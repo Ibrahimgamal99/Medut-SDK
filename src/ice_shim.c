@@ -195,6 +195,8 @@ struct bsdk_ice_sess {
 	bool              await_answer;/* a restart offer is on the wire */
 	struct tmr        tmr_rrestart;/* deferred answer to a peer ICE restart */
 	unsigned          rrestarts;/* peer restarts answered with our own */
+	struct tmr        tmr_chkfail;/* watchdog: restart's checks concluded? */
+	bool              checking;  /* a restart's checks are outstanding */
 	bool              primed;   /* early connectivity checks kicked off */
 	struct sdp_session *sdp;    /* borrowed; the call's SDP session */
 	struct list       medial;   /* struct bsdk_ice_media */
@@ -252,10 +254,11 @@ static void sess_destructor(void *data)
 	struct bsdk_ice_sess *s = data;
 	struct le *le, *tmp;
 
-	/* Timers first: all three close over `s`. */
+	/* Timers first: all four close over `s`. */
 	tmr_cancel(&s->tmr);
 	tmr_cancel(&s->tmr_reoffer);
 	tmr_cancel(&s->tmr_rrestart);
+	tmr_cancel(&s->tmr_chkfail);
 	list_unlink(&s->le);
 
 	/* The media wrappers belong to baresip's streams, which may outlive us:
@@ -412,6 +415,47 @@ static void rrestart_handler(void *arg)
 		warning("EchoSDK/ice: could not answer the peer's ICE restart"
 		        " (%m) — this call may have no audio\n", err);
 	}
+}
+
+
+/* How long a restart's connectivity checks get before they are called failed.
+ *
+ * A check transaction is RTO-paced with Rc=7 retransmits, so the last one goes
+ * out around 3.1 s after the first and a pair cannot be declared dead before
+ * then; the pacing between pairs adds to that.  Six seconds clears the whole
+ * ladder for the two-pair check lists these calls actually form, without
+ * leaving a genuinely broken generation unreported for long. */
+#define BSDK_ICE_CHECK_DEADLINE_MS 6000
+
+/**
+ * A restart's connectivity checks never concluded on a usable pair.
+ *
+ * baresip's ice module reports failure by warning and returning — no estab
+ * handler, no connected handler, no event (modules/ice/ice.c, conncheck_handler)
+ * — so without this the app cannot tell a call whose media path was never
+ * validated from one that is working.  Three such calls on-device (2026-09-10)
+ * ran fully established and silent to the end.
+ *
+ * Nothing is torn down here.  reassert_selected() has kept the stream on the
+ * pair the previous generation validated, which is what lets audio survive a
+ * failed restart, and whether to redial is the app's decision.
+ */
+static void chkfail_handler(void *arg)
+{
+	struct bsdk_ice_sess *s = arg;
+
+	if (!s->checking)
+		return;
+
+	s->checking = false;
+
+	warning("EchoSDK/ice: the restarted ICE generation did not nominate a"
+	        " pair within %u ms — the peer rejected our checks or the path"
+	        " stopped carrying UDP.  Holding the media on the pair the"
+	        " previous generation validated\n",
+	        (unsigned)BSDK_ICE_CHECK_DEADLINE_MS);
+
+	bsdk_netmon_call_ice_failed((struct call *)s->arg, ETIMEDOUT);
 }
 
 
@@ -864,6 +908,11 @@ static void ice_connected(const struct sa *raddr1, const struct sa *raddr2,
 		return;
 	}
 
+	/* This generation nominated a pair, so the watchdog armed for it in
+	 * ice_updateh() has nothing left to report. */
+	s->checking = false;
+	tmr_cancel(&s->tmr_chkfail);
+
 	/* Remember the pair ICE nominated.  call_apply_sdp() throws it away on
 	 * every later SDP exchange — see ice_updateh(). */
 	if (raddr1 && sa_isset(raddr1, SA_ALL)) {
@@ -1237,6 +1286,10 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 	s->released     = false;
 	s->restarting   = true;
 	s->reoffered    = false;
+	/* A verdict on the generation being replaced is no longer wanted — this
+	 * one supersedes it, and will arm a watchdog of its own. */
+	s->checking     = false;
+	tmr_cancel(&s->tmr_chkfail);
 	/* The peer will restart in its answer to this, per RFC 8445 §9.  Marks
 	 * that credential change as ours to expect — see ice_updateh(). */
 	s->await_answer = true;
@@ -1245,7 +1298,19 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 		struct bsdk_ice_media *m = le->data;
 		int e;
 
-		m->sel_set    = false;
+		/* selected[]/sel_set deliberately survive the swap.
+		 *
+		 * They describe the pair the *previous* generation validated,
+		 * and until this one nominates its own that is the only address
+		 * known to carry media.  Clearing it here left reassert_selected()
+		 * with nothing to re-apply, so every SDP exchange during the
+		 * restart handed the stream back to the address the peer
+		 * signals — for a PBX behind NAT, its private one — and a
+		 * restart whose checks never concluded stranded the call there
+		 * for good.  ice_connected() overwrites them the moment this
+		 * generation nominates, and reassert_selected() only re-applies
+		 * them while the peer is still signalling the same place, so a
+		 * peer that genuinely moved its media is still followed. */
 		m->held       = false;
 		m->reasserted = false;
 
@@ -1354,19 +1419,46 @@ static int ice_updateh(struct mnat_sess *sess)
 	if (s->await_answer) {
 		s->await_answer = false;
 
-		if (changed) {
-			struct le *le;
+		/* The answer to our restart is in, so this generation's checks
+		 * start now.  Nothing in baresip or libre reports a check list
+		 * that ends with an empty valid list — ice.c's conncheck_handler
+		 * warns and returns — so put a clock on it here.  Armed whether
+		 * or not the peer changed credentials: a generation can fail
+		 * against unchanged ones just as easily. */
+		s->checking = true;
+		tmr_start(&s->tmr_chkfail, BSDK_ICE_CHECK_DEADLINE_MS,
+		          chkfail_handler, s);
 
+		if (changed) {
 			info("EchoSDK/ice: the peer's new credentials are the"
 			     " answer to our own ICE restart — checks are"
 			     " running against them, not restarting again\n");
 
-			/* The pair ICE nominated belonged to the generation
-			 * this restart replaced. */
-			LIST_FOREACH(&s->medial, le) {
-				struct bsdk_ice_media *m = le->data;
-				m->sel_set = false;
-			}
+			/* Keep the pair the previous generation validated until
+			 * this one has actually nominated its own.
+			 *
+			 * Dropping it here is what made a failed restart fatal.
+			 * The theory was that the nominated pair belonged to the
+			 * generation being replaced and so had to go; what
+			 * happens in practice is that stream_update() has just
+			 * reset the stream to the address the peer *signals*,
+			 * which for a PBX behind NAT is its private one
+			 * (`c=IN IP4 172.16.11.52`).  With the pair forgotten,
+			 * reassert_selected() has nothing to put back, and the
+			 * only thing that would ever repoint the stream is
+			 * ice_connected() from the new generation.  When that
+			 * generation's checks are answered 401 — every restart
+			 * against this Asterisk was — it never fires, and the
+			 * stream stays aimed at an RFC 1918 address for the rest
+			 * of the call: rx climbing, `spk -72.2 dBov`, SRTP
+			 * replay failures, permanent silence (2026-09-10).
+			 *
+			 * Holding the old pair costs nothing when the restart
+			 * succeeds: ice_connected() overwrites it as soon as the
+			 * new generation nominates.  It is the difference
+			 * between a restart that fails harmlessly and one that
+			 * kills the call. */
+			reassert_selected(s);
 
 			return err;
 		}

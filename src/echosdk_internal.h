@@ -313,6 +313,7 @@ struct echosdk_call {
 	uint32_t                   stall_rx_packets;  /* rx count at last advance */
 	uint64_t                   stall_since;       /* tmr_jiffies() of last advance */
 	bool                       stall_active;      /* MEDIA_STALL alert outstanding */
+	bool                       stall_setup_pending;/* media could not carry RTP yet */
 	/* Call-setup watchdog (call.c).  tmr_jiffies() when the INVITE went
 	 * out, 0 once the call has left CALLING.  A timestamp rather than a
 	 * per-call struct tmr: the sweep timer is global, so there is no timer
@@ -607,6 +608,11 @@ void bsdk_netmon_call_sdp_answer(struct echosdk_call *lc);
  * (or re-offer), and verify that media came back.  Bounded and rate-limited —
  * see the comment on the implementation. */
 void bsdk_netmon_call_stalled(struct echosdk_call *lc);
+/* Called from ice_shim.c when an ICE generation's connectivity checks end with
+ * no valid pair.  Reports ECHOSDK_NET_CALL_ICE_FAILED; the call is left up,
+ * because the stream is usually still held on a pair that was validated
+ * earlier and ending it is the app's decision. */
+void bsdk_netmon_call_ice_failed(struct call *bc, int err);
 
 /* ── dns.c ─────────────────────────────────────────────────────────────── */
 

@@ -8,6 +8,67 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **A call whose media came up slowly was diagnosed as stalled, "repaired"
+  with an ICE restart, and left permanently silent.** Three calls on-device
+  (2026-09-10) went the same way: established, media working or about to work,
+  a false media-stall alert around 4–5 s, an ICE restart, and dead audio for
+  the rest of the call. A browser (sip.js) against the same FreePBX on the same
+  network was unaffected, because nothing in a browser stack restarts ICE four
+  seconds into a healthy call. Four separate defects, each of which had to be
+  fixed for the call to survive:
+
+  *The stall clock counted setup time.* `stall_since` was stamped at
+  `CALL_ESTABLISHED` and only advanced when packets arrived, so the ICE
+  connectivity checks and the DTLS-SRTP handshake — everything that has to
+  finish before the first packet *can* arrive — accumulated on it. The grace
+  window meant to cover that was conditioned on the handshake still being
+  unfinished, so it fell away the instant DTLS completed while the time it had
+  been covering stayed on the clock. A handshake slower than
+  `cfg.media_stall_ms` therefore produced an alert on the very tick media
+  became able to flow. Measured: established 15:21:53.203, DTLS complete
+  15:21:54.288, alert at 15:21:58.055 reporting 4854 ms — of which only 3765 ms
+  were after media was ready, i.e. below the threshold. The clock now restarts
+  on the setup→ready edge, and a renegotiation that re-enters handshake raises
+  the flag again so later handshakes on the same call are covered too.
+
+  *A stall forced an ICE restart even when nothing had moved.* The stall repair
+  set `net_mig_path_moved` unconditionally, purely to route itself through the
+  ICE-restart branch — a handover on an unchanged address bails out with "same
+  path, no re-INVITE", and the stall path deliberately overrode exactly that
+  guard. Against a peer that answers a restart offer with `a=connection:new`,
+  as Asterisk/FreePBX does every time, that is a bad trade: it tears down and
+  rebuilds its RTP instance, our connectivity checks race the rebuild and are
+  answered `401 Unauthorized`, and the check list ends Failed with an empty
+  valid list. Five restarts across three calls, 401 every time. The flag now
+  reflects reality — set only when the address rotation actually picked a
+  different local address — so a stall on an unchanged address gets the plain
+  re-offer instead, and never asks the peer to throw its ICE session away.
+
+  *A failed ICE generation stranded the stream on the peer's private address.*
+  Two places dropped the pair ICE had validated: `bsdk_ice_restart()` cleared
+  `sel_set` on every media, and the restart-answer path cleared it again and
+  returned without calling `reassert_selected()`. Since `stream_update()` has
+  by then reset the stream to the address the peer *signals* — for a PBX behind
+  NAT, its RFC 1918 one (`c=IN IP4 172.16.11.52`) — and the only thing that
+  would ever repoint it is `ice_connected()` from the new generation, a
+  generation whose checks were rejected left the stream aimed there for the
+  rest of the call: rx counter climbing, `spk -72.2 dBov`, SRTP replay
+  failures, silence. The validated pair now survives a restart and is
+  re-applied until the new generation nominates its own; `ice_connected()`
+  overwrites it the moment one is nominated, and `reassert_selected()`'s
+  existing guard still follows a peer that genuinely moved its media.
+
+  *Nothing reported ICE failure.* baresip's ice module answers a check list
+  that ends with no valid pair by logging a warning and returning — no estab
+  handler, no connected handler, no event — so a call whose media path was
+  never validated was indistinguishable from a working one through the API.
+  New `ECHOSDK_NET_CALL_ICE_FAILED` network event, raised by a watchdog armed
+  when the answer to a restart offer arrives and cancelled as soon as a pair is
+  nominated. The call is **not** ended: with the fix above audio usually
+  survives a failed restart, and redialling is the app's decision. Exposed in
+  the C, C++, Python (`call_ice_failed`) and Dart (`NetworkStage.callIceFailed`)
+  bindings; documented in [Events](api/events.md).
+
 - **Call quality was scored from lifetime numbers, so one early burst of loss
   depressed MOS for the rest of the call.** `loss_pct` / `loss_pct_rx` are now
   rates over the last poll window (`stats_interval_ms`) rather than

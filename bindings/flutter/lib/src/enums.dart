@@ -220,7 +220,20 @@ enum NetworkStage {
   /// still-valid TURN-relayed path; if media does not resume, the remedy is to
   /// re-place the call.  `EchoSDKConfig.netIceHandover` decides whether to keep
   /// retrying.  An ICE call that was restarted does not emit this.
-  callIceStale(c.echosdk_net_event_t.ECHOSDK_NET_CALL_ICE_STALE);
+  callIceStale(c.echosdk_net_event_t.ECHOSDK_NET_CALL_ICE_STALE),
+
+  /// ICE finished its connectivity checks with no usable candidate pair, so
+  /// nothing was nominated and the media path was never validated.
+  ///
+  /// Unlike [callIceStale] the candidates were gathered and offered and the
+  /// peer answered — every pair in the check list then failed, because the peer
+  /// rejected the checks (a STUN 401 after it rebuilt its own ICE session
+  /// across our restart offer) or the path stopped carrying UDP.
+  ///
+  /// The call is left up: where a pair had been validated earlier the stream is
+  /// held on it and audio usually survives. If it does not, the remedy is to
+  /// re-place the call.
+  callIceFailed(c.echosdk_net_event_t.ECHOSDK_NET_CALL_ICE_FAILED);
 
   final int raw;
   const NetworkStage(this.raw);

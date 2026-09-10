@@ -279,6 +279,7 @@ static void stall_tick(struct echosdk_call *lc,
 {
 	uint64_t now = tmr_jiffies();
 	uint32_t elapsed;
+	bool pending;
 
 	if (!g_bsdk.cfg.media_stall_ms)
 		return;
@@ -308,9 +309,45 @@ static void stall_tick(struct echosdk_call *lc,
 		return;
 	}
 
-	/* stall_since is stamped when the call is established, so a call that
-	 * never receives a single packet — one-way audio from the start, the
-	 * classic symptom of a NAT that never opened — is reported too. */
+	/* Media that has only just become able to carry RTP has not been silent
+	 * for any of the time before that, so restart the clock on the edge.
+	 *
+	 * stall_since is stamped at CALL_ESTABLISHED, which on an ICE +
+	 * DTLS-SRTP call is well before the first packet *could* arrive: the
+	 * connectivity checks and then the handshake have to finish first.  The
+	 * grace below covers that window while it lasts, but it is conditioned
+	 * on the handshake still being unfinished — so the moment DTLS
+	 * completed, the guard fell away and left the whole setup time sitting
+	 * on the clock.  A call whose handshake took longer than
+	 * cfg.media_stall_ms was therefore reported as stalled on the very tick
+	 * its media came up, and netmon repaired a call that had never had a
+	 * chance to receive anything.
+	 *
+	 * Measured on-device (2026-09-10, inbound over WSS): established
+	 * 15:21:53.203, DTLS complete 15:21:54.288, alert at 15:21:58.055
+	 * reporting 4854 ms — of which only 3765 ms were after media was ready,
+	 * i.e. below the threshold.  The ICE restart that followed took the
+	 * call from "slow to start" to permanently silent.
+	 *
+	 * A renegotiation that puts the encryption back into handshake (an ICE
+	 * restart, a re-INVITE that re-keys) raises the flag again, so the same
+	 * edge covers the second and later handshakes on one call. */
+	pending = media_setup_pending(lc);
+
+	if (lc->stall_setup_pending && !pending) {
+		lc->stall_setup_pending = false;
+		lc->stall_rx_packets    = s->packets_received;
+		lc->stall_since         = now;
+		stall_clear(lc, 0);
+		return;
+	}
+
+	lc->stall_setup_pending = pending;
+
+	/* stall_since is stamped when the media path becomes able to carry RTP,
+	 * so a call that never receives a single packet — one-way audio from the
+	 * start, the classic symptom of a NAT that never opened — is reported
+	 * too. */
 	elapsed = (uint32_t)(now - lc->stall_since);
 
 	if (!lc->stall_active && elapsed >= g_bsdk.cfg.media_stall_ms) {
@@ -319,8 +356,7 @@ static void stall_tick(struct echosdk_call *lc,
 		 * handshake its ladder before calling this a fault — the alert
 		 * and the repair both still follow if it never lands, they just
 		 * stop arriving while it is still plausibly in flight. */
-		if (elapsed < BSDK_MEDIA_SETUP_GRACE_MS &&
-		    media_setup_pending(lc))
+		if (elapsed < BSDK_MEDIA_SETUP_GRACE_MS && pending)
 			return;
 
 		lc->stall_active = true;
@@ -407,6 +443,9 @@ void bsdk_adapt_call_start(struct echosdk_call *lc)
 	lc->stall_active      = false;
 	lc->stall_rx_packets  = 0;
 	lc->stall_since       = tmr_jiffies();
+	/* Seeded, not assumed: a plain-RTP call never reads as pending, so it
+	 * sees no edge and keeps the old behaviour exactly. */
+	lc->stall_setup_pending = media_setup_pending(lc);
 }
 
 void bsdk_adapt_tick(struct echosdk_call *lc,

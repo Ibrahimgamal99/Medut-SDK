@@ -436,7 +436,7 @@ See [Network handover](../guides/network_handover.md) for the full sequence.
 Stages: `CHANGE_DETECTED`, `DOWN`, `UP`, `TRANSPORT_RESET`, `REREGISTERING`,
 `CALL_MIGRATING`, `CALL_MIGRATE_ACCEPTED`, `CALL_MIGRATED`,
 `CALL_MIGRATION_FAILED`, `CALL_DEFERRED`, `HANDOVER_FAILED`,
-`CALL_ICE_STALE`.
+`CALL_ICE_STALE`, `CALL_ICE_FAILED`.
 
 An ICE call is migrated with a full RFC 8445 §9 ICE restart, so it emits the
 ordinary `CALL_MIGRATING` → `CALL_MIGRATE_ACCEPTED` → `CALL_MIGRATED` sequence —
@@ -449,6 +449,21 @@ is emitted once per call per handover, before that offer. The offer still
 recovers a direct or still-valid TURN-relayed path; if media does not resume, the
 remedy is to re-place the call. `cfg.net_ice_handover` decides whether to keep
 retrying; see [Network handover](../guides/network_handover.md#ice-calls).
+
+`CALL_ICE_FAILED` is the other ICE outcome, and a different one: the candidates
+*were* gathered and offered and the peer answered, but every pair in the check
+list failed, so nothing was nominated and the media path was never validated.
+The usual causes are a peer that rejected the connectivity checks — Asterisk
+answers `401 Unauthorized` for a while after it rebuilds its own ICE session
+across a restart offer — or a path that stopped carrying UDP.
+
+The call is not ended. Where a pair had been validated by an earlier ICE
+generation the SDK holds the stream on it, so audio usually survives a failed
+restart; the event says the *new* path was never proven, not that the call is
+silent. Treat it as a prompt to check whether audio is actually flowing (the
+`ECHOSDK_QUALITY_MEDIA_STALL` alert answers that) rather than as a reason to
+hang up. It is emitted once per failed ICE generation, so a call that restarts
+twice can emit it twice.
 
 ---
 

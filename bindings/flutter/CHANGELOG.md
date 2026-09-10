@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- A call whose media came up slowly was diagnosed as stalled, "repaired" with
+  an ICE restart, and left permanently silent. The stall clock counted the ICE
+  connectivity checks and the DTLS-SRTP handshake — everything that must finish
+  before the first packet can arrive — as silence, so any handshake slower than
+  `mediaStallMs` produced an alert on the very tick audio became able to flow.
+  The repair then restarted ICE even though nothing had moved, which against
+  Asterisk/FreePBX makes it rebuild its RTP instance and reject the new
+  connectivity checks, leaving the stream pinned to the PBX's private address
+  for the rest of the call. The clock now starts when media can actually carry
+  RTP, a stall on an unchanged address gets a plain re-offer instead of an ICE
+  restart, and a restart that fails keeps the stream on the pair that was
+  already working. Requires the refreshed `jniLibs` in this release.
+
 - One incoming SIP MESSAGE, presence NOTIFY, MWI NOTIFY or REFER used to stop
   the event stream permanently. Four native event producers skipped the queue
   length accounting, which underflowed a `size_t` counter and made every
@@ -13,6 +26,13 @@
   release.
 
 ### Added
+
+- `NetworkStage.callIceFailed` — ICE finished its connectivity checks with no
+  usable candidate pair, so the media path was never validated. Distinct from
+  `callIceStale`, where the candidates could not be re-gathered at all. The
+  call is not ended and audio often survives on the previously validated pair,
+  so treat it as "the new path was never proven" and let the `mediaStall`
+  quality alert say whether audio actually stopped.
 
 - `Call.transferAccept()` / `Call.transferReject()` — answer an incoming
   `TransferRequestEvent`. `transferAccept()` returns the new `Call` placed to

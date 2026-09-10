@@ -310,3 +310,43 @@ case ECHOSDK_NET_CALL_MIGRATION_FAILED:
 
 Re-placing the call remains the complete remedy for one that failed: a new call
 allocates a new media session and gathers on the network you are actually on.
+
+### When the restart is done but nothing validates
+
+A restart that is offered and answered can still end with no usable candidate
+pair: every pair in the check list fails, nothing is nominated, and the media
+path is never proven. The common cause is a peer that rejected the connectivity
+checks. Asterisk/FreePBX answers an ICE restart offer with `a=connection:new`,
+tears down and rebuilds its own RTP instance, and replies `401 Unauthorized` to
+checks that arrive while that rebuild is in flight; libre's check list is
+one-shot per generation, so those pairs stay Failed.
+
+Such a call emits `ECHOSDK_NET_CALL_ICE_FAILED`. It is *not* the same as
+`CALL_ICE_STALE` — there the candidates could not be re-gathered at all; here
+they were gathered, offered and answered, and the checks failed.
+
+The call is not ended, and it is usually not silent either: the SDK holds the
+stream on the pair a previous ICE generation validated rather than letting the
+SDP exchange leave it on the address the peer signals, which for a PBX behind
+NAT is an RFC 1918 address the phone cannot reach. Treat the event as "the new
+path was never proven", and let the media-stall alert tell you whether audio is
+actually flowing:
+
+```c
+case ECHOSDK_NET_CALL_ICE_FAILED:
+    /* Media is probably still up on the previous pair — do not hang up.
+     * Watch for MEDIA_STALL to decide whether it really died. */
+    log_warn("ICE could not validate a path for this call");
+    break;
+```
+
+### Stalls do not restart ICE on an unchanged address
+
+The media-stall repair and the handover repair share machinery but not this
+decision. A handover restarts ICE because the local address moved and the old
+candidates are genuinely wrong. A stall on an address that has *not* moved gets
+a plain re-offer instead: restarting would ask the peer to discard a working
+ICE session and re-run the checks, and against a peer that rebuilds its RTP
+instance to do so that trade loses a call more often than it saves one. A stall
+that rotates to another interface still restarts — there the new candidates are
+the whole point.

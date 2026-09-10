@@ -71,7 +71,19 @@ case ECHOSDK_EV_QUALITY_ALERT: {
 
 Both are suppressed while a call is held (no RTP is expected) and while a
 handover migration is in flight (`netmon` is already narrating that outage in
-richer terms). Per-call override:
+richer terms).
+
+The stall clock measures time since media *could* have been flowing, not since
+the call was answered. On an ICE + DTLS-SRTP call the connectivity checks and
+the handshake have to finish before the first packet can arrive, and that
+window is not silence — it is setup. The clock therefore starts when the media
+path becomes able to carry RTP, and restarts if a renegotiation puts the
+encryption back into handshake. Without that, any call whose handshake took
+longer than `media_stall_ms` reported a stall on the very tick its audio came
+up, and the repair below then fired on a call that had never had a chance to
+receive anything.
+
+Per-call override:
 
 ```c
 echosdk_call_set_rtp_timeout(call, 45);   /* 0 = never, for this call */

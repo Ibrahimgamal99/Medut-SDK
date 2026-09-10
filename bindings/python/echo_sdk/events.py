@@ -235,7 +235,7 @@ class NetworkEvent:
       change_detected, down, up, transport_reset, reregistering,
       call_migrating, call_migrate_accepted, call_migrated,
       call_migration_failed, call_deferred, handover_failed,
-      call_ice_stale
+      call_ice_stale, call_ice_failed
 
     An ICE call is migrated with a full RFC 8445 §9 ICE restart: new
     credentials and a fresh gather on the new interface, so the re-INVITE
@@ -248,6 +248,20 @@ class NetworkEvent:
     candidates.  That recovers a direct or TURN-relayed path; if it fails the
     remedy is to re-place the call.  configure(net_ice_handover=1) makes the
     SDK give up after one attempt rather than retrying such a call.
+
+    call_ice_failed is the other ICE outcome, and a different one: the
+    candidates *were* gathered and offered and the peer answered, but every
+    pair in the check list failed, so nothing was nominated and the media path
+    was never validated.  The usual causes are a peer that rejected the
+    connectivity checks -- Asterisk answers STUN 401 for a while after it
+    rebuilds its own ICE session across a restart offer -- or a path that
+    stopped carrying UDP.
+
+    The call is not ended.  Where an earlier ICE generation had validated a
+    pair the SDK holds the stream on it, so audio usually survives; the event
+    says the *new* path was never proven, not that the call is silent.  Check
+    whether audio is actually flowing (the media_stall quality alert answers
+    that) rather than hanging up on it.
 
     Typical logging:
         if ev.stage == "call_migrating":

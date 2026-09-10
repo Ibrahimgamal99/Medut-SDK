@@ -146,6 +146,7 @@ typedef enum {
  ECHOSDK_NET_CALL_DEFERRED,
  ECHOSDK_NET_HANDOVER_FAILED,
  ECHOSDK_NET_CALL_ICE_STALE,
+ ECHOSDK_NET_CALL_ICE_FAILED,
 } echosdk_net_event_t;
 typedef struct {
  echosdk_net_event_t event;

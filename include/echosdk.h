@@ -327,6 +327,20 @@ typedef enum {
 	 *  restarted does not emit this — it migrates like any other call.  See
 	 *  echosdk_ice_handover_t and cfg.net_ice_handover. */
 	ECHOSDK_NET_CALL_ICE_STALE,
+	/** ICE finished its connectivity checks with no usable candidate pair,
+	 *  so nothing was nominated and the media path was never validated.
+	 *
+	 *  Distinct from CALL_ICE_STALE, which is "the candidates could not be
+	 *  re-gathered": here they were gathered and offered, the peer answered,
+	 *  and every pair in the check list failed — a peer that rejected the
+	 *  checks (STUN 401 after it rebuilt its own ICE session across our
+	 *  restart offer) or a path that stopped carrying UDP.
+	 *
+	 *  The SDK does not end the call: where a pair had been validated
+	 *  earlier the stream is held on it and audio usually survives, and the
+	 *  decision to redial belongs to the app.  Emitted once per failed ICE
+	 *  generation, so a call that restarts twice can emit it twice. */
+	ECHOSDK_NET_CALL_ICE_FAILED,
 } echosdk_net_event_t;
 
 /**

@@ -297,6 +297,47 @@ The first falls back to the plain re-INVITE and emits `CALL_ICE_STALE`; the
 second still offers, deliberately, because reporting a media-NAT failure to
 baresip would close a call that is up and merely needs a new offer.
 
+### `STUN Response: 401 Unauthorized` on a restarted call
+
+```
+connchk: {audio.1} STUN Response: 401 Unauthorized
+ice: {audio.1} checklist update: no valid candidate pair (validlist=0)
+ice: connectivity check failed: No such file or directory [2]
+EchoSDK/ice: the restarted ICE generation did not nominate a pair within 6000 ms
+```
+
+The peer rejected the connectivity checks for the generation an ICE restart
+just created. Asterisk/FreePBX does this predictably: it answers a restart
+offer with `a=connection:new`, destroys and rebuilds its RTP instance, and
+401s checks that arrive before the replacement ICE session is ready. libre
+starts a check list once per generation, so pairs that fail this way stay
+Failed and nothing re-checks them.
+
+The call is left up and `ECHOSDK_NET_CALL_ICE_FAILED` is emitted. Audio usually
+keeps working, because the stream is held on the pair a previous generation
+validated — check the `peer` field in the periodic level line to confirm which
+address it is actually on:
+
+```
+level mic -13.7 dBov / spk -13.1 dBov  tx 173 rx 53  peer 82.129.158.253:18308
+```
+
+A `peer` showing the PBX's *private* address (`172.16.11.52`) alongside
+`spk -72.2 dBov` and climbing `rx` is the signature of a stream pinned to an
+unreachable address: packets arrive at the socket, none of them decrypt.
+
+Reading the check list itself: a two-local × three-remote candidate set
+normally forms only **two** pairs, and that is correct, not a bug. Pairs across
+address families are never formed (an IPv6 link-local remote against IPv4
+locals contributes nothing), and srflx candidates are pruned against their base
+per RFC 8445 §6.1.2.4 — an srflx whose `rel-addr` equals the host candidate
+duplicates it. What is left is one pair to the peer's private address, which
+always times out, and one to its public address, which is the only pair that
+can ever succeed. The valid list is then built as a side effect of that check
+succeeding (the response's XOR-MAPPED-ADDRESS yields the peer-reflexive pair
+that gets nominated), so a rejected check means an empty valid list and nothing
+to nominate.
+
 ### Audio levels: `NaN` is not silence
 
 `mic_level_dbov` and `audio_level_dbov` start as `NaN` and become a real dBov

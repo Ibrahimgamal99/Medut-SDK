@@ -230,7 +230,8 @@ def _global_event_cb(ev_ptr, _userdata):
                         "reregistering", "call_migrating",
                         "call_migrate_accepted", "call_migrated",
                         "call_migration_failed", "call_deferred",
-                        "handover_failed", "call_ice_stale")
+                        "handover_failed", "call_ice_stale",
+                        "call_ice_failed")
 
         acct_handle = ffi.NULL
         call_handle = ffi.NULL

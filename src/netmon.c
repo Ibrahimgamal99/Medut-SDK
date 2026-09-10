@@ -944,13 +944,38 @@ static void start_migration(struct echosdk_call *lc)
 	 * re-INVITE is owed, and send_migration() needs the first one: it decides
 	 * between an ICE restart and a plain re-offer. */
 	if (lc->net_mig_stall) {
-		/* Media died without the address moving, so "did the path move?"
-		 * is the wrong question here — the path is precisely what has to
-		 * be rebuilt.  Claiming it moved is what routes this through the
-		 * ICE restart in send_migration(), which is the only offer that
-		 * re-gathers and mints new credentials; a plain re-offer under
-		 * the old ones is the thing the captures show a peer ignoring. */
-		lc->net_mig_path_moved = true;
+		/* A stall repair restarts ICE only when it is actually moving the
+		 * media somewhere — that is, when the rotation above picked a
+		 * different local address than the one the call is using.
+		 *
+		 * It used to claim the path had moved unconditionally, purely to
+		 * route every stall through the ICE restart in send_migration()
+		 * on the reasoning that a plain re-offer under the old
+		 * credentials is ignored by some peers.  Against a peer that
+		 * answers a restart offer with `a=connection:new` — Asterisk /
+		 * FreePBX does, on every one — that trade is a bad one: it tears
+		 * down and rebuilds its RTP instance, our connectivity checks
+		 * race the rebuild and are answered `401 Unauthorized`, the check
+		 * list goes Failed with an empty valid list, and nothing ever
+		 * nominates a pair again.  Five restarts across three calls
+		 * on-device (2026-09-10), 401 every time, each call permanently
+		 * silent afterwards — while a browser (sip.js) on the same
+		 * network and the same PBX is fine, because nothing in a browser
+		 * stack restarts ICE four seconds into a healthy call.
+		 *
+		 * So a stall on an address that has not moved gets the plain
+		 * re-offer below, which refreshes the media path without asking
+		 * the peer to throw its ICE session away.  A stall that *did*
+		 * rotate to another interface still restarts: there the new
+		 * candidates are the entire point, and the old ones really are
+		 * wrong. */
+		lc->net_mig_path_moved = old && !sa_cmp(&laddr, old, SA_ADDR);
+
+		if (!lc->net_mig_path_moved) {
+			debug("EchoSDK/netmon: media stalled on %j — re-offering"
+			      " without an ICE restart (the address has not"
+			      " moved)\n", &laddr);
+		}
 	}
 	else if (old && sa_cmp(&laddr, old, SA_ADDR)) {
 		debug("EchoSDK/netmon: same path but WS transport was reset —"
@@ -1105,6 +1130,31 @@ static void verify_handler(void *arg)
 	}
 
 	arm_verify();
+}
+
+/**
+ * An ICE generation concluded with an empty valid list.
+ *
+ * baresip's ice module only warns about this ("connectivity check failed") and
+ * carries on: `m->complete` stays false, no estab handler runs, and no event
+ * reaches the app — so a call whose media path was never validated looks
+ * identical, from the outside, to one that is working.  On-device (2026-09-10)
+ * that meant three calls sat fully established, SIP-healthy and silent, with
+ * nothing in the API to distinguish them from a good call.
+ *
+ * Report it and stop there.  ice_shim.c holds the stream on the last pair that
+ * *was* validated, so audio often survives a failed generation, and a call the
+ * SDK cannot fix is not automatically a call the SDK should end.
+ */
+void bsdk_netmon_call_ice_failed(struct call *bc, int err)
+{
+	struct echosdk_call *lc = bc ? bsdk_call_find(bc) : NULL;
+
+	if (!lc)
+		return;
+
+	netmon_emit(ECHOSDK_NET_CALL_ICE_FAILED, lc, lc->acct, err,
+	            lc->net_mig_tries);
 }
 
 /**
