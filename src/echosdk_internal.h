@@ -290,6 +290,10 @@ struct echosdk_call {
 	struct sa                  net_mig_laddr;  /* target local address */
 	uint64_t                   net_mig_due;    /* jiffies before which a SENT
 	                                            * offer must not be judged */
+	uint64_t                   net_mig_hs_since;/* jiffies when this migration
+	                                             * first waited on a media-
+	                                             * encryption handshake; 0 = not
+	                                             * waiting on one */
 	bool                       net_ice_stale_sent; /* ICE_STALE emitted this gen */
 	bool                       net_ice_restarted;  /* ICE was restarted this gen */
 	bool                       net_mig_path_moved; /* the local address changed
@@ -579,6 +583,14 @@ void bsdk_post_quality_alert(struct echosdk_call *lc,
 
 /* Reset per-call adaptation state; call when the call reaches established. */
 void bsdk_adapt_call_start(struct echosdk_call *lc);
+/* Is a media-encryption handshake still in flight on this call?
+ *
+ * True only for a call configured for DTLS-SRTP that has at least one stream
+ * whose encryption has not come up yet.  Both the stall detector here and
+ * netmon's migration hold use it to keep a re-INVITE away from a handshake it
+ * would break; callers must bound their own wait, because a call configured
+ * for DTLS whose peer answered plain RTP never reads as secure. */
+bool bsdk_media_setup_pending(const struct echosdk_call *lc);
 /* Evaluate stall detection and bitrate adaptation for one stats sample. */
 void bsdk_adapt_tick(struct echosdk_call *lc,
                      const echosdk_ev_media_stats_t *s);
@@ -596,9 +608,12 @@ int  bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
 int  bsdk_netmon_init(void);
 void bsdk_netmon_stop(void);   /* app thread: stop acting, before teardown */
 void bsdk_netmon_close(void);  /* re loop stopped: cancel timers */
-/* Called from event.c when a call reaches a state where a re-INVITE becomes
- * legal again, so a deferred migration can proceed without waiting for the
- * next retry tick. */
+/* Called from event.c when something that was holding a migration back may
+ * have cleared — the dialog can carry a re-INVITE again, or the media
+ * encryption finished handshaking — so a deferred migration can proceed
+ * without waiting for the next retry tick.  Acts only on a call that is
+ * actually deferred in the current generation; send_migration() re-tests every
+ * condition, so calling it speculatively is free. */
 void bsdk_netmon_call_refreshable(struct echosdk_call *lc);
 /* Called from event.c when the peer answers our SDP offer, so a migration
  * in flight can report "accepted — waiting for audio". */

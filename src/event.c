@@ -747,11 +747,22 @@ static void bevent_handler(enum bevent_ev bev,
 	 *   CREATE    a UA was allocated, which the caller already knows:
 	 *             echosdk_account_create() returned it the handle.
 	 */
+	case BEVENT_CALL_MENC:
+		/* Not posted, but netmon wants to know: a migration held back
+		 * because the encryption was mid-handshake can go out as soon
+		 * as it finishes, instead of waiting for the next verify tick.
+		 * The bounce only acts on a call that is actually deferred, and
+		 * send_migration() re-tests the handshake itself, so a MENC
+		 * event that is not "secure" costs a no-op. */
+		if (lc)
+			bsdk_netmon_call_refreshable(lc);
+		post = false;
+		break;
+
 	case BEVENT_CREATE:
 	case BEVENT_CALL_OUTGOING:
 	case BEVENT_CALL_RTPESTAB:
 	case BEVENT_CALL_RTCP:
-	case BEVENT_CALL_MENC:
 		post = false;
 		break;
 

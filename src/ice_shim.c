@@ -436,9 +436,20 @@ static void rrestart_handler(void *arg)
  * validated from one that is working.  Three such calls on-device (2026-09-10)
  * ran fully established and silent to the end.
  *
- * Nothing is torn down here.  reassert_selected() has kept the stream on the
- * pair the previous generation validated, which is what lets audio survive a
- * failed restart, and whether to redial is the app's decision.
+ * Nothing is torn down here, and nothing is re-checked.  RFC 8445 §7.2.5.2.4
+ * requires a pair that got an unrecoverable STUN error to be marked Failed,
+ * and the state machine in its Figure 6 has no edge out of Failed — so
+ * re-running this generation's check list would be a spec violation, not a
+ * repair.  The only legal recovery is a fresh generation (new credentials via
+ * bsdk_ice_restart), which netmon decides on, bounded, from its own policy.
+ *
+ * reassert_selected() has meanwhile kept the stream on the pair the previous
+ * generation validated, which is what lets audio survive a failed restart.
+ * RFC 7675 §5.1 contemplates exactly that — an endpoint may keep sending on
+ * the previously validated pair across a restart (it asks for consent
+ * freshness on that pair, which libre does not implement: it sends only the
+ * RFC 5245 §10 Binding Indications, never Requests).  Whether to redial is
+ * the app's decision.
  */
 static void chkfail_handler(void *arg)
 {

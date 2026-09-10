@@ -102,6 +102,14 @@
 #define BSDK_NET_STALL_ATTEMPTS        3
 #define BSDK_NET_STALL_ROUNDS          3
 
+/* How long a migration offer waits for a media-encryption handshake.
+ *
+ * The length of the handshake ladder itself: dtls_srtp waits 1200 ms on the
+ * first attempt and 2500 ms on each of four restarts, so a handshake still
+ * running at 12 s has been given up on and there is nothing left to protect.
+ * See the hold in send_migration(). */
+#define BSDK_NET_MIG_SECURE_HOLD_MS 12000
+
 struct bsdk_netmon {
 	struct tmr tmr_poll;    /* periodic interface scan                     */
 	struct tmr tmr_settle;  /* debounce / retry of the handover itself     */
@@ -740,6 +748,73 @@ static void send_migration(struct echosdk_call *lc)
 		return;
 	}
 
+	/* Hold the offer while the media encryption is still handshaking.
+	 *
+	 * ice_shim.c holds its candidate re-offer for exactly this reason, and
+	 * measured across 22 calls that a re-INVITE landing mid-DTLS is the
+	 * single strongest predictor of a permanently silent call: the handshake
+	 * is still retransmitting when the address changes under it, the retries
+	 * go into the void, `menc_secure` is never set, and stream_is_ready()
+	 * stays false for the life of the call.  A migration offer is the same
+	 * re-INVITE arriving at the same moment — it was simply reaching the
+	 * dialog by a different route, so it was never covered.
+	 *
+	 * DEFERRED is the right state for it: the verify tick already re-runs
+	 * send_migration() for a deferred call, so the offer goes out on the
+	 * first tick after the handshake completes, and the hold costs nothing
+	 * on a call that is not handshaking at all.  Deferring here rather than
+	 * below the counter also means the wait does not spend an attempt.
+	 *
+	 * Bounded, because a call configured for DTLS whose peer answered plain
+	 * RTP never reads as secure and would otherwise never migrate.  The
+	 * bound is the length of the handshake ladder itself: dtls_srtp waits
+	 * 1200 ms on the first attempt and 2500 ms on each of four restarts
+	 * (cmake/patches/dtls_srtp-state.new), so after 12 s the module has
+	 * given up and there is no handshake left to protect.  Same figure as
+	 * BSDK_ICE_REOFFER_SECURE_DEADLINE_MS and BSDK_MEDIA_SETUP_GRACE_MS, for
+	 * the same reason.
+	 *
+	 * Unlike ice_shim, the deadline sends rather than drops.  A candidate
+	 * re-offer is an optimisation and can be abandoned; a migration offer is
+	 * the recovery — it carries the address (and, for ICE, the freshly
+	 * gathered candidates) that a handshake failing because the path moved
+	 * needs in order to succeed.  Holding it forever guarantees the silence
+	 * it was trying to prevent. */
+	if (bsdk_media_setup_pending(lc)) {
+		uint64_t now = tmr_jiffies();
+
+		if (!lc->net_mig_hs_since)
+			lc->net_mig_hs_since = now;
+
+		if (now - lc->net_mig_hs_since < BSDK_NET_MIG_SECURE_HOLD_MS) {
+			if (lc->net_mig_state != BSDK_MIG_DEFERRED) {
+				lc->net_mig_state = BSDK_MIG_DEFERRED;
+				debug("EchoSDK/netmon: media encryption is still"
+				      " handshaking — holding the migration"
+				      " re-INVITE that would break it\n");
+				netmon_emit(ECHOSDK_NET_CALL_DEFERRED, lc,
+				            lc->acct, 0,
+				            lc->net_mig_tries + 1u);
+			}
+			return;
+		}
+
+		info("EchoSDK/netmon: media encryption still not secure after"
+		     " %u ms — the handshake ladder has run out, so the"
+		     " migration goes ahead\n",
+		     (unsigned)BSDK_NET_MIG_SECURE_HOLD_MS);
+
+		/* net_mig_hs_since is deliberately left standing.  This
+		 * generation has already waited the ladder out once, and a
+		 * later attempt within it must not wait it out again — six
+		 * attempts each paying a fresh 12 s would put the call off the
+		 * air for over a minute.  It is cleared when a generation
+		 * starts, and below whenever the handshake is actually done. */
+	}
+	else {
+		lc->net_mig_hs_since = 0;
+	}
+
 	lc->net_rx_at_mig = rx_packets(lc);
 	lc->net_mig_tries++;
 
@@ -877,6 +952,7 @@ static void start_migration(struct echosdk_call *lc)
 		lc->net_mig_gen   = g_nm.gen;
 		lc->net_mig_tries = 0;
 		lc->net_mig_due   = 0;
+		lc->net_mig_hs_since   = 0;
 		lc->net_ice_stale_sent = false;
 		lc->net_ice_restarted  = false;
 		lc->net_mig_path_moved = false;
@@ -1223,6 +1299,7 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 	lc->net_mig_gen        = g_nm.gen;
 	lc->net_mig_tries      = 0;
 	lc->net_mig_due        = 0;
+	lc->net_mig_hs_since   = 0;
 	lc->net_ice_stale_sent = false;
 	lc->net_ice_restarted  = false;
 	lc->net_mig_path_moved = false;

@@ -309,9 +309,16 @@ EchoSDK/ice: the restarted ICE generation did not nominate a pair within 6000 ms
 The peer rejected the connectivity checks for the generation an ICE restart
 just created. Asterisk/FreePBX does this predictably: it answers a restart
 offer with `a=connection:new`, destroys and rebuilds its RTP instance, and
-401s checks that arrive before the replacement ICE session is ready. libre
-starts a check list once per generation, so pairs that fail this way stay
-Failed and nothing re-checks them.
+401s checks that arrive before the replacement ICE session is ready (pjnath,
+which Asterisk uses, answers 401 automatically whenever the USERNAME's
+remote-ufrag half does not match its own current one).
+
+A pair that fails this way stays Failed for the life of the ICE generation and
+is never re-checked. That is required, not a shortcoming: RFC 8445 §7.2.5.2.4
+says a pair receiving an unrecoverable STUN error MUST be marked Failed, and
+Figure 6's state machine has no edge out of Failed. **Do not "fix" this by
+re-running the check list** — the only spec-legal recovery is a *new* ICE
+restart, i.e. fresh credentials and therefore a fresh generation.
 
 The call is left up and `ECHOSDK_NET_CALL_ICE_FAILED` is emitted. Audio usually
 keeps working, because the stream is held on the pair a previous generation
@@ -337,6 +344,23 @@ can ever succeed. The valid list is then built as a side effect of that check
 succeeding (the response's XOR-MAPPED-ADDRESS yields the peer-reflexive pair
 that gets nominated), so a rejected check means an empty valid list and nothing
 to nominate.
+
+### The SDK has no ICE liveness signal after nomination
+
+Worth knowing when reading any "media stopped" symptom: once a pair is
+nominated, libre sends only RFC 5245 §10 keepalives — STUN Binding
+*Indications* every 15 s (`ICE_DEFAULT_Tr`), which are fire-and-forget and are
+never answered. It does not implement RFC 7675 consent freshness, which uses
+Binding *Requests* and revokes consent after 30 s without a valid response.
+
+So there is no equivalent of WebRTC's `iceConnectionState` going
+`disconnected` / `failed` mid-call. Nothing at the ICE layer notices that a
+validated pair has stopped working, which is why the media-stall counter in
+adapt.c ends up being the only signal available. Bear that in mind before
+treating a stall as proof that the *path* died — it is a byte-counter
+heuristic, not a connectivity verdict, and WebRTC's own guidance is to restart
+ICE on `failed` and to gather more evidence before acting on a mere gap in
+received bytes.
 
 ### Audio levels: `NaN` is not silence
 

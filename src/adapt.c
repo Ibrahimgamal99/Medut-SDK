@@ -236,7 +236,7 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
  * so holds for the full grace once — bounded, once per call, and the alert
  * still follows.
  */
-static bool media_setup_pending(const struct echosdk_call *lc)
+bool bsdk_media_setup_pending(const struct echosdk_call *lc)
 {
 	struct list *streaml;
 	struct le *le;
@@ -332,7 +332,7 @@ static void stall_tick(struct echosdk_call *lc,
 	 * A renegotiation that puts the encryption back into handshake (an ICE
 	 * restart, a re-INVITE that re-keys) raises the flag again, so the same
 	 * edge covers the second and later handshakes on one call. */
-	pending = media_setup_pending(lc);
+	pending = bsdk_media_setup_pending(lc);
 
 	if (lc->stall_setup_pending && !pending) {
 		lc->stall_setup_pending = false;
@@ -445,7 +445,7 @@ void bsdk_adapt_call_start(struct echosdk_call *lc)
 	lc->stall_since       = tmr_jiffies();
 	/* Seeded, not assumed: a plain-RTP call never reads as pending, so it
 	 * sees no edge and keeps the old behaviour exactly. */
-	lc->stall_setup_pending = media_setup_pending(lc);
+	lc->stall_setup_pending = bsdk_media_setup_pending(lc);
 }
 
 void bsdk_adapt_tick(struct echosdk_call *lc,

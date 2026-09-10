@@ -8,6 +8,32 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **A network handover could re-INVITE a call in the middle of its DTLS-SRTP
+  handshake and leave it permanently silent.** `ice_shim.c` has held its
+  candidate re-offer for the handshake since the 22-call measurement that
+  identified a mid-DTLS re-INVITE as the single strongest predictor of a dead
+  call — the handshake is still retransmitting when the address changes under
+  it, the retries go into the void, `menc_secure` is never set, and
+  `stream_is_ready()` stays false for the life of the call. netmon's migration
+  offer is the same re-INVITE arriving at the same moment by a different route,
+  and was never covered by that hold.
+
+  It now defers, reusing the `BSDK_MIG_DEFERRED` state that already parks a
+  migration whose dialog cannot carry an offer yet: the verify tick re-runs it,
+  so the offer goes out on the first tick after the encryption comes up, and
+  `BEVENT_CALL_MENC` bounces that tick early rather than waiting a full
+  `net_verify_ms`. The wait is taken before the attempt counter, so it never
+  spends a retry.
+
+  Bounded at 12 s — the length of the handshake ladder itself (`dtls_srtp`
+  waits 1200 ms on the first attempt and 2500 ms on each of four restarts), so
+  past it the module has given up and there is nothing left to protect. Unlike
+  `ice_shim`, which drops its re-offer at the deadline, the migration is sent:
+  a candidate re-offer is an optimisation, but a migration offer is the
+  recovery, and holding it forever guarantees the silence it was avoiding. The
+  bound also covers a call configured for DTLS whose peer answered plain RTP,
+  which never reads as secure and would otherwise never migrate.
+
 - **A call whose media came up slowly was diagnosed as stalled, "repaired"
   with an ICE restart, and left permanently silent.** Three calls on-device
   (2026-09-10) went the same way: established, media working or about to work,
