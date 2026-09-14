@@ -543,6 +543,7 @@ fail:
 	ua_close();
 	bsdk_call_global_reset();
 	bsdk_ice_shim_close();
+	mod_close();   /* see echosdk_shutdown(): a retry of init must reload */
 	bsdk_dns_close();
 #ifdef _WIN32
 	{ __try { baresip_close(); } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -690,6 +691,24 @@ void echosdk_shutdown(void)
 #endif
 	/* Put the ice module's vtable back before baresip_close() unloads it. */
 	bsdk_ice_shim_close();
+
+	/* Unload the static modules.  libre_close() does not: it is
+	 * fd_setsize(0) + net_sock_close() + re_thread_close(), and the module
+	 * registry (re's mod.c `modl`) survives it.  baresip_close() meanwhile
+	 * frees the codec / media-encryption / media-NAT lists the modules had
+	 * registered into.  So a second echosdk_init() in the same process saw
+	 * module_load() answer EALREADY for every module — mod_find() still knew
+	 * them — and never re-ran their init(): zero codecs, no dtls_srtp, no
+	 * ice, and echosdk_account_create() still returned 0.  (Two Flutter
+	 * engines each treating the SDK as their own is how it was hit.)
+	 *
+	 * Here, and not later: the module close handlers unlink from baresip's
+	 * lists, so those must still exist.  After ua_close() and the ice-shim
+	 * restore, so nothing is mid-call and the vtable we hand back is
+	 * baresip's own. */
+	BSDK_TRACE("[bsdk] shutdown: mod_close\n");
+	mod_close();
+
 	BSDK_TRACE("[bsdk] shutdown: dns_close\n");
 	bsdk_dns_close();
 	BSDK_TRACE("[bsdk] shutdown: baresip_close\n");

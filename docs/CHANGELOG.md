@@ -8,6 +8,46 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **A second `echosdk_init()` in one process came up with no codecs, no
+  DTLS-SRTP and no ICE — and `echosdk_account_create()` still returned 0.**
+  `libre_close()` is `fd_setsize(0)` + `net_sock_close()` + `re_thread_close()`;
+  it never unloads the module registry, so re's `mod.c` still knew every
+  static module. `baresip_close()` meanwhile freed the codec /
+  media-encryption / media-NAT lists those modules had registered into. On the
+  next init `module_load()` found each module via `mod_find()`, answered
+  `EALREADY`, and never re-ran its `init()` — three registries at zero,
+  baresip warning "mediaenc not found: dtls_srtp" into a log nobody reads, and
+  an account that would have offered plain RTP with no codecs. Hit in practice
+  by two Flutter engines each treating the SDK as their own: one engine's
+  `shutdown()` crippled the other's next `init()`.
+
+  `echosdk_shutdown()` (and the `echosdk_init()` failure unwind) now calls
+  `mod_close()` after the UA and the ice-shim are down and before
+  `baresip_close()`, so module close handlers still find the lists they
+  unlink from and the next init reloads everything. Independently,
+  `echosdk_account_create()` now returns `ECHOSDK_ERR_STATE` — with a warning
+  naming what is missing — when the requested media encryption, ICE, or any
+  audio codec is not registered, instead of handing back an account that
+  silently degrades. Measured: registries `3/4/3 → 0/0/0 → 0/0/0` across three
+  inits before, `3/4/3` on every init after. Test: `test/reinit_test.c`.
+
+- **WebSocket accounts registered a new binding from every connection instead
+  of replacing their own (`[2 bindings]`).** baresip only assigns a
+  registration id when the account carries `sipnat=outbound`
+  (`ua.c`, `create_register_clients()`), and libre only writes `;reg-id=N` and
+  `Supported: gruu, outbound, path` for `regid > 0`. The SDK never set it, so
+  every REGISTER carried `+sip.instance` (from the uuid module) but no
+  `reg-id`, and a registrar had nothing RFC 5626 gives it to *replace* a
+  binding by — it keyed on the Contact URI, which under PJSIP's
+  `rewrite_contact` carries the per-connection source address. WS and WSS
+  accounts now register with `sipnat=outbound`: same instance-id, `reg-id=1`
+  (the SDK always sets exactly one outbound proxy), `Supported: outbound`.
+  UDP/TCP/TLS are unchanged. Not a config knob: the config structs are
+  mirrored by the generated Dart bindings and a new field would change
+  `struct_size` under them. Checked side effects: libre's flow keepalive
+  only starts on a `Require: outbound` answer, and for WS transports
+  `sip_keepalive_start()` returns `EPROTONOSUPPORT`, which `sipreg` ignores.
+
 - **Every API call could stall for seconds behind unrelated DNS work — seen as
   a slow `register()`, and on Flutter as a frozen UI.** `bsdk_dispatch()` and
   `bsdk_dispatch_sync()` posted their work to re_main with

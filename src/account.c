@@ -289,8 +289,13 @@ static int build_push_contact_params(const struct echosdk_account *acct,
 
 
 /* Configure a baresip account object.
- * acct->parsed_* fields (user, host, port, transport) must be set first. */
-static void configure_baresip_account(struct echosdk_account *acct)
+ * acct->parsed_* fields (user, host, port, transport) must be set first.
+ *
+ * Returns 0, or ECHOSDK_ERR_STATE when the stack cannot honour the request
+ * because a module the account needs is not registered — see the checks
+ * below.  baresip itself only warns ("mediaenc not found") and carries on
+ * with an account that will offer plain RTP or no codecs at all. */
+static int configure_baresip_account(struct echosdk_account *acct)
 {
 	struct account *ba = ua_account(acct->ua);
 	const echosdk_config_t *cfg = &g_bsdk.cfg;
@@ -344,13 +349,86 @@ static void configure_baresip_account(struct echosdk_account *acct)
 		echosdk_media_enc_t enc = acct->cfg.media_enc
 		                        ? acct->cfg.media_enc : cfg->media_enc;
 		const char *menc = bsdk_mediaenc_str(enc);
-		if (menc)
+		if (menc) {
+			/* Fail here rather than let baresip's account_set_mediaenc()
+			 * warn "mediaenc not found" and hand back an account that
+			 * offers plain RTP — the app asked for encryption, and an
+			 * empty registry means the stack is not in a usable state
+			 * (the classic cause was a second echosdk_init() before
+			 * shutdown unloaded the modules; see core.c). */
+			if (!menc_find(baresip_mencl(), menc)) {
+				warning("EchoSDK/account: media encryption '%s' is not "
+				        "registered — refusing to create an account "
+				        "that would silently fall back to plain RTP\n",
+				        menc);
+				return ECHOSDK_ERR_STATE;
+			}
 			account_set_mediaenc(ba, menc);
+		}
 	}
 
 	/* ICE / NAT — account OR global */
-	if (acct->cfg.ice_enabled || cfg->ice_enabled)
+	if (acct->cfg.ice_enabled || cfg->ice_enabled) {
+		if (!mnat_find(baresip_mnatl(), "ice")) {
+			warning("EchoSDK/account: ICE requested but the ice module "
+			        "is not registered — refusing to create the "
+			        "account\n");
+			return ECHOSDK_ERR_STATE;
+		}
 		account_set_medianat(ba, "ice");
+	}
+
+	/* RFC 5626 (SIP outbound) for WebSocket accounts.
+	 *
+	 * baresip assigns a registration id only when the account carries
+	 * sipnat=outbound (ua.c, create_register_clients: reg_add(…, i+1) per
+	 * outbound proxy, else reg_add(…, 0)), and libre writes ";reg-id=N" and
+	 * "Supported: gruu, outbound, path" only for regid > 0.  Without it a
+	 * WebSocket client re-registers from every new connection as a *new*
+	 * binding — the registrar keys on the Contact URI, and with PJSIP's
+	 * rewrite_contact that URI carries the per-connection source address —
+	 * so an AOR collects one binding per connection the phone has ever
+	 * opened ("[2 bindings]"), and inbound calls are tried on dead ones
+	 * first.  RFC 5626 gives the registrar what it needs to *replace* the
+	 * binding instead: the same +sip.instance (already sent, from the uuid
+	 * module) plus a reg-id.  RFC 7118 §5.2 expects exactly this of a
+	 * WebSocket client.
+	 *
+	 * WS/WSS only: they always go through the one outbound proxy the SDK
+	 * sets, and the transport is what makes the binding churn.  UDP/TCP/TLS
+	 * keep baresip's default.  Not a config knob on purpose — the config
+	 * structs are mirrored by generated bindings (ffigen) and a new field
+	 * would change struct_size under them.
+	 *
+	 * Side effects, all checked: libre's flow keepalive (start_outbound) only
+	 * starts if the 200 carries "Require: outbound", and for WS transports
+	 * sip_keepalive_start() returns EPROTONOSUPPORT, which sipreg ignores.
+	 * The uuid the instance-id comes from is a precondition — baresip
+	 * refuses outbound without one — so skip when it is missing rather than
+	 * turn every register into ENOSYS. */
+	if ((acct->parsed_transport == ECHOSDK_TRANSPORT_WS ||
+	     acct->parsed_transport == ECHOSDK_TRANSPORT_WSS) &&
+	    str_isset(conf_config()->sip.uuid)) {
+		if (account_set_sipnat(ba, "outbound")) {
+			warning("EchoSDK/account: could not enable RFC 5626 "
+			        "outbound for the WebSocket account\n");
+		}
+		else {
+			/* ua_alloc() already built the registration list — one
+			 * reg with id 0, from an account that had neither sipnat
+			 * nor an outbound proxy yet (ua.c:1272).  Setting the flag
+			 * now changes nothing until that list is rebuilt from the
+			 * account as it stands: ua_update_account() flushes it and
+			 * the extension list and re-runs create_register_clients(),
+			 * which is where the reg-id is assigned.  Verified on the
+			 * wire — without this call the REGISTER still had no
+			 * reg-id and no Supported: outbound. */
+			int uerr = ua_update_account(acct->ua);
+			if (uerr)
+				warning("EchoSDK/account: ua_update_account: %m\n",
+				        uerr);
+		}
+	}
 
 	/* RTCP multiplexing (RFC 5761) — per-account override; fall back to global */
 	account_set_rtcp_mux(ba, acct->cfg.rtcp_mux_set ? acct->cfg.rtcp_mux : cfg->rtcp_mux);
@@ -407,6 +485,13 @@ static void configure_baresip_account(struct echosdk_account *acct)
 		}
 
 		if (codecs[0]) {
+			/* No codec at all is the same broken stack as above, and a
+			 * call with no codecs cannot be negotiated. */
+			if (list_isempty(baresip_aucodecl())) {
+				warning("EchoSDK/account: no audio codec is registered "
+				        "— refusing to create the account\n");
+				return ECHOSDK_ERR_STATE;
+			}
 			account_set_audio_codecs(ba, codecs);
 			/* Unknown names are passed to baresip as-is so any codec a
 			 * loaded module registers can be named. When none of them
@@ -439,6 +524,7 @@ static void configure_baresip_account(struct echosdk_account *acct)
 	/* Call transfer support */
 	account_set_call_transfer(ba, true);
 
+	return 0;
 }
 
 /* ── Reconnecting vs failed ──────────────────────────────────────────────────
@@ -1334,7 +1420,15 @@ static void create_fn(void *arg)
 	err = ua_alloc(&acct->ua, aor);
 	if (err) { mem_deref(acct); ctx->result = err; return; }
 
-	configure_baresip_account(acct);
+	err = configure_baresip_account(acct);
+	if (err) {
+		/* The UA is not owned by account_destructor (destroy_fn releases
+		 * it), so drop it here before the wrapper. */
+		acct->ua = mem_deref(acct->ua);
+		mem_deref(acct);
+		ctx->result = err;
+		return;
+	}
 
 	mtx_lock(&g_bsdk.acct_lock);
 	list_append(&g_bsdk.accounts, &acct->le, acct);

@@ -54,8 +54,9 @@ static const char *DESKTOP_EXTRA[] = {
 };
 
 #if defined(ECHOSDK_PROFILE_DESKTOP) && defined(ECHOSDK_HAS_WEBRTC_AEC)
-/* Loaded only when aec_mode == WEBRTC at init time.
- * module_load is one-way — we don't unload at runtime. */
+/* Loaded only when aec_mode == WEBRTC at init time.  Not unloaded while the
+ * stack is up; echosdk_shutdown() unloads every module with mod_close() so
+ * the next echosdk_init() re-runs their init handlers. */
 static const char *WEBRTC_AEC_LIST[] = { "webrtc_aec", NULL };
 #endif
 
