@@ -213,6 +213,19 @@ sdk.events.listen((ev) {
 });
 ```
 
+`account.call(target)` takes a full SIP URI, a bare extension (`'120'`), a phone
+number (`'+15551234'`), or any other legal SIP user part — the target is only
+completed with a scheme and the account domain, never validated as numeric, so a
+UUID dials like anything else:
+
+```dart
+account.call('550e8400-e29b-41d4-a716-446655440000');
+// → INVITE sip:550e8400-e29b-41d4-a716-446655440000@pbx.example.com
+```
+
+`transfer()` takes the same forms. See [Dial targets](../api/calls.md#dial-targets)
+for the completion rule and the server-side caveats.
+
 ## 5 — Reconnection & network handover
 
 Registration retries automatically with exponential backoff
