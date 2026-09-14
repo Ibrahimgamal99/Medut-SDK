@@ -8,6 +8,48 @@ int rc = echosdk_call_invite(acct, "sip:bob@pbx.example.com", &call);
 // fires: CALLING → RINGING → ESTABLISHED  (or FAILED)
 ```
 
+### Dial targets
+
+The second argument is an opaque dial string, not a phone number. The SDK only
+completes it into a full SIP URI — it prepends `sip:` when there is no scheme,
+and appends `@<account-domain>` (plus the port, when it is not 5060) when there
+is no `@`. IP literals and anything already carrying `user@host` are left alone.
+Nothing is validated as numeric and nothing is stripped, so any legal SIP user
+part works:
+
+```c
+echosdk_call_invite(acct, "sip:bob@pbx.example.com", &call);   /* full URI   */
+echosdk_call_invite(acct, "120", &call);                       /* extension  */
+echosdk_call_invite(acct, "+15551234", &call);                 /* E.164      */
+
+/* A UUID is a legal user part — hex digits and '-' are all RFC 3261
+   `unreserved`, so no percent-encoding is needed. */
+echosdk_call_invite(acct, "550e8400-e29b-41d4-a716-446655440000", &call);
+/* → INVITE sip:550e8400-e29b-41d4-a716-446655440000@pbx.example.com */
+```
+
+```python
+sdk.call("550e8400-e29b-41d4-a716-446655440000")
+```
+
+```dart
+account.call('550e8400-e29b-41d4-a716-446655440000');
+```
+
+An account may also *register* under a UUID — the AOR is just
+`echosdk_account_config_t.uri` — and an inbound call from such a peer reports it
+verbatim in `from_uri`, so opaque identifiers work in both directions without a
+phone number anywhere in the flow.
+
+Two things to get right, both on the server side:
+
+- **Your PBX has to route the identifier.** On Asterisk that means a PJSIP
+  endpoint/AOR named by the UUID, or a dialplan pattern that matches it — the
+  usual `exten => _X.` patterns match digits only and will never match a UUID.
+- **SIP user parts are case-sensitive**, while UUIDs as identifiers are not.
+  Pick one casing (lowercase by convention) and use it for both registration and
+  dialling, or the registrar will not match the AOR.
+
 ## Incoming call
 
 ```c

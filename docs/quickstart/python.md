@@ -355,7 +355,7 @@ sdk.version()                   # SDK version string
 | `rel100` | `"disabled"` `"enabled"` `"required"` |
 | `extra_headers` | `dict[str, str]` — calls `account.add_header()` for each pair |
 
-`sdk.call(target)` accepts a full SIP URI, a bare extension (`"120"`), or a phone number (`"+15551234"`). When only one account exists it is used automatically; pass `account=` when multiple accounts are registered.
+`sdk.call(target)` accepts a full SIP URI, a bare extension (`"120"`), a phone number (`"+15551234"`), or any other legal SIP user part — a UUID (`"550e8400-e29b-41d4-a716-446655440000"`) dials fine, since the target is only completed with a scheme and the account domain, never validated as numeric. See [Dial targets](../api/calls.md#dial-targets). When only one account exists it is used automatically; pass `account=` when multiple accounts are registered.
 
 ---
 
