@@ -66,6 +66,7 @@ struct bsdk_ctx {
 	thrd_t             re_thread;
 	bool               re_thread_running;
 	struct mqueue     *re_wakeup_mq;  /* wakes select() so re_cancel takes effect */
+	struct mqueue     *dispatch_mq;   /* bsdk_dispatch*() → re_main, see dispatch.c */
 
 	/* Event dispatch thread (separate from re_main to prevent consumer
 	 * deadlocks when they call back into EchoSDK from inside an event) */
@@ -357,6 +358,12 @@ int bsdk_dispatch(bsdk_main_fn fn, void *arg);
 
 /* Post fn(arg) to re_main and block until it completes. */
 int bsdk_dispatch_sync(bsdk_main_fn fn, void *arg);
+
+/* Allocate / free the dispatch mqueue.  Called by re_loop.c around the
+ * re_main thread's lifetime: init before the thread starts (mqueue_alloc
+ * registers its pipe with re_global's fd table), close after it has joined. */
+int  bsdk_dispatch_init(void);
+void bsdk_dispatch_close(void);
 
 /* ── event.c ───────────────────────────────────────────────────────────── */
 

@@ -5,9 +5,11 @@
 # third_party/re is fetched by scripts/fetch-third-party.sh at a pinned
 # revision and is gitignored — not a submodule — so an in-place patch cannot
 # leak into upstream history (the hazard fix-msvc-re.cmake retired over).
-# Each patch is idempotent behind a "EchoSDK-patched" marker and fails loudly
-# when a libre bump moves the text it splices at, in the spirit of the
-# configure-time prototype guard in CMakeLists.txt.
+# Each patch is idempotent — it is skipped when its replacement text is
+# already in the file — and fails loudly when a libre bump moves the text it
+# splices at, in the spirit of the configure-time prototype guard in
+# CMakeLists.txt.  Every replacement carries an "EchoSDK-patched" comment so
+# a patched tree is recognisable by eye and by grep.
 #
 # Why patches instead of GNU ld's --wrap (which used to carry two of these
 # fixes on Linux/Android): Apple's linker has no --wrap, so iOS builds
@@ -22,16 +24,21 @@ if(NOT DEFINED SOURCE_DIR)
 endif()
 
 # Splice NEW in place of OLD in FILE, or verify it already happened.
-# OLD must match byte-for-byte (tabs included); NEW must contain the
-# "EchoSDK-patched" marker that makes the operation idempotent.
+# OLD must match byte-for-byte (tabs included); NEW should carry an
+# "EchoSDK-patched" comment so the change is findable in the tree.
+#
+# Idempotency is decided per hunk, not per file: NEW itself is the marker.
+# It used to be "the file contains 'EchoSDK-patched' anywhere", which is one
+# bit per file — the first hunk applied to ice/candpair.c would have made the
+# second report itself as already done and silently ship unapplied.
 function(echosdk_patch FILE OLD NEW WHAT)
   if(NOT EXISTS "${FILE}")
     message(FATAL_ERROR "patch-re-sources: ${FILE} does not exist (${WHAT})")
   endif()
   file(READ "${FILE}" _content)
 
-  string(FIND "${_content}" "EchoSDK-patched" _marker)
-  if(NOT _marker EQUAL -1)
+  string(FIND "${_content}" "${NEW}" _applied)
+  if(NOT _applied EQUAL -1)
     message(STATUS "patch-re-sources: ${FILE} already patched (${WHAT})")
     return()
   endif()
@@ -340,5 +347,127 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 }
 ]=]
 "WebSocket REGISTER Contact: per-instance host, not the local address")
+
+# ---------------------------------------------------------------------------
+# 5. ice/candpair.c — a candidate pair that fails and then succeeds must end
+#    up Succeeded (two hunks in one file; see the per-hunk note on
+#    echosdk_patch above)
+#
+# libre's ICE state machine treats Failed as terminal: icem_candpair_set_state()
+# refuses to move a completed pair, and Failed counts as completed.  Behind a
+# carrier NAT the first connectivity check routinely times out before the
+# binding exists and the *retransmit* is what gets answered — so the pair is
+# already Failed when handle_success() (connchk.c) runs.  Two things then go
+# wrong, and both are fixed here:
+#
+#   (a) The success reveals a peer-reflexive address, so construct_valid_pair()
+#       clones the pair for it — and icem_candpair_clone() copied the parent's
+#       `state`, so the brand-new pair was born Failed.
+#   (b) icem_candpair_make_valid() set `valid`, moved the pair to the valid
+#       list and cleared err/scode, but its set_state(SUCCEEDED) was a no-op.
+#
+# The pair is then selected (comp->cp_sel, which nothing gates on state — so
+# media does flow) while its state says Failed.  On-device that is
+#   "icecomp: {audio.1} set_selected: invalid state 'Failed'
+#    [{comp=1} Failed { V } seth_lte0:prflx:… <---> host:…]"
+# — valid, not nominated, and no (err)/[scode] because make_valid just erased
+# them.  The consequence that matters: concluding_ice() (chklist.c) picks the
+# pair to nominate with icem_candpair_find_st(…, SUCCEEDED), a *state* filter,
+# so when this is the only valid pair for the component it finds nothing,
+# never sets comp->concluded and never sends USE-CANDIDATE.
+#
+# Fix (a) starts the clone the way icem_candpair_alloc() starts every pair;
+# fix (b) steps a Failed pair back to InProgress so the transition to
+# Succeeded is allowed.  RFC 8445 gives Failed no outgoing edge, but that rule
+# is about not *re-checking* a failed pair; a response that did arrive is the
+# pair working, and the valid list is where this function is putting it.
+# Both are plain bug fixes, upstreamable as-is.
+# ---------------------------------------------------------------------------
+echosdk_patch("${SOURCE_DIR}/src/ice/candpair.c"
+[=[
+	cp->def       = cp0->def;
+	cp->valid     = cp0->valid;
+	cp->nominated = cp0->nominated;
+	cp->state     = cp0->state;
+	cp->pprio     = cp0->pprio;
+	cp->err       = cp0->err;
+	cp->scode     = cp0->scode;
+
+	list_add_sorted(&cp0->icem->checkl, cp);
+]=]
+[=[
+	cp->def       = cp0->def;
+	cp->nominated = cp0->nominated;
+	cp->pprio     = cp0->pprio;
+
+	/* EchoSDK-patched: a clone with different candidates is a pair that
+	 * has not been checked yet, so it must not inherit the parent's verdict.
+	 *
+	 * The one caller is construct_valid_pair() (connchk.c), cloning the
+	 * pair a STUN success arrived on so the peer-reflexive address the
+	 * response revealed gets a pair of its own.  Behind a carrier NAT the
+	 * parent has usually already *failed* by then — the first check times
+	 * out before the binding opens, and the late answer is what discovers
+	 * the prflx — and copying `state` handed the clone ICE_CANDPAIR_FAILED.
+	 * Nothing can undo that: icem_candpair_set_state() treats FAILED as
+	 * terminal, so the icem_candpair_make_valid() that follows moved the
+	 * pair onto the valid list and left it Failed.  Seen on-device as
+	 * "set_selected: invalid state 'Failed' [... { V } ...]", and the pair
+	 * is then invisible to concluding_ice(), which selects by state, so
+	 * USE-CANDIDATE nomination is skipped for the component.
+	 *
+	 * Start the clone the way icem_candpair_alloc() starts every pair.
+	 * The caller makes it valid on the next line anyway; `err` and
+	 * `scode` describe a check this pair never ran. */
+	cp->valid     = false;
+	cp->state     = ICE_CANDPAIR_FROZEN;
+	cp->err       = 0;
+	cp->scode     = 0;
+
+	list_add_sorted(&cp0->icem->checkl, cp);
+]=]
+"ICE: a cloned candidate pair does not inherit the parent's Failed state")
+
+echosdk_patch("${SOURCE_DIR}/src/ice/candpair.c"
+[=[
+	cp->err = 0;
+	cp->scode = 0;
+	cp->valid = true;
+
+	icem_candpair_set_state(cp, ICE_CANDPAIR_SUCCEEDED);
+
+	list_unlink(&cp->le);
+	list_add_sorted(&cp->icem->validl, cp);
+]=]
+[=[
+	cp->err = 0;
+	cp->scode = 0;
+	cp->valid = true;
+
+	/* EchoSDK-patched: a success that arrives after the pair was given up
+	 * on must still be recorded.
+	 *
+	 * icem_candpair_set_state() refuses to move a completed pair, and
+	 * FAILED counts as completed — so a pair whose check timed out and
+	 * then answered (the ordinary course of events behind a carrier NAT,
+	 * where the first request leaves before the binding exists) stayed
+	 * Failed while this function put it on the valid list and cleared the
+	 * error that said why.  That mismatch is what "set_selected: invalid
+	 * state 'Failed'" reports, and concluding_ice() cannot nominate a pair
+	 * it cannot find by state.
+	 *
+	 * RFC 8445 gives Failed no outgoing edge, but that is about not
+	 * re-checking a failed pair; a response that did arrive is the pair
+	 * working, and the valid list is where it is going.  Step it back so
+	 * the transition below is allowed. */
+	if (cp->state == ICE_CANDPAIR_FAILED)
+		cp->state = ICE_CANDPAIR_INPROGRESS;
+
+	icem_candpair_set_state(cp, ICE_CANDPAIR_SUCCEEDED);
+
+	list_unlink(&cp->le);
+	list_add_sorted(&cp->icem->validl, cp);
+]=]
+"ICE: a late connectivity-check success moves a Failed pair to Succeeded")
 
 message(STATUS "patch-re-sources: libre patching complete")

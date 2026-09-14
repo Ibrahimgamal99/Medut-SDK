@@ -34,8 +34,17 @@ int bsdk_re_loop_start(void)
 	if (err)
 		return err;
 
+	/* Same reasoning for the dispatch queue: its pipe has to be in
+	 * re_global's fd table before the loop that polls it starts. */
+	err = bsdk_dispatch_init();
+	if (err) {
+		g_bsdk.re_wakeup_mq = mem_deref(g_bsdk.re_wakeup_mq);
+		return err;
+	}
+
 	int rc = thrd_create(&g_bsdk.re_thread, re_main_thread_fn, NULL);
 	if (rc != thrd_success) {
+		bsdk_dispatch_close();
 		g_bsdk.re_wakeup_mq = mem_deref(g_bsdk.re_wakeup_mq);
 		return ENOMEM;
 	}
@@ -45,8 +54,12 @@ int bsdk_re_loop_start(void)
 
 void bsdk_re_loop_stop(void)
 {
-	if (!g_bsdk.re_thread_running)
+	if (!g_bsdk.re_thread_running) {
+		/* Never started (init unwound early) — nothing to join, but a
+		 * queue allocated by a start that then failed must not leak. */
+		bsdk_dispatch_close();
 		return;
+	}
 
 	/* Push to the wakeup mqueue — this writes to the pipe, which wakes up
 	 * the blocking select() in the re_main loop.  The wakeup_handler then
@@ -55,6 +68,10 @@ void bsdk_re_loop_stop(void)
 	mqueue_push(g_bsdk.re_wakeup_mq, 0, NULL);
 
 	thrd_join(g_bsdk.re_thread, NULL);
+	/* After the join: nothing can be mid-handler on re_main any more, and
+	 * a dispatch that races this teardown now fails with ERR_STATE rather
+	 * than writing into a pipe with no reader. */
+	bsdk_dispatch_close();
 	g_bsdk.re_wakeup_mq = mem_deref(g_bsdk.re_wakeup_mq);
 	g_bsdk.re_thread_running = false;
 }

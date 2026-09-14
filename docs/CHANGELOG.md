@@ -8,6 +8,66 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **Every API call could stall for seconds behind unrelated DNS work — seen as
+  a slow `register()`, and on Flutter as a frozen UI.** `bsdk_dispatch()` and
+  `bsdk_dispatch_sync()` posted their work to re_main with
+  `re_thread_async_main(NULL, …)`. That reads like a "run on the event loop"
+  primitive, but with `work = NULL` the item still transits libre's async
+  worker pool: `re_async()` appends it to the work list, one of the
+  `RE_THREAD_WORKERS = 4` worker threads dequeues it, and only then is it
+  pushed to the loop. The same four threads run libre's *blocking*
+  `getaddrinfo()` (which `core.c` forces on for Android, where re's resolver
+  has no nameservers) and its blocking mDNS `.local` ICE-candidate resolution
+  (libre's own comment: "~5s"). A SIP hostname costs two slots — A and AAAA
+  go out together — so two accounts registering at once filled the pool, and
+  every call behind them waited for a resolve to return: `register()`,
+  `answer()`, `hangup()`, `invite()`, `hold()`, `dtmf()`, all of it.
+
+  Measured against a local registrar: registration completes in 2–4 ms with
+  up to three workers busy, **3.0 s with four, 6.0 s with eight** — the
+  REGISTER is not even on the wire until a slot frees. The 28 synchronous
+  APIs block the *caller* for that long, and the Flutter binding makes its FFI
+  calls on the Dart isolate with no offload, so the app's UI froze with them.
+
+  Dispatch now has its own `mqueue`: `mqueue_push()` is one atomic pipe write
+  from any thread and the handler runs on re_main with no worker in between —
+  the primitive `re_loop.c` already used to wake the loop for shutdown. A
+  dispatch that arrives after the loop has stopped now returns
+  `ECHOSDK_ERR_STATE` instead of a `cnd_wait()` that never returns.
+  Regression test: `test/unit/test_dispatch_starve.c` holds all four workers
+  and times a dispatch.
+
+- **ICE: a candidate pair that failed its first check and then answered was
+  selected while still marked `Failed`, and could not be nominated.** libre
+  treats `Failed` as terminal — `icem_candpair_set_state()` refuses to move a
+  completed pair — which is right for "do not re-check it" and wrong for the
+  ordinary carrier-NAT sequence where the first request times out before the
+  binding exists and the retransmit is what gets answered. Two things then
+  went wrong in `handle_success()`: the peer-reflexive address the response
+  revealed got a *cloned* pair, and `icem_candpair_clone()` copied the
+  parent's `state`, so the new pair was born `Failed`; and
+  `icem_candpair_make_valid()` set `valid`, moved the pair to the valid list
+  and cleared `err`/`scode`, but its `set_state(SUCCEEDED)` was a no-op.
+
+  On-device the log line is
+  `icecomp: {audio.1} set_selected: invalid state 'Failed' [{comp=1} Failed { V } seth_lte0:prflx:… <---> host:…]`
+  — valid, not nominated, and no `(err)`/`[scode]` because they were just
+  erased. Media did flow (`cp_sel` is set and nothing reading it checks
+  state) and the checklist completed (that test is valid-list membership).
+  What broke is nomination: `concluding_ice()` picks the pair to nominate
+  with `icem_candpair_find_st(…, SUCCEEDED)`, a *state* filter, so when this
+  was the only valid pair for the component it found nothing, never set
+  `comp->concluded` and never sent USE-CANDIDATE.
+
+  Two libre hunks in `cmake/patch-re-sources.cmake`: the clone starts the way
+  `icem_candpair_alloc()` starts every pair, and `make_valid` steps a
+  `Failed` pair back to `InProgress` so the transition is allowed. The
+  patcher's idempotency check is now per hunk (it is skipped when its
+  replacement text is already present) rather than per file — the old
+  "file contains `EchoSDK-patched`" test would have reported the second
+  `candpair.c` hunk as done after applying the first. Regression test:
+  `test/unit/test_ice_candpair.c`.
+
 - **A network handover could re-INVITE a call in the middle of its DTLS-SRTP
   handshake and leave it permanently silent.** `ice_shim.c` has held its
   candidate re-offer for the handshake since the 22-call measurement that

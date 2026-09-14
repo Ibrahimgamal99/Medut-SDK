@@ -9,7 +9,8 @@ TESTS := test_mos test_url_parser test_mwi_parser test_codec_str test_transport_
 # (SYSROOT=... to point elsewhere); the other tests stay standalone.
 SYSROOT ?= ../../build/linux-x86_64/sysroot
 ifneq ($(wildcard $(SYSROOT)/include/re/re.h),)
-TESTS += test_ws_pin test_audio_external test_fmtp_bitrate test_ice_deadline
+TESTS += test_ws_pin test_audio_external test_fmtp_bitrate test_ice_deadline \
+         test_dispatch_starve test_ice_candpair
 endif
 
 .PHONY: all clean test
@@ -64,6 +65,26 @@ test_ice_deadline: test_ice_deadline.c ../../src/ice_shim.c
 # Links libre but not libbaresip, for the reason given on test_audio_external:
 # the test stubs the handful of baresip symbols src/adapt.c references.
 test_fmtp_bitrate: test_fmtp_bitrate.c ../../src/adapt.c
+	$(CC) $(CFLAGS) -Wno-unused-parameter \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+# Links src/dispatch.c and src/re_loop.c against libre only (they read
+# g_bsdk, which the test defines, and nothing else from the SDK).  Holds all
+# of libre's async workers and times a dispatch: with the mqueue-based
+# dispatch.c it lands in milliseconds, with re_thread_async_main() it lands
+# when the first worker frees up.
+test_dispatch_starve: test_dispatch_starve.c ../../src/dispatch.c ../../src/re_loop.c
+	$(CC) $(CFLAGS) -Wno-unused-parameter \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+# Exercises the two ice/candpair.c hunks in cmake/patch-re-sources.cmake via
+# libre's internal ice.h.  Fails against a libre built from an unpatched tree
+# — rebuild the sysroot after a libre bump before trusting a red run here.
+test_ice_candpair: test_ice_candpair.c
 	$(CC) $(CFLAGS) -Wno-unused-parameter \
 	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
