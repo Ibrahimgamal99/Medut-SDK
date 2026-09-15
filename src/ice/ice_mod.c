@@ -318,15 +318,40 @@ static bool relay_only_unmet(const struct icea_sess *s)
 }
 
 
+/**
+ * Write this stream's ICE attributes, then re-baseline what the peer has been
+ * told our media address is.
+ *
+ * `signalled` is seeded in icea_mediah() from the *session* address, which is
+ * all there is before gathering produces anything — and on an SDP session that
+ * is the placeholder `0.0.0.0`/port 9 or the private host address.  The offer
+ * that actually goes out carries the reflexive address gathering just found,
+ * so comparing a later selection against the seed reports "never signalled"
+ * for an address the peer was told about, and the log says so in as many
+ * words.  Take the baseline from what the SDP carries at the moment baresip is
+ * about to build the offer or answer from it.
+ */
+static void media_write_sdp(struct icea_sess *s, struct icea_media *m)
+{
+	const struct sa *laddr;
+
+	if (!m->cur || !m->sdpm)
+		return;
+
+	(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
+
+	laddr = sdp_media_laddr(m->sdpm);
+	if (laddr && sa_isset(laddr, SA_ADDR))
+		m->signalled = *laddr;
+}
+
+
 static void write_all_sdp(struct icea_sess *s)
 {
 	struct le *le;
 
-	LIST_FOREACH(&s->medial, le) {
-		struct icea_media *m = le->data;
-		if (m->cur && m->sdpm)
-			(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
-	}
+	LIST_FOREACH(&s->medial, le)
+		media_write_sdp(s, le->data);
 }
 
 
@@ -423,7 +448,7 @@ static void on_gathered(struct icea_gen *gen, void *arg)
 	if (!s)
 		return;
 
-	(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
+	media_write_sdp(s, m);
 
 	if (all_gathered(s))
 		release_offer(s, "all streams gathered");
@@ -1143,7 +1168,10 @@ static int icea_mediah(struct mnat_media **mp, struct mnat_sess *sess,
 	if (err)
 		goto out;
 
-	(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
+	/* Host candidates only so far, so this is also the first honest
+	 * baseline for `signalled`: what the peer would be told if the offer
+	 * went out right now. */
+	media_write_sdp(s, m);
 
 	if (s->servers_ready)
 		(void)media_start_gather(m);
@@ -1205,7 +1233,7 @@ static int icea_updateh(struct mnat_sess *sess)
 			warning("EchoSDK/ice: '%s': ICE mismatch — using the"
 				" signalled address\n", sdp_media_name(m->sdpm));
 			fire_connh_plain(m);
-			(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
+			media_write_sdp(s, m);
 			continue;
 		}
 	}
@@ -1259,7 +1287,7 @@ static int icea_updateh(struct mnat_sess *sess)
 		media_maybe_start_checks(m);
 
 		/* refresh what the SDP carries (laddr, candidates) */
-		(void)icea_sdp_write_local(m->cur, s->sdp, m->sdpm, true);
+		media_write_sdp(s, m);
 
 		/* stream_update() has just reset tx.raddr to the signalled
 		 * address; put the virtual peer back (the 172.16.11.52

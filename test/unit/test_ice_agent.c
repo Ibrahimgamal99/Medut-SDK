@@ -868,6 +868,67 @@ static void test_renomination_switches(void)
 }
 
 
+static void test_receipt_credits_reflexive_selected_pair(void)
+{
+	/* A NAT'd caller: the selected pair is peer-reflexive while the host
+	 * pair to the same remote still exists and outranks it.  Inbound data
+	 * must keep the *selected* pair receiving — crediting only the
+	 * highest-priority match made COMPLETED flap to DISCONNECTED on the
+	 * ping cadence (found against FreeSWITCH, 2026-09-15). */
+	struct node *na = node_new("A", "192.168.1.2", 5000, "203.0.113.1", 40000);
+	struct node *nb = node_new("B", "198.51.100.2", 6000, NULL, 0);
+	struct agent a, b, *ab[2] = { &a, &b };
+	struct icea_pair *sel;
+	unsigned host_pairs = 0;
+	struct le *le;
+	uint64_t t0;
+
+	agent_init(&a, &fast_conf, ICE_ROLE_CONTROLLING, 1, &na);
+	agent_init(&b, &fast_conf, ICE_ROLE_CONTROLLED, 1, &nb);
+	agent_learn(&a, &b);
+	agent_learn(&b, &a);
+	CHECK(0 == icea_gen_start_checks(a.gen));
+	CHECK(0 == icea_gen_start_checks(b.gen));
+	CHECK(run_until(both_completed, ab, 3000));
+
+	sel = a.gen->selected[0];
+	CHECK(sel != NULL);
+	CHECK(sel->lc->type == ICE_CAND_TYPE_PRFLX);   /* the NAT case */
+
+	/* the host pair to the same remote exists and outranks the selected */
+	LIST_FOREACH(&a.gen->pairl, le) {
+		const struct icea_pair *p = le->data;
+		if (p->lc->type == ICE_CAND_TYPE_HOST &&
+		    sa_cmp(&p->rc->addr, &sel->rc->addr, SA_ALL)) {
+			host_pairs++;
+			CHECK(p->prio > sel->prio);
+		}
+	}
+	CHECK(host_pairs == 1);
+
+	/* Feed data only — no checks at all — for longer than the receiving
+	 * window, and the selected pair must stay receiving and COMPLETED. */
+	icea_gen_hold(a.gen);                     /* stop A's scheduler */
+	t0 = icea_now();
+	while (icea_now() - t0 < fast_conf.receiving_timeout_ms * 3) {
+		struct mbuf *mb = mbuf_alloc(64);
+		mbuf_write_u8(mb, 0x80);          /* RTP-ish, not STUN */
+		mbuf_fill(mb, 0x5a, 40);
+		mb->pos = 0;
+		CHECK(0 == udp_send(nb->us, &na->pub, mb));
+		mem_deref(mb);
+		run_for(40);
+		icea_select_tick(a.gen, icea_now());
+		CHECK(sel->receiving);
+		CHECK(a.gen->state == ICEA_STATE_COMPLETED);
+	}
+
+	agent_close(&a);
+	agent_close(&b);
+	nodes_flush();
+}
+
+
 static void test_pac_waits_for_better_pair(void)
 {
 	/* RFC 8863 (ICE PAC).  B offers two candidates: a high-priority one on
@@ -1033,6 +1094,7 @@ int main(void)
 	test_liveness_disconnect_and_fail();
 	test_silent_switch_for_controlled();
 	test_renomination_switches();
+	test_receipt_credits_reflexive_selected_pair();
 	test_pac_waits_for_better_pair();
 	test_gather_srflx_via_sim_stun();
 	test_own_port_alloc();

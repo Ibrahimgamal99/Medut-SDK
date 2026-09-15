@@ -197,27 +197,66 @@ uint64_t icea_pair_last_received(const struct icea_pair *p)
 }
 
 
+/**
+ * Stamp receipt on every pair the arriving packet is evidence for.
+ *
+ * A datagram proves liveness for a 5-tuple, and a 5-tuple is (socket,
+ * remote) — not (candidate, remote).  Every local candidate on one port
+ * shares that port's socket, so host, server-reflexive and peer-reflexive
+ * pairs to the same remote are all the same path on the wire and the packet
+ * is evidence for all of them.
+ *
+ * Attributing it to one pair instead — the first match, which is the
+ * highest-priority one — is wrong in exactly the case that matters.  Behind
+ * a NAT the *selected* pair is reflexive while the host pair to the same
+ * remote still exists and outranks it, so the media went on stamping the
+ * host pair while the selected pair's clock ran out: `receiving` lapsed on
+ * the ping cadence alone (2500 ms window, 2500 ms cadence) and the call
+ * reported COMPLETED → DISCONNECTED → COMPLETED for ever.  Found against
+ * FreeSWITCH on 2026-09-15, where the selected local candidate is reflexive;
+ * Asterisk on the same office LAN had hidden it by selecting a host pair.
+ *
+ * That flapping is not cosmetic: `disconnected` puts the scheduler into its
+ * weak cadence, and netmon reads the state to decide whether a media stall
+ * is the far end's problem or its own.
+ */
+static void note_receipt(struct icea_gen *gen, unsigned compid,
+			 const struct icea_port *port, const struct sa *src,
+			 bool is_data)
+{
+	uint64_t now = icea_now();
+	struct le *le;
+
+	LIST_FOREACH(&gen->pairl, le) {
+		struct icea_pair *p = le->data;
+
+		if (p->lc->compid != compid)
+			continue;
+		if (port && p->lc->port != port)
+			continue;
+		if (!sa_cmp(&p->rc->addr, src, SA_ALL))
+			continue;
+
+		if (is_data)
+			p->last_data_recv = now;
+		else
+			p->last_ping_recv = now;
+		p->receiving = true;
+	}
+}
+
+
 void icea_pair_note_data(struct icea_gen *gen, unsigned compid,
 			 const struct icea_port *port, const struct sa *src)
 {
-	struct icea_pair *p = icea_pair_by_src(gen, compid, port, src);
-
-	if (p) {
-		p->last_data_recv = icea_now();
-		p->receiving = true;
-	}
+	note_receipt(gen, compid, port, src, true);
 }
 
 
 void icea_pair_note_ping_recv(struct icea_gen *gen, unsigned compid,
 			      const struct icea_port *port, const struct sa *src)
 {
-	struct icea_pair *p = icea_pair_by_src(gen, compid, port, src);
-
-	if (p) {
-		p->last_ping_recv = icea_now();
-		p->receiving = true;
-	}
+	note_receipt(gen, compid, port, src, false);
 }
 
 
