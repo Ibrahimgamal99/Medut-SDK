@@ -72,6 +72,17 @@ int audio_encoder_set(struct audio *a, const struct aucodec *ac, int pt,
 	return 0;
 }
 
+/* The stall check reads whether media setup is still under way: no streams,
+ * nothing encrypting, no ICE, and the netmon seam it would call. */
+static struct list g_streaml = LIST_INIT;
+struct list *call_streaml(const struct call *call)
+{
+	(void)call; return &g_streaml;
+}
+bool stream_is_secure(const struct stream *strm) { (void)strm; return true; }
+bool bsdk_ice_setup_pending(void *call) { (void)call; return false; }
+void bsdk_netmon_call_stalled(struct echosdk_call *lc) { (void)lc; }
+
 /* baresip's info() macro expands to this; its implementation lives in
  * libbaresip's log.c, which the test deliberately does not link. */
 void _info(bool safe, const char *fmt, ...)
