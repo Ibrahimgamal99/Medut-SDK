@@ -215,7 +215,7 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
  * dtls_srtp's own restart ladder is 1200 ms plus four 2500 ms attempts
  * (cmake/patches/dtls_srtp-state.new), so a handshake that is going to
  * complete at all can still be trying 11.2 s in.  This spans it, and matches
- * the deadline ice_shim.c holds its candidate re-offer for. */
+ * the deadline src/ice/ice_mod.c holds its candidate re-offer for. */
 #define BSDK_MEDIA_SETUP_GRACE_MS 12000
 
 /**
@@ -225,7 +225,7 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
  * be: dtls_srtp sets `wait_secure`, so stream_is_ready() is false and baresip
  * has not opened the audio device yet.  Calling that a stall starts a repair
  * (netmon.c) whose ICE restart re-INVITEs the call in the middle of the very
- * handshake it is waiting for — which ice_shim.c measured across 22 calls as
+ * handshake it is waiting for — which the ICE module measured across 22 calls as
  * the single strongest predictor of a permanently silent call, and which on
  * 2026-09-02 turned a 4 s handshake on cellular into five re-INVITEs and a
  * dead call (outbound to *43 over WSS).

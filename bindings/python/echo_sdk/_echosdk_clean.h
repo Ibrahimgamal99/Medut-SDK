@@ -51,6 +51,23 @@ typedef enum {
  ECHOSDK_ICE_HANDOVER_BEST_EFFORT = 0,
  ECHOSDK_ICE_HANDOVER_FAIL_FAST,
 } echosdk_ice_handover_t;
+typedef enum {
+ ECHOSDK_ICE_NEW = 0,
+ ECHOSDK_ICE_GATHERING,
+ ECHOSDK_ICE_CHECKING,
+ ECHOSDK_ICE_CONNECTED,
+ ECHOSDK_ICE_COMPLETED,
+ ECHOSDK_ICE_DISCONNECTED,
+ ECHOSDK_ICE_FAILED,
+ ECHOSDK_ICE_CLOSED,
+} echosdk_ice_state_t;
+typedef enum {
+ ECHOSDK_ICE_CAND_HOST = 0,
+ ECHOSDK_ICE_CAND_SRFLX,
+ ECHOSDK_ICE_CAND_PRFLX,
+ ECHOSDK_ICE_CAND_RELAY,
+ ECHOSDK_ICE_CAND_NONE,
+} echosdk_ice_cand_type_t;
 
 typedef struct {
  int bitrate;
@@ -132,6 +149,7 @@ typedef enum {
  ECHOSDK_EV_NETWORK,
 
  ECHOSDK_EV_TRANSFER_FAILED,
+ ECHOSDK_EV_ICE_STATE,
 } echosdk_event_type_t;
 typedef enum {
  ECHOSDK_NET_CHANGE_DETECTED = 0,
@@ -159,6 +177,18 @@ typedef struct {
  bool ice;
  echosdk_error_t error;
 } echosdk_ev_network_t;
+typedef struct {
+ echosdk_call_handle_t call;
+ echosdk_ice_state_t state;
+ echosdk_ice_state_t prev;
+ uint32_t generation;
+ echosdk_ice_cand_type_t local_type;
+ echosdk_ice_cand_type_t remote_type;
+ const char *local_addr;
+ const char *remote_addr;
+ float rtt_ms;
+ echosdk_error_t error;
+} echosdk_ev_ice_state_t;
 typedef struct {
  echosdk_account_handle_t account;
  echosdk_reg_state_t state;
@@ -211,7 +241,9 @@ typedef struct {
  uint32_t packets_sent;
  uint32_t packets_received;
  uint32_t packets_lost;
+
  uint32_t packets_lost_rx;
+
  uint32_t bytes_sent;
  uint32_t bytes_received;
  uint32_t tx_errors;
@@ -219,7 +251,9 @@ typedef struct {
  float loss_pct;
  float loss_pct_rx;
  float jitter_ms;
+
  float tx_jitter_ms;
+
  float rtt_ms;
  uint32_t jitter_buffer_ms;
  uint32_t jitter_buffer_load;
@@ -332,6 +366,7 @@ typedef struct {
   echosdk_ev_presence_state_t presence;
   echosdk_ev_quality_alert_t quality_alert;
   echosdk_ev_network_t network;
+  echosdk_ev_ice_state_t ice;
  } u;
 } echosdk_event_t;
 typedef void (*echosdk_event_cb_t)(const echosdk_event_t *ev, void *userdata);
@@ -561,6 +596,9 @@ typedef void (*echosdk_call_iter_fn)(echosdk_call_handle_t call, void *arg);
  echosdk_account_handle_t echosdk_call_get_account(
         echosdk_call_handle_t call);
  echosdk_call_state_t echosdk_call_get_state(
+        echosdk_call_handle_t call);
+
+ echosdk_ice_state_t echosdk_call_ice_state(
         echosdk_call_handle_t call);
  int echosdk_message_send(echosdk_account_handle_t account,
                           const char *to_uri,

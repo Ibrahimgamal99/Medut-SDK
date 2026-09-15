@@ -283,6 +283,37 @@ class NetworkEvent:
     error: int
 
 
+@dataclass
+class IceStateEvent:
+    """The ICE liveness of a call's media path changed.
+
+    state / prev are one of:
+      new, gathering, checking, connected, completed, disconnected, failed,
+      closed
+    -- the agent's own verdict from its connectivity checks (RFC 8445) and
+    consent freshness (RFC 7675), mirroring the browser's
+    RTCIceConnectionState.  `connected`: a pair is writable; `completed`: it
+    is also nominated; `disconnected`: the selected pair stopped answering or
+    receiving while checks continue; `failed`: every pair timed out.  The SDK
+    never ends a call on `failed` -- redialling is the app's decision.
+
+    local_addr / remote_addr are the selected pair as "ip:port" ("" until one
+    is selected), generation counts ICE restarts (1 = initial), rtt_ms is the
+    STUN round trip on the selected pair.
+    """
+    type: str = field(init=False, default="ice_state")
+    state: str
+    prev: str
+    call: object
+    generation: int
+    local_type: str
+    remote_type: str
+    local_addr: str
+    remote_addr: str
+    rtt_ms: float
+    error: int
+
+
 class CallStats:
     """
     Live call statistics that update in-place as media_stats events arrive.

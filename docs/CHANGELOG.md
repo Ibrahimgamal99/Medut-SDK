@@ -6,6 +6,45 @@ All notable changes to EchoSDK are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **ICE is now EchoSDK's own agent (`src/ice/`), replacing baresip's `ice`
+  module and the 1.6k-line `ice_shim.c` that compensated for it.**  The old
+  agent could never say whether the media path was alive: after its check
+  list completed it sent only RFC 5245 §10 Binding *Indications* (every 15 s,
+  fire-and-forget) and never re-ran a check, so every liveness signal in the
+  SDK was inferred from RTP counters, and a browser on the same PBX
+  outperformed the phone on every handover.  The new agent is shaped like
+  libwebrtc's: connectivity checks never stop (2.5 s cadence on the selected
+  pair once stable, 48 ms scheduler while weak), every response is an RFC 7675
+  consent refresh, a pair is `unreliable` after 5 unanswered pings over 5 s
+  and `timed out` at 15 s, and the call's state is reported as
+  `ECHOSDK_EV_ICE_STATE` (`new → gathering → checking → connected →
+  completed`, plus `disconnected` / `failed`) and via
+  `echosdk_call_ice_state()`.  Nomination is RFC 8445 §8.1.1 regular (once,
+  the selected pair; renomination only when the peer negotiated it), 4xx
+  responses back a pair off instead of failing it (the 401 storm Asterisk
+  produces while rebuilding its session after a restart, 2026-09-10, is no
+  longer terminal), a Binding Request that arrives before the answer is
+  answered with our own password and remembered as a triggered check
+  (Asterisk checks 4 ms before we have processed its 200 OK, measured
+  2026-09-15), and everything above ICE — DTLS-SRTP, SRTP, RTP, RTCP — sees a
+  single constant virtual peer address (`192.0.2.1:9`), so a pair change or a
+  restart never re-keys the DTLS association.  Every on-device lesson the
+  shim encoded is carried over: gathering deadline releasing as success,
+  checks primed while an inbound call rings, media held until our answer is
+  out, the re-INVITE hold for the DTLS handshake (abandon, never send late),
+  credential change as the only peer-restart signal, ≤ 2 answered peer
+  restarts.  Plain-RTP accounts are untouched.  The `ice-ifsel` and
+  `ice/candpair.c` source patches are retired with the module they patched.
+  Tests: `test/unit/test_ice_sdp.c` (132 checks, real Asterisk/browser/lite
+  bodies), `test_ice_pair.c` (67), `test_ice_agent.c` (246, two agents over a
+  simulated network with NAT/loss/kill and compressed timers) and
+  `test_ice_mod.c` (122, the module driven as baresip drives it over real
+  loopback sockets).  Baseline against the production PBX before the change:
+  audio-ready 1.02 s after a 300 ms setup, 3 SDP exchanges per call, one
+  re-INVITE mid-DTLS.
+
 ### Fixed
 
 - **A second `echosdk_init()` in one process came up with no codecs, no

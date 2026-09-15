@@ -42,7 +42,7 @@
  * the address and the candidate list of the network the call just left.  Those
  * calls are migrated with an RFC 8445 §9 ICE restart instead —
  * bsdk_ice_restart(), whose re-INVITE carries new credentials, freshly gathered
- * candidates and the new address at both levels.  See ice_shim.c.
+ * candidates and the new address at both levels.  See src/ice/ice_mod.c.
  *
  * A restart is only attempted when the local address actually moved.  A
  * WebSocket call whose path is unchanged is re-INVITEd for a different reason
@@ -669,7 +669,7 @@ static uint32_t restart_grace_ms(void)
 {
 	return g_bsdk.cfg.ice_gathering_timeout_ms
 	     ? g_bsdk.cfg.ice_gathering_timeout_ms
-	     : 3000;   /* ice_shim.c's own restart deadline */
+	     : BSDK_ICE_RESTART_DEADLINE_MS;
 }
 
 static void fail_migration(struct echosdk_call *lc, int err)
@@ -750,7 +750,7 @@ static void send_migration(struct echosdk_call *lc)
 
 	/* Hold the offer while the media encryption is still handshaking.
 	 *
-	 * ice_shim.c holds its candidate re-offer for exactly this reason, and
+	 * the ICE module holds its candidate re-offer for exactly this reason, and
 	 * measured across 22 calls that a re-INVITE landing mid-DTLS is the
 	 * single strongest predictor of a permanently silent call: the handshake
 	 * is still retransmitting when the address changes under it, the retries
@@ -774,7 +774,7 @@ static void send_migration(struct echosdk_call *lc)
 	 * BSDK_ICE_REOFFER_SECURE_DEADLINE_MS and BSDK_MEDIA_SETUP_GRACE_MS, for
 	 * the same reason.
 	 *
-	 * Unlike ice_shim, the deadline sends rather than drops.  A candidate
+	 * Unlike the ICE module's re-offer hold, the deadline sends rather than drops.  A candidate
 	 * re-offer is an optimisation and can be abandoned; a migration offer is
 	 * the recovery — it carries the address (and, for ICE, the freshly
 	 * gathered candidates) that a handshake failing because the path moved
@@ -828,7 +828,7 @@ static void send_migration(struct echosdk_call *lc)
 	 * §5.7), and nothing re-gathers, so the offer would re-advertise the
 	 * network the call just left.  Restart ICE instead — new credentials, a
 	 * fresh gather on the interface that now has the route, and the re-INVITE
-	 * follows from the gather.  See ice_shim.c.
+	 * follows from the gather.  See src/ice/ice_mod.c.
 	 *
 	 * Only when the address actually moved: a WebSocket call whose path is
 	 * unchanged is re-INVITEd purely to re-bind the dialog to the new

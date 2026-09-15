@@ -186,6 +186,46 @@ enum QualityIssue {
       values.firstWhere((v) => v.raw == raw, orElse: () => mos);
 }
 
+/// ICE liveness of a call's media path — the agent's own verdict from its
+/// connectivity checks (RFC 8445) and consent freshness (RFC 7675), mirroring
+/// the browser's `RTCIceConnectionState`.  Delivered as [IceStateEvent] and
+/// readable via `Call.iceState`.
+enum IceState {
+  newState(c.echosdk_ice_state_t.ECHOSDK_ICE_NEW),
+  gathering(c.echosdk_ice_state_t.ECHOSDK_ICE_GATHERING),
+  checking(c.echosdk_ice_state_t.ECHOSDK_ICE_CHECKING),
+  /// A candidate pair is writable.
+  connected(c.echosdk_ice_state_t.ECHOSDK_ICE_CONNECTED),
+  /// The writable pair is also nominated — media path settled.
+  completed(c.echosdk_ice_state_t.ECHOSDK_ICE_COMPLETED),
+  /// The selected pair stopped answering or receiving; checks continue and
+  /// the path may recover on its own.
+  disconnected(c.echosdk_ice_state_t.ECHOSDK_ICE_DISCONNECTED),
+  /// Every pair timed out and nothing is left to gather.  The SDK does not
+  /// end the call — redialling is the app's decision.
+  failed(c.echosdk_ice_state_t.ECHOSDK_ICE_FAILED),
+  closed(c.echosdk_ice_state_t.ECHOSDK_ICE_CLOSED);
+
+  final int raw;
+  const IceState(this.raw);
+  static IceState fromRaw(int raw) =>
+      values.firstWhere((v) => v.raw == raw, orElse: () => newState);
+}
+
+/// Candidate type of one side of the selected ICE pair.
+enum IceCandType {
+  host(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_HOST),
+  srflx(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_SRFLX),
+  prflx(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_PRFLX),
+  relay(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_RELAY),
+  none(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_NONE);
+
+  final int raw;
+  const IceCandType(this.raw);
+  static IceCandType fromRaw(int raw) =>
+      values.firstWhere((v) => v.raw == raw, orElse: () => none);
+}
+
 /// Media direction for SIP trace / media tap.
 enum MediaDirection {
   rx(c.echosdk_media_dir_t.ECHOSDK_MEDIA_DIR_RX),

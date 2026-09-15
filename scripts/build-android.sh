@@ -113,6 +113,11 @@ for ABI in ${ABIS}; do
   if ! grep -q '__real_sip_dialog_route' <<<"${DEFINED}"; then
     echo "ERROR: sip_dialog_route rename missing (patch-re-sources.cmake not applied?)" >&2; exit 1
   fi
+  # EchoSDK's own ICE agent (src/ice/) must be in the archive: without it no
+  # account can enable ICE and every WebRTC endpoint fails to register.
+  if ! grep -q 'bsdk_ice_module_init' <<<"${DEFINED}"; then
+    echo "ERROR: echo-ice missing (src/ice/*.c not compiled into echosdk_core?)" >&2; exit 1
+  fi
   UNDEF=$("${LLVM_BIN}/llvm-nm" -D --undefined-only "${SO}" \
           | grep -E ' (mbedtls_|opus_|SSL_|EVP_|X509_|__real_websock_connect|__real_sip_dialog_route|AAudio)' || true)
   if [ -n "${UNDEF}" ]; then

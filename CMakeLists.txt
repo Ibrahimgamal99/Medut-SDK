@@ -75,6 +75,12 @@ if(ECHOSDK_SRC_MODE)
   # a new .c file links as if it were never written, which is a silent and very
   # confusing failure for anyone adding one.
   file(GLOB CORE_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+  # echo-ice: EchoSDK's own ICE agent lives one directory down and the glob
+  # above is deliberately flat, so it needs naming.  It compiles into the
+  # core archive (it reads g_bsdk and calls netmon) and registers its
+  # media-NAT from bsdk_ice_module_init(), not through baresip's mod_table.
+  file(GLOB ICE_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/ice/*.c")
+  list(APPEND CORE_SRCS ${ICE_SRCS})
   # glibc_symver.c pins glibc symbol versions for portable desktop-Linux
   # binaries — it references strtoll@GLIBC_2.2.5 etc. and must not be
   # compiled anywhere else (Android uses bionic, Windows/macOS no glibc).

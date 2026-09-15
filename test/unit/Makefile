@@ -9,8 +9,9 @@ TESTS := test_mos test_url_parser test_mwi_parser test_codec_str test_transport_
 # (SYSROOT=... to point elsewhere); the other tests stay standalone.
 SYSROOT ?= ../../build/linux-x86_64/sysroot
 ifneq ($(wildcard $(SYSROOT)/include/re/re.h),)
-TESTS += test_ws_pin test_audio_external test_fmtp_bitrate test_ice_deadline \
-         test_dispatch_starve test_ice_candpair
+TESTS += test_ws_pin test_audio_external test_fmtp_bitrate \
+         test_dispatch_starve test_ice_sdp test_ice_pair test_ice_agent \
+         test_ice_mod
 endif
 
 .PHONY: all clean test
@@ -53,15 +54,6 @@ test_audio_external: test_audio_external.c ../../src/audio_external.c
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 
-# Links libre but not libbaresip: baresip_mnatl() needs a full baresip_init(),
-# and the test only wants a media-NAT registry entry to interpose on, so it
-# supplies its own along with the three other baresip symbols ice_shim.c uses.
-test_ice_deadline: test_ice_deadline.c ../../src/ice_shim.c
-	$(CC) $(CFLAGS) -Wno-unused-parameter \
-	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
-	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
-	  $(LDFLAGS)
-
 # Links libre but not libbaresip, for the reason given on test_audio_external:
 # the test stubs the handful of baresip symbols src/adapt.c references.
 test_fmtp_bitrate: test_fmtp_bitrate.c ../../src/adapt.c
@@ -81,12 +73,38 @@ test_dispatch_starve: test_dispatch_starve.c ../../src/dispatch.c ../../src/re_l
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 
-# Exercises the two ice/candpair.c hunks in cmake/patch-re-sources.cmake via
-# libre's internal ice.h.  Fails against a libre built from an unpatched tree
-# — rebuild the sysroot after a libre bump before trusting a red run here.
-test_ice_candpair: test_ice_candpair.c
+# echo-ice engine files link against libre alone: they include no baresip
+# header by design (see src/ice/ice_internal.h), so the agent's candidate,
+# pairing and check logic is testable without a baresip_init().
+ICE_ENGINE_SRCS := ../../src/ice/ice_gen.c ../../src/ice/ice_port.c \
+                   ../../src/ice/ice_cand.c ../../src/ice/ice_sdp.c \
+                   ../../src/ice/ice_pair.c ../../src/ice/ice_check.c \
+                   ../../src/ice/ice_stund.c ../../src/ice/ice_select.c \
+                   ../../src/ice/ice_route.c ../../src/ice/ice_gather.c
+
+test_ice_sdp: test_ice_sdp.c $(ICE_ENGINE_SRCS)
 	$(CC) $(CFLAGS) -Wno-unused-parameter \
 	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+test_ice_pair: test_ice_pair.c $(ICE_ENGINE_SRCS)
+	$(CC) $(CFLAGS) -Wno-unused-parameter \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+test_ice_agent: test_ice_agent.c $(ICE_ENGINE_SRCS)
+	$(CC) $(CFLAGS) -Wno-unused-parameter \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+# The module itself, with baresip's call/stream/log/config symbols stubbed
+# — the same discipline as test_ice_deadline (no libbaresip link).
+test_ice_mod: test_ice_mod.c $(ICE_ENGINE_SRCS) ../../src/ice/ice_mod.c
+	$(CC) $(CFLAGS) -Wno-unused-parameter -D_GNU_SOURCE \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include -I../../src \
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 

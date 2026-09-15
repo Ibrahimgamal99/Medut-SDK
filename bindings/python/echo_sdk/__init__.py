@@ -32,6 +32,7 @@ from typing import Callable, Optional
 
 from ._loader import ffi, lib
 from .events import (
+    IceStateEvent,
     RegStateEvent, IncomingCallEvent, CallStateEvent, CallDtmfEvent,
     SdpNegotiationEvent, SipTraceEvent, MediaStatsEvent, LogEvent,
     RegistrarWarningEvent, TransferRequestEvent, TransferFailedEvent, MwiEvent,
@@ -360,6 +361,22 @@ def _global_event_cb(ev_ptr, _userdata):
                 elapsed_ms   = n.elapsed_ms,
                 ice          = bool(n.ice),
                 error        = n.error,
+            )
+
+        elif typ == 16: # ICE_STATE
+            i = ev.u.ice
+            call_handle = i.call
+            obj = IceStateEvent(
+                state       = _ICE_STATE[i.state] if 0 <= i.state < len(_ICE_STATE) else "new",
+                prev        = _ICE_STATE[i.prev] if 0 <= i.prev < len(_ICE_STATE) else "new",
+                call        = None,
+                generation  = i.generation,
+                local_type  = _ICE_CAND[i.local_type] if 0 <= i.local_type < len(_ICE_CAND) else "none",
+                remote_type = _ICE_CAND[i.remote_type] if 0 <= i.remote_type < len(_ICE_CAND) else "none",
+                local_addr  = _s(i.local_addr) or "",
+                remote_addr = _s(i.remote_addr) or "",
+                rtt_ms      = float(i.rtt_ms),
+                error       = i.error,
             )
 
         elif typ == 15: # TRANSFER_FAILED

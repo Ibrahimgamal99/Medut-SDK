@@ -678,6 +678,13 @@ echosdk_call_state_t echosdk_call_get_state(echosdk_call_handle_t call)
 	return call->state;
 }
 
+echosdk_ice_state_t echosdk_call_ice_state(echosdk_call_handle_t call)
+{
+	if (!call) return ECHOSDK_ICE_NEW;
+	/* Written on re_main by the ICE module on every transition. */
+	return (echosdk_ice_state_t)atomic_load(&call->ice_state);
+}
+
 /* ── Per-dialog custom headers ─────────────────────────────────────────── */
 
 typedef struct {

@@ -78,3 +78,11 @@ desktop.ini
 # Claude Code / Kilo
 .claude/
 .kilo/
+
+# Unit-test binaries built by test/unit/Makefile.  (Some older ones are
+# tracked by mistake and left alone; new ones stay out.)
+/test/unit/test_ice_agent
+/test/unit/test_ice_mod
+/test/unit/test_ice_pair
+/test/unit/test_ice_sdp
+/test/unit/test_dispatch_starve

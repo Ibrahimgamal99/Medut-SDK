@@ -825,6 +825,22 @@ class EchoSDKBindings {
   late final _echosdk_call_get_state = _echosdk_call_get_statePtr
       .asFunction<int Function(echosdk_call_handle_t)>();
 
+  /// The call's current ICE liveness state (see echosdk_ice_state_t).  Safe from
+  /// any thread; ECHOSDK_ICE_NEW for a call without ICE or before gathering.
+  int echosdk_call_ice_state(
+    echosdk_call_handle_t call,
+  ) {
+    return _echosdk_call_ice_state(
+      call,
+    );
+  }
+
+  late final _echosdk_call_ice_statePtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(echosdk_call_handle_t)>>(
+          'echosdk_call_ice_state');
+  late final _echosdk_call_ice_state = _echosdk_call_ice_statePtr
+      .asFunction<int Function(echosdk_call_handle_t)>();
+
   /// Send a SIP MESSAGE (instant message) out of dialog.
   /// content_type defaults to "text/plain" if NULL.
   /// Fires ECHOSDK_EV_MESSAGE on the remote end when received.
@@ -1773,6 +1789,38 @@ abstract class echosdk_ice_handover_t {
   static const int ECHOSDK_ICE_HANDOVER_FAIL_FAST = 1;
 }
 
+/// ICE liveness of a call's media path — the agent's own verdict, from its
+/// connectivity checks (RFC 8445) and consent freshness (RFC 7675), not an
+/// inference from RTP counters.  Mirrors the browser's RTCIceConnectionState.
+///
+/// NEW → GATHERING → CHECKING → CONNECTED → COMPLETED
+///
+/// CONNECTED: a pair is writable; COMPLETED: that pair is also nominated.
+/// DISCONNECTED: the selected pair stopped answering or receiving while
+/// checks continue (the path is in trouble but may recover on its own).
+/// FAILED: every pair timed out and nothing is left to gather; the SDK does
+/// not end the call — redialling is the app's decision.
+/// Delivered as ECHOSDK_EV_ICE_STATE and readable via echosdk_call_ice_state().
+abstract class echosdk_ice_state_t {
+  static const int ECHOSDK_ICE_NEW = 0;
+  static const int ECHOSDK_ICE_GATHERING = 1;
+  static const int ECHOSDK_ICE_CHECKING = 2;
+  static const int ECHOSDK_ICE_CONNECTED = 3;
+  static const int ECHOSDK_ICE_COMPLETED = 4;
+  static const int ECHOSDK_ICE_DISCONNECTED = 5;
+  static const int ECHOSDK_ICE_FAILED = 6;
+  static const int ECHOSDK_ICE_CLOSED = 7;
+}
+
+/// Candidate type of one side of the selected pair (RFC 8445 §5.1.1).
+abstract class echosdk_ice_cand_type_t {
+  static const int ECHOSDK_ICE_CAND_HOST = 0;
+  static const int ECHOSDK_ICE_CAND_SRFLX = 1;
+  static const int ECHOSDK_ICE_CAND_PRFLX = 2;
+  static const int ECHOSDK_ICE_CAND_RELAY = 3;
+  static const int ECHOSDK_ICE_CAND_NONE = 4;
+}
+
 final class echosdk_opus_config_t extends ffi.Struct {
   /// 0 = auto/VBR; otherwise bps, e.g. 32000
   @ffi.Int()
@@ -1935,6 +1983,10 @@ abstract class echosdk_event_type_t {
   /// that succeeds needs no event of its own: the far end takes the call over
   /// and our leg closes, which arrives as ECHOSDK_EV_CALL_STATE / ENDED.
   static const int ECHOSDK_EV_TRANSFER_FAILED = 15;
+
+  /// The ICE liveness state of a call's media path changed — see
+  /// echosdk_ice_state_t.  Payload: echosdk_ev_ice_state_t.
+  static const int ECHOSDK_EV_ICE_STATE = 16;
 }
 
 /// Stages of a network handover (Wi-Fi ↔ 4G/5G, VPN up/down, dock/undock).
@@ -1987,18 +2039,19 @@ abstract class echosdk_net_event_t {
   /// echosdk_ice_handover_t and cfg.net_ice_handover.
   static const int ECHOSDK_NET_CALL_ICE_STALE = 11;
 
-  /// ICE finished its connectivity checks with no usable candidate pair, so
-  /// nothing was nominated and the media path was never validated.
+  /// ICE finished its connectivity checks with no usable candidate pair,
+  /// so nothing was nominated and the media path was never validated.
   ///
   /// Distinct from CALL_ICE_STALE, which is "the candidates could not be
-  /// re-gathered": here they were gathered and offered, the peer answered, and
-  /// every pair in the check list failed — a peer that rejected the checks
-  /// (STUN 401 after it rebuilt its own ICE session across our restart offer)
-  /// or a path that stopped carrying UDP.
+  /// re-gathered": here they were gathered and offered, the peer answered,
+  /// and every pair in the check list failed — a peer that rejected the
+  /// checks (STUN 401 after it rebuilt its own ICE session across our
+  /// restart offer) or a path that stopped carrying UDP.
   ///
-  /// The SDK does not end the call: where a pair had been validated earlier the
-  /// stream is held on it and audio usually survives, and the decision to
-  /// redial belongs to the app.
+  /// The SDK does not end the call: where a pair had been validated
+  /// earlier the stream is held on it and audio usually survives, and the
+  /// decision to redial belongs to the app.  Emitted once per failed ICE
+  /// generation, so a call that restarts twice can emit it twice.
   static const int ECHOSDK_NET_CALL_ICE_FAILED = 12;
 }
 
@@ -2058,6 +2111,43 @@ typedef echosdk_call_handle_t = ffi.Pointer<echosdk_call>;
 
 /// ── Opaque handles ─────────────────────────────────────────────────────────
 typedef echosdk_account_handle_t = ffi.Pointer<echosdk_account>;
+
+/// ICE liveness change (ECHOSDK_EV_ICE_STATE).
+///
+/// `local_addr` / `remote_addr` are the selected candidate pair as
+/// "ip:port" ("" until a pair is selected), `generation` counts ICE
+/// restarts (1 = the initial session), `rtt_ms` is the STUN round trip on
+/// the selected pair.  The strings are valid for the callback's duration
+/// (or for the event's life with cfg.deliver_owned_events).
+final class echosdk_ev_ice_state_t extends ffi.Struct {
+  external echosdk_call_handle_t call;
+
+  @ffi.Int32()
+  external int state;
+
+  @ffi.Int32()
+  external int prev;
+
+  @ffi.Uint32()
+  external int generation;
+
+  @ffi.Int32()
+  external int local_type;
+
+  @ffi.Int32()
+  external int remote_type;
+
+  external ffi.Pointer<ffi.Char> local_addr;
+
+  external ffi.Pointer<ffi.Char> remote_addr;
+
+  @ffi.Float()
+  external double rtt_ms;
+
+  /// ECHOSDK_OK unless FAILED
+  @ffi.Int32()
+  external int error;
+}
 
 /// ── Event payload structs ────────────────────────────────────────────────── */
 /// /**
@@ -2532,6 +2622,8 @@ final class UnnamedUnion1 extends ffi.Union {
   external echosdk_ev_quality_alert_t quality_alert;
 
   external echosdk_ev_network_t network;
+
+  external echosdk_ev_ice_state_t ice;
 }
 
 final class echosdk_config_t extends ffi.Struct {

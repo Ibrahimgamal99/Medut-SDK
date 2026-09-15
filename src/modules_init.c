@@ -37,7 +37,8 @@ static const char *COMMON_MODULES[] = {
 	"dtls_srtp",
 	"stun",
 	"turn",
-	"ice",
+	/* "ice": replaced by EchoSDK's own agent (src/ice/), registered from
+	 * bsdk_ice_module_init() rather than loaded as a baresip module. */
 	"mwi",
 	"presence",
 	"uuid",

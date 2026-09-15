@@ -431,6 +431,39 @@ class NetworkEvent extends EchoSDKEvent {
   });
 }
 
+/// The ICE liveness of a call's media path changed.  See [IceState].
+class IceStateEvent extends EchoSDKEvent {
+  final Call? call;
+  final IceState state;
+  final IceState prev;
+
+  /// ICE restarts so far; 1 is the initial session.
+  final int generation;
+  final IceCandType localType;
+  final IceCandType remoteType;
+
+  /// The selected candidate pair as `ip:port`; empty until one is selected.
+  final String localAddr;
+  final String remoteAddr;
+
+  /// STUN round trip on the selected pair, ms.
+  final double rttMs;
+  final EchoSDKError error;
+
+  IceStateEvent({
+    required this.call,
+    required this.state,
+    required this.prev,
+    required this.generation,
+    required this.localType,
+    required this.remoteType,
+    required this.localAddr,
+    required this.remoteAddr,
+    required this.rttMs,
+    required this.error,
+  });
+}
+
 class SipTraceEvent extends EchoSDKEvent {
   final MediaDirection direction;
   final String transport;
@@ -491,6 +524,11 @@ class Call {
 
   /// True while the call is on local hold.
   bool get isHeld => internal.nativeBindings.echosdk_call_is_held(_handle);
+
+  /// Current ICE liveness of this call's media path (see [IceState]);
+  /// [IceState.newState] for a call without ICE.
+  IceState get iceState => IceState.fromRaw(
+      internal.nativeBindings.echosdk_call_ice_state(_handle));
 
   void mute({bool on = true}) =>
       internal.nativeBindings.echosdk_audio_mute(_handle, on);
@@ -895,6 +933,14 @@ class EchoSDK {
   /// stack instead of failing, and [reattached] is true on the result. See
   /// [reattached] for what that does and does not carry over; pass
   /// [reattachIfRunning] = false to get the old hard failure instead.
+  /// How long after a fresh [start] the platform monitor's report of the
+  /// current network is treated as the initial report rather than a change.
+  /// Both platforms deliver it well inside a second; the window only has to
+  /// outlast that, and anything it could swallow is a genuine switch in the
+  /// first moments of a process — which the native monitor's own polling and
+  /// the next REGISTER refresh recover from anyway.
+  static const Duration _initialNetworkReportWindow = Duration(seconds: 2);
+
   static Future<EchoSDK> start({
     EchoSDKConfig config = const EchoSDKConfig(),
     bool manageAudioSession = true,
@@ -912,7 +958,31 @@ class EchoSDK {
     }
     final sdk = EchoSDK._(config, manageAudioSession, libPath,
         reattachIfRunning: reattachIfRunning);
-    EchoSDKPlatform.onNetworkChanged = sdk.networkChanged;
+    // Both platform monitors report the CURRENT network to a freshly registered
+    // callback — Android's registerDefaultNetworkCallback() delivers the default
+    // network immediately, NWPathMonitor fires once after start() — and both
+    // plugins forward that first report as a change. On a FRESH stack it is not
+    // one: the transports were built on this very network moments ago, and the
+    // "handover" it triggers is a transport reset ~1.5s after the first REGISTER
+    // plus a re-REGISTER, exactly when an incoming call's INVITE is arriving
+    // (on-device 2026-09-14, every cold boot: `changeDetected` 3ms after
+    // REGISTERED, `transportReset` at 1.5s, INVITE 1s after that, no media).
+    //
+    // On a REATTACHED stack the same report is worth keeping: the native side
+    // may be holding a cached WSS connection that died while no isolate was
+    // listening, and this refresh is what flushes it. Gated here rather than in
+    // the plugins because this is the only layer that knows which case it is.
+    // A window, not "drop the first callback": Android delivers no initial
+    // report when there is no network at start, and a later real change must
+    // not be the one that gets swallowed.
+    final startedAt = DateTime.now();
+    EchoSDKPlatform.onNetworkChanged = () {
+      if (!sdk.reattached &&
+          DateTime.now().difference(startedAt) < _initialNetworkReportWindow) {
+        return;
+      }
+      sdk.networkChanged();
+    };
     // Applied after init, not through echosdk_config_t: the device switch is a
     // runtime call, and there is no config field for it.
     if (config.appOwnedAudio) await sdk.useAppOwnedAudio(true);
@@ -1596,6 +1666,22 @@ class EchoSDK {
           error: EchoSDKError.fromRaw(n.error),
         );
         if (n.account != nullptr) target = _accounts[n.account.address];
+        break;
+
+      case echosdk_event_type_t.ECHOSDK_EV_ICE_STATE:
+        final i = ev.ref.u.ice;
+        decoded = IceStateEvent(
+          call: i.call == nullptr ? null : _trackCall(i.call, null),
+          state: IceState.fromRaw(i.state),
+          prev: IceState.fromRaw(i.prev),
+          generation: i.generation,
+          localType: IceCandType.fromRaw(i.local_type),
+          remoteType: IceCandType.fromRaw(i.remote_type),
+          localAddr: _str(i.local_addr) ?? '',
+          remoteAddr: _str(i.remote_addr) ?? '',
+          rttMs: i.rtt_ms,
+          error: EchoSDKError.fromRaw(i.error),
+        );
         break;
 
       default:

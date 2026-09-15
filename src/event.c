@@ -146,6 +146,10 @@ qev_clone(struct echosdk_queued_event *old)
 	case ECHOSDK_EV_NETWORK:
 		ev->u.network.local_addr = rb(ev->u.network.local_addr, old, n);
 		break;
+	case ECHOSDK_EV_ICE_STATE:
+		ev->u.ice.local_addr  = rb(ev->u.ice.local_addr, old, n);
+		ev->u.ice.remote_addr = rb(ev->u.ice.remote_addr, old, n);
+		break;
 	}
 
 	return n;

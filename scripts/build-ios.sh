@@ -226,6 +226,10 @@ for SLICE in device simulator; do
     echo "ERROR: ${SLICE}: sip_dialog_route rename missing (patch-re-sources.cmake not applied?)" >&2
     exit 1
   fi
+  if ! grep -q '_bsdk_ice_module_init' <<<"${DEFINED}"; then
+    echo "ERROR: ${SLICE}: echo-ice missing (src/ice/*.c not compiled into echosdk_core?)" >&2
+    exit 1
+  fi
   if ! grep -q ' _SSL_CTX_new' <<<"${DEFINED}"; then
     echo "ERROR: ${SLICE}: OpenSSL missing from the binary — this build has no TLS/WSS/DTLS-SRTP" >&2
     exit 1

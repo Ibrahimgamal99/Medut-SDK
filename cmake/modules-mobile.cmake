@@ -17,7 +17,6 @@ set(ECHOSDK_MOBILE_MODULES_BASE
   "dtls_srtp"
   "stun"
   "turn"
-  "ice"
   "uuid"
   "mwi"
   "presence"

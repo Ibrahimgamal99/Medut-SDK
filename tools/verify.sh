@@ -48,6 +48,8 @@ MISSING_SYMS=0
 
 # EchoSDK public API
 check_sym "echosdk_init"
+check_sym "echosdk_call_ice_state"
+check_sym "bsdk_ice_module_init"
 check_sym "echosdk_shutdown"
 check_sym "echosdk_config_init"
 check_sym "echosdk_account_create"

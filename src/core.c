@@ -436,11 +436,10 @@ int echosdk_init(const echosdk_config_t *cfg)
 		goto fail;
 	BSDK_TRACE("[bsdk] step 9 done\n");
 
-	/* After modules_init: the ice module has to have registered its media-NAT
-	 * before we can interpose the gathering deadline on it.  ENOENT just means
-	 * this build has no ice module, and then no INVITE is ever deferred. */
-	if (bsdk_ice_shim_init() == 0)
-		BSDK_TRACE("[bsdk] step 9b: ice gathering deadline installed\n");
+	/* After modules_init (baresip's media-NAT list exists) and before any
+	 * account can ask for medianat "ice": register EchoSDK's own ICE agent. */
+	if (bsdk_ice_module_init() == 0)
+		BSDK_TRACE("[bsdk] step 9b: echo-ice media-NAT registered\n");
 
 	/* Platform audio session setup (iOS AVAudioSession; no-op elsewhere).
 	 * Non-fatal: a session category the OS refuses right now (e.g. during
@@ -542,7 +541,7 @@ fail:
 	bsdk_event_close();
 	ua_close();
 	bsdk_call_global_reset();
-	bsdk_ice_shim_close();
+	bsdk_ice_module_close();
 	mod_close();   /* see echosdk_shutdown(): a retry of init must reload */
 	bsdk_dns_close();
 #ifdef _WIN32
@@ -689,8 +688,8 @@ void echosdk_shutdown(void)
 	 * OpenSLES engine can be destroyed. */
 	bsdk_sles_vc_close();
 #endif
-	/* Put the ice module's vtable back before baresip_close() unloads it. */
-	bsdk_ice_shim_close();
+	/* Unregister our media-NAT before baresip_close() frees the list. */
+	bsdk_ice_module_close();
 
 	/* Unload the static modules.  libre_close() does not: it is
 	 * fd_setsize(0) + net_sock_close() + re_thread_close(), and the module

@@ -12,6 +12,7 @@
 #else
 #include <strings.h>
 #endif
+#include <stdatomic.h>
 #include <re.h>
 #include <baresip.h>
 #include "../include/echosdk.h"
@@ -216,6 +217,9 @@ struct echosdk_call {
 	struct call               *bc;          /* baresip call (weak ref) */
 	struct echosdk_account    *acct;
 	echosdk_call_state_t       state;
+	atomic_int                 ice_state;   /* echosdk_ice_state_t; written on
+	                                           re_main by ice_mod.c, read by
+	                                           echosdk_call_ice_state() */
 	/* SDP capture for ECHOSDK_EV_SDP_NEGOTIATION */
 	char                       local_sdp[4096];
 	char                       remote_sdp[4096];
@@ -630,7 +634,7 @@ void bsdk_netmon_call_sdp_answer(struct echosdk_call *lc);
  * (or re-offer), and verify that media came back.  Bounded and rate-limited —
  * see the comment on the implementation. */
 void bsdk_netmon_call_stalled(struct echosdk_call *lc);
-/* Called from ice_shim.c when an ICE generation's connectivity checks end with
+/* Called from src/ice/ice_mod.c when an ICE generation's connectivity checks end with
  * no valid pair.  Reports ECHOSDK_NET_CALL_ICE_FAILED; the call is left up,
  * because the stream is usually still held on a pair that was validated
  * earlier and ending it is the app's decision. */
@@ -647,20 +651,18 @@ typedef void (bsdk_dns_done_h)(const struct bsdk_dns_result *res, void *arg);
 int  bsdk_dns_init(void);
 void bsdk_dns_close(void);
 
-/* ── ICE gathering deadline (ice_shim.c) ─────────────────────────────────── */
+/* ── echo-ice (src/ice/) ────────────────────────────────────────────────── */
 
-/* Interposes cfg.ice_gathering_timeout_ms on the "ice" media-NAT so a stalled
- * gather can never hold an outgoing INVITE forever.  _init() must run after
- * modules_init(), which registers the struct it mutates; ENOENT means the ice
- * module is not in this build and nothing was changed. */
-int  bsdk_ice_shim_init(void);
-void bsdk_ice_shim_close(void);
+/* Gather bound for a restart when cfg.ice_gathering_timeout_ms is 0: the
+ * initial INVITE may wait for baresip's own conclusion, a restart runs under
+ * a live, already-silent call and must not.  Shared with netmon's grace. */
+#define BSDK_ICE_RESTART_DEADLINE_MS 3000
 
 /* Restart ICE for one call (RFC 8445 §9) and re-offer on `laddr`: new
  * ice-ufrag/ice-pwd, a fresh gather on the interface that now carries the
  * default route, and a re-INVITE driven from the estab handler once it reports
  * or the gathering deadline expires.  This is how a handover moves an ICE call
- * — see the ICE-restart section in ice_shim.c for why call_reset_transp() alone
+ * — see src/ice/ice_mod.c for why call_reset_transp() alone
  * cannot.  `call` is a `struct call *`.
  *
  * Returns 0 when a restart is under way, ENOENT when the call has no ICE
@@ -671,6 +673,22 @@ int  bsdk_ice_restart(void *call, const struct sa *laddr);
 /* True when `call` (a `struct call *`) has a live ICE media-NAT with at least
  * one stream — the negotiated truth, as opposed to cfg.ice_enabled. */
 bool bsdk_ice_call_active(void *call);
+
+/* Register / unregister the "ice" media-NAT.  _init() runs after
+ * modules_init() (baresip's lists exist) and before any account; _close()
+ * before baresip_close().  Both idempotent. */
+int  bsdk_ice_module_init(void);
+void bsdk_ice_module_close(void);
+
+/* The call's ICE liveness state as an enum icea_state value (mirrors
+ * RTCIceConnectionState; the public echosdk_ice_state_t has the same values). */
+int  bsdk_ice_call_state(void *call);
+
+/* The selected pair of the first stream, when there is one.  `ltype`/`rtype`
+ * are enum ice_cand_type.  Returns false before a pair is selected. */
+bool bsdk_ice_call_selected(void *call, struct sa *local, struct sa *remote,
+			    int *ltype, int *rtype, uint32_t *rtt_ms,
+			    uint32_t *generation);
 
 /* Async RFC 3263 resolution. done_h fires on re_main thread.
  * port_hint > 0 skips NAPTR/SRV (explicit port in URI). */

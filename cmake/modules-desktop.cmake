@@ -24,7 +24,6 @@ set(ECHOSDK_DESKTOP_MODULES
   # NAT traversal
   "stun"
   "turn"
-  "ice"
   # SIP features — account/contact/menu intentionally excluded:
   # the SDK creates accounts/contacts programmatically; those modules
   # would load from ~/.baresip/{accounts,contacts} which is not wanted.

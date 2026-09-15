@@ -488,3 +488,23 @@ mid-handover — the link is up and the dialog is healthy, and no audio is
 arriving. `value` is the stall duration in ms. It is deliberately non-fatal;
 `cfg.rtp_timeout_s` is the setting that ends such a call instead. See
 [Degraded links](../guides/degraded_links.md).
+
+## `ECHOSDK_EV_ICE_STATE`
+
+Emitted whenever the ICE liveness of a call's media path changes — the
+agent's own verdict from its connectivity checks and RFC 7675 consent, not an
+inference from RTP.  Payload `echosdk_ev_ice_state_t`:
+
+| Field | Meaning |
+|---|---|
+| `call` | the call |
+| `state`, `prev` | `echosdk_ice_state_t`: `NEW → GATHERING → CHECKING → CONNECTED → COMPLETED`; `DISCONNECTED` while the selected pair stops answering or receiving but checks continue; `FAILED` once every pair has timed out and nothing is left to gather |
+| `generation` | ICE restarts so far (1 = the initial session) |
+| `local_type`, `remote_type` | candidate types of the selected pair (`host`, `srflx`, `prflx`, `relay`) |
+| `local_addr`, `remote_addr` | the selected pair as `ip:port`, `""` until one is selected |
+| `rtt_ms` | STUN round trip on the selected pair |
+| `error` | `ECHOSDK_ERR_TIMEOUT` on `FAILED`, else `ECHOSDK_OK` |
+
+`FAILED` never ends the call: where a pair was validated earlier the stream is
+still held on it and audio usually survives; redialling is the app's decision.
+`echosdk_call_ice_state()` returns the current value from any thread.
