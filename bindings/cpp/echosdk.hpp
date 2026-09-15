@@ -182,6 +182,40 @@ typedef enum {
 	ECHOSDK_ICE_HANDOVER_FAIL_FAST,
 } echosdk_ice_handover_t;
 
+/**
+ * ICE liveness of a call's media path — the agent's own verdict, from its
+ * connectivity checks (RFC 8445) and consent freshness (RFC 7675), not an
+ * inference from RTP counters.  Mirrors the browser's RTCIceConnectionState.
+ *
+ *   NEW → GATHERING → CHECKING → CONNECTED → COMPLETED
+ *
+ * CONNECTED: a pair is writable; COMPLETED: that pair is also nominated.
+ * DISCONNECTED: the selected pair stopped answering or receiving while
+ * checks continue (the path is in trouble but may recover on its own).
+ * FAILED: every pair timed out and nothing is left to gather; the SDK does
+ * not end the call — redialling is the app's decision.
+ * Delivered as ECHOSDK_EV_ICE_STATE and readable via echosdk_call_ice_state().
+ */
+typedef enum {
+	ECHOSDK_ICE_NEW = 0,
+	ECHOSDK_ICE_GATHERING,
+	ECHOSDK_ICE_CHECKING,
+	ECHOSDK_ICE_CONNECTED,
+	ECHOSDK_ICE_COMPLETED,
+	ECHOSDK_ICE_DISCONNECTED,
+	ECHOSDK_ICE_FAILED,
+	ECHOSDK_ICE_CLOSED,
+} echosdk_ice_state_t;
+
+/** Candidate type of one side of the selected pair (RFC 8445 §5.1.1). */
+typedef enum {
+	ECHOSDK_ICE_CAND_HOST = 0,
+	ECHOSDK_ICE_CAND_SRFLX,
+	ECHOSDK_ICE_CAND_PRFLX,
+	ECHOSDK_ICE_CAND_RELAY,
+	ECHOSDK_ICE_CAND_NONE,
+} echosdk_ice_cand_type_t;
+
 typedef struct {
 	int  bitrate;    /* 0 = auto/VBR; otherwise bps, e.g. 32000 */
 	int  complexity; /* 0-10 CPU trade-off; -1 = opus default (9) */
@@ -315,6 +349,9 @@ typedef enum {
 	 *  that succeeds needs no event of its own: the far end takes the call over
 	 *  and our leg closes, which arrives as ECHOSDK_EV_CALL_STATE / ENDED. */
 	ECHOSDK_EV_TRANSFER_FAILED,
+	/** The ICE liveness state of a call's media path changed — see
+	 *  echosdk_ice_state_t.  Payload: echosdk_ev_ice_state_t. */
+	ECHOSDK_EV_ICE_STATE,
 } echosdk_event_type_t;
 
 /* ── Network handover ─────────────────────────────────────────────────────── */
@@ -401,6 +438,28 @@ typedef struct {
 	bool                     ice;
 	echosdk_error_t          error;    /* ECHOSDK_OK unless *_FAILED       */
 } echosdk_ev_network_t;
+
+/**
+ * ICE liveness change (ECHOSDK_EV_ICE_STATE).
+ *
+ * `local_addr` / `remote_addr` are the selected candidate pair as
+ * "ip:port" ("" until a pair is selected), `generation` counts ICE
+ * restarts (1 = the initial session), `rtt_ms` is the STUN round trip on
+ * the selected pair.  The strings are valid for the callback's duration
+ * (or for the event's life with cfg.deliver_owned_events).
+ */
+typedef struct {
+	echosdk_call_handle_t    call;
+	echosdk_ice_state_t      state;
+	echosdk_ice_state_t      prev;
+	uint32_t                 generation;
+	echosdk_ice_cand_type_t  local_type;
+	echosdk_ice_cand_type_t  remote_type;
+	const char              *local_addr;
+	const char              *remote_addr;
+	float                    rtt_ms;
+	echosdk_error_t          error;      /* ECHOSDK_OK unless FAILED */
+} echosdk_ev_ice_state_t;
 
 /* ── Event payload structs ────────────────────────────────────────────────── */
 /**
@@ -565,6 +624,19 @@ typedef struct {
 	uint32_t stats_tick;        /* which poll this is (1-based) */
 	uint64_t call_duration_ms;  /* elapsed ms since CALL_ESTABLISHED */
 	bool     is_final;          /* true on the last event before teardown */
+
+	/* ── ICE ───────────────────────────────────────────────────────────── */
+	/* The media path as the ICE agent sees it.  `ice_state` is
+	 * ECHOSDK_ICE_NEW and the rest zero on a call without ICE.
+	 * `remote_addr` above is the same address as `ice_remote_addr` on an
+	 * ICE call, and the signalled peer on a plain-RTP one. */
+	echosdk_ice_state_t     ice_state;
+	echosdk_ice_cand_type_t ice_local_type;
+	echosdk_ice_cand_type_t ice_remote_type;
+	float    ice_rtt_ms;        /* STUN RTT on the selected pair */
+	uint32_t ice_generation;    /* ICE restarts so far; 1 = initial session */
+	char     ice_local_addr[64];  /* selected local candidate "ip:port" */
+	char     ice_remote_addr[64]; /* selected remote candidate "ip:port" */
 } echosdk_ev_media_stats_t;
 
 typedef struct {
@@ -685,6 +757,7 @@ typedef struct {
 		echosdk_ev_presence_state_t    presence;
 		echosdk_ev_quality_alert_t     quality_alert;
 		echosdk_ev_network_t           network;
+		echosdk_ev_ice_state_t         ice;
 	} u;
 } echosdk_event_t;
 
@@ -1648,6 +1721,13 @@ ECHOSDK_EXPORT echosdk_account_handle_t echosdk_call_get_account(
 
 /** Current call state. Returns ECHOSDK_CALL_ENDED for a NULL handle. */
 ECHOSDK_EXPORT echosdk_call_state_t echosdk_call_get_state(
+        echosdk_call_handle_t call);
+
+/**
+ * The call's current ICE liveness state (see echosdk_ice_state_t).  Safe from
+ * any thread; ECHOSDK_ICE_NEW for a call without ICE or before gathering.
+ */
+ECHOSDK_EXPORT echosdk_ice_state_t echosdk_call_ice_state(
         echosdk_call_handle_t call);
 
 /* ── SIP MESSAGE ─────────────────────────────────────────────────────────── */
