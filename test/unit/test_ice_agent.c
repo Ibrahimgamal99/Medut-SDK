@@ -929,6 +929,55 @@ static void test_receipt_credits_reflexive_selected_pair(void)
 }
 
 
+static void test_silent_stream_stays_completed(void)
+{
+	/* A call that carries no media — the far end is silent, or on hold —
+	 * has nothing but the keepalives on the selected pair to refresh
+	 * `receiving`.  The tick used to wake on the flat ping cadence, so a
+	 * keepalive due at pair_stable_ms went out up to ping_strong_ms late
+	 * and the receiving window lapsed for exactly one tick before every
+	 * one of them: COMPLETED -> DISCONNECTED -> COMPLETED for as long as
+	 * the stream stayed quiet (2026-09-15, FreeSWITCH).  netmon reads
+	 * that state to decide whether a media stall is ours to repair. */
+	struct node *na = node_new("A", "192.168.1.2", 5000, NULL, 0);
+	struct node *nb = node_new("B", "198.51.100.2", 6000, NULL, 0);
+	struct agent a, b, *ab[2] = { &a, &b };
+	unsigned a_changes, b_changes;
+
+	agent_init(&a, &fast_conf, ICE_ROLE_CONTROLLING, 1, &na);
+	agent_init(&b, &fast_conf, ICE_ROLE_CONTROLLED, 1, &nb);
+	agent_learn(&a, &b);
+	agent_learn(&b, &a);
+	CHECK(0 == icea_gen_start_checks(a.gen));
+	CHECK(0 == icea_gen_start_checks(b.gen));
+	CHECK(run_until(both_completed, ab, T(3000)));
+
+	/* enough cycles for the selected pair to count as stable, which is
+	 * what puts the keepalive on the slow cadence */
+	run_for(T(fast_conf.pair_stable_ms * 6));
+	CHECK(a.gen->state == ICEA_STATE_COMPLETED);
+
+	/* B stops checking once the pair is nominated — FreeSWITCH does, and
+	 * it leaves A's own keepalive responses as the only thing A hears. */
+	icea_gen_hold(b.gen);
+	run_for(T(fast_conf.pair_stable_ms * 2));
+	a_changes = a.state_changes;
+	b_changes = b.state_changes;
+
+	run_for(T(fast_conf.pair_stable_ms * 8));
+
+	CHECK(a.state_changes == a_changes);
+	CHECK(b.state_changes == b_changes);
+	CHECK(a.gen->state == ICEA_STATE_COMPLETED);
+	CHECK(b.gen->state == ICEA_STATE_COMPLETED);
+	CHECK(a.gen->selected[0]->receiving);
+
+	agent_close(&a);
+	agent_close(&b);
+	nodes_flush();
+}
+
+
 static void test_pac_waits_for_better_pair(void)
 {
 	/* RFC 8863 (ICE PAC).  B offers two candidates: a high-priority one on
@@ -1095,6 +1144,7 @@ int main(void)
 	test_silent_switch_for_controlled();
 	test_renomination_switches();
 	test_receipt_credits_reflexive_selected_pair();
+	test_silent_stream_stays_completed();
 	test_pac_waits_for_better_pair();
 	test_gather_srflx_via_sim_stun();
 	test_own_port_alloc();

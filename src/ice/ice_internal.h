@@ -48,7 +48,11 @@ extern "C" {
 #define ICEA_PING_WEAK_MS               48     /* transport tick while weak     */
 #define ICEA_PING_STRONG_MS            480     /* transport tick while strong   */
 #define ICEA_PAIR_STABILIZING_MS       900     /* selected pair, not yet stable */
-#define ICEA_PAIR_STABLE_MS           2500     /* selected pair, stable         */
+/* Keepalive on a stable selected pair.  Its response is what refreshes
+ * `receiving` while the stream carries no media, so it has to sit clear of
+ * ICEA_RECEIVING_TIMEOUT_MS by more than one rtt — libwebrtc's own 2500
+ * leaves no margin at all once a timer fires late. */
+#define ICEA_PAIR_STABLE_MS           2000     /* selected pair, stable         */
 #define ICEA_BACKUP_PING_MS          25000     /* non-selected writable pairs   */
 #define ICEA_WRITE_CONNECT_FAILURES      5     /* unanswered pings ...          */
 #define ICEA_WRITE_CONNECT_TIMEOUT_MS 5000     /* ... over this long → unreliable */

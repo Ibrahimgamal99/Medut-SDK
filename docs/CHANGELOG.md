@@ -27,6 +27,19 @@ All notable changes to EchoSDK are documented here.
   orders, with the call state kept where baresip keeps it (answering by
   flipping the state first is what hid this).
 
+- **The ICE state still flapped `completed → disconnected → completed` on a
+  call carrying no inbound media.**  With the receipt-crediting fix in place the
+  selected pair was credited correctly, but its keepalive was quantised by the
+  check scheduler's own tick: a check due at `pair_stable_ms` (2500 ms) went out
+  at the next tick, up to `ping_strong_ms` (480 ms) later, against a receiving
+  window of exactly 2500 ms.  The window therefore lapsed for one tick before
+  every keepalive whenever nothing else was arriving — a silent far end, a call
+  on hold, or a peer like FreeSWITCH that stops checking once the pair is
+  nominated.  The scheduler no longer sleeps past a selected pair's next
+  keepalive, and the keepalive cadence now sits clear of the receiving window
+  rather than exactly on it.  Test: `test_ice_agent.c` (a nominated pair whose
+  peer has stopped checking holds `completed` through many keepalive cycles).
+
 - **A NAT'd call reported its ICE state flapping `completed → disconnected →
   completed` for as long as it lasted.**  A received packet proves liveness for
   a 5-tuple, and a 5-tuple is (socket, remote), not (candidate, remote): every

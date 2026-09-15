@@ -595,6 +595,44 @@ static struct icea_pair *pick_ping(struct icea_gen *gen, uint64_t now)
 }
 
 
+/* When the next tick must land.
+ *
+ * The selected pair's keepalive is what refreshes `receiving` on a call
+ * whose far end sends no media, and its response has to arrive inside
+ * receiving_timeout_ms.  Waking on the flat ping cadence quantises that
+ * keepalive: a check due at 2500 ms goes out at the next tick, up to
+ * ping_strong_ms late, so the window lapses for exactly one tick before
+ * every keepalive — COMPLETED -> DISCONNECTED -> COMPLETED for as long as
+ * the stream stays silent (2026-09-15, FreeSWITCH).  So never sleep past
+ * the moment a selected pair is due.
+ */
+static uint64_t tick_delay(const struct icea_gen *gen, uint64_t now)
+{
+	bool weak = icea_gen_weak(gen);
+	uint64_t delay = weak ? gen->conf->ping_weak_ms
+			      : gen->conf->ping_strong_ms;
+
+	for (unsigned i = 0; i < gen->ncomp; i++) {
+		const struct icea_pair *s = gen->selected[i];
+		uint64_t due;
+
+		if (!s)
+			continue;
+
+		due = s->last_ping_sent + ((weak || !pair_stable(s))
+					   ? gen->conf->pair_stabilizing_ms
+					   : gen->conf->pair_stable_ms);
+		if (s->next_allowed_ping > due)
+			due = s->next_allowed_ping;
+
+		if (due > now && due - now < delay)
+			delay = due - now;
+	}
+
+	return delay;
+}
+
+
 static void tick(void *arg)
 {
 	struct icea_gen *gen = arg;
@@ -616,10 +654,7 @@ static void tick(void *arg)
 	}
 
 	if (gen->checking)
-		tmr_start(&gen->tmr_tick,
-			  icea_gen_weak(gen) ? gen->conf->ping_weak_ms
-					     : gen->conf->ping_strong_ms,
-			  tick, gen);
+		tmr_start(&gen->tmr_tick, tick_delay(gen, now), tick, gen);
 }
 
 
