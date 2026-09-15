@@ -935,7 +935,7 @@ static void start_migration(struct echosdk_call *lc)
 {
 	struct stream   *strm;
 	const struct sa *raddr, *old;
-	struct sa        laddr;
+	struct sa        laddr, ice_laddr;
 
 	if (!lc->bc) {
 		lc->net_mig_state = BSDK_MIG_IDLE;
@@ -1005,7 +1005,19 @@ static void start_migration(struct echosdk_call *lc)
 		}
 	}
 
-	old = call_laddr(lc->bc);
+	/* What address is this call's media actually leaving from?
+	 *
+	 * For an ICE call that is the *base* of the selected local candidate,
+	 * not baresip's session address and not the candidate itself: a
+	 * server- or peer-reflexive candidate carries the NAT's address, which
+	 * never equals anything net_dst_source_addr_get() can return, so
+	 * comparing against it reads as "the path moved" on every single
+	 * check — and routes every stall through an ICE restart, which is the
+	 * trade the comment below exists to avoid. */
+	if (!lc->bc || !bsdk_ice_call_laddr(lc->bc, &ice_laddr))
+		old = call_laddr(lc->bc);
+	else
+		old = &ice_laddr;
 	if (old && sa_cmp(&laddr, old, SA_ADDR) && !call_signals_over_ws(lc) &&
 	    !lc->net_mig_stall) {
 		lc->net_mig_state = BSDK_MIG_IDLE;   /* same path — no re-INVITE */
@@ -1278,6 +1290,40 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 	    call_is_onhold(lc->bc))
 		return;
 
+	/* Silence is not proof that the path is broken.
+	 *
+	 * The RTP counter answers "is audio arriving", never "whose fault is
+	 * it".  An ICE agent that is still exchanging connectivity checks on
+	 * the selected pair has just told us the path is alive in both
+	 * directions — every check it sends is answered — so the silence is
+	 * the far end's: a peer that muted, stopped sending without
+	 * signalling hold, or is itself waiting on something.  Re-offering
+	 * then repairs nothing and costs real audio: against this PBX a
+	 * re-offer draws `a=connection:new`, it rebuilds its RTP instance,
+	 * and the call that was merely quiet comes back silent for good
+	 * (2026-09-10, five restarts across three calls).
+	 *
+	 * This is what a browser does by default and why sip.js survives the
+	 * same PBX: nothing in a browser stack re-offers four seconds into a
+	 * call whose ICE is connected.  The SDK could not make this
+	 * distinction before — libre's ICE sent Binding *Indications* and
+	 * never learned anything from them — and had to treat every stall as
+	 * its own to fix.
+	 *
+	 * DISCONNECTED or FAILED is the opposite verdict and falls through to
+	 * the repair; so does a call without ICE, where there is nothing to
+	 * ask. */
+	if (lc->bc && bsdk_ice_call_active(lc->bc)) {
+		int ice = bsdk_ice_call_state(lc->bc);
+
+		if (ice == ECHOSDK_ICE_CONNECTED || ice == ECHOSDK_ICE_COMPLETED) {
+			info("EchoSDK/netmon: media stalled but ICE is still"
+			     " connected — the far end has gone quiet, not our"
+			     " path; not re-offering\n");
+			return;
+		}
+	}
+
 	now = tmr_jiffies();
 
 	if (lc->net_stall_repair_at &&
@@ -1314,6 +1360,28 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 	     lc->net_stall_rounds, (unsigned)BSDK_NET_STALL_ROUNDS);
 
 	tmr_start(&g_nm.tmr_verify, 1, verify_handler, NULL);
+}
+
+
+/**
+ * The ICE agent's liveness verdict for one call changed.
+ *
+ * Recorded, not acted on: the repair decisions this feeds — whether a stall
+ * is ours to fix, and whether it warrants an ICE restart — belong to
+ * bsdk_netmon_call_stalled() and start_migration(), which run on their own
+ * clocks and are rate-limited.  Acting here would put a re-INVITE on the
+ * wire from inside a STUN response handler.
+ */
+void bsdk_netmon_call_ice_state(struct call *bc, int prev, int now)
+{
+	struct echosdk_call *lc = bsdk_call_find(bc);
+
+	if (!lc)
+		return;
+
+	lc->net_ice_state = (uint8_t)now;
+
+	debug("EchoSDK/netmon: ICE %d -> %d\n", prev, now);
 }
 
 
@@ -1442,6 +1510,20 @@ static void apply_handover(void)
 	 * the app pinned its own nameservers. */
 	if (!conf_config()->net.nsc)
 		net_dns_refresh(net);
+
+	/* There is a routable address again, and the migrations below are about
+	 * to re-offer each call's candidates.  The NAT mapping behind our RTP
+	 * sockets almost certainly died with the old network, so ask the ICE
+	 * agent to re-run its reflexive gathering first — otherwise the offer
+	 * carries the mapping that has just gone away.  One STUN request per
+	 * port, no new credentials, no new generation and nothing signalled on
+	 * its own; whether a call needs a full ICE restart is still decided per
+	 * call in start_migration().
+	 *
+	 * Deliberately below the no-address bail above: gathering into a dead
+	 * network only leaves the generation marked un-gathered while the
+	 * handover waits for an interface to appear. */
+	bsdk_ice_network_changed();
 
 	/* Flush every SIP transport and re-bind on the current addresses.  This
 	 * also drops the connection hash, which is what kills the half-open

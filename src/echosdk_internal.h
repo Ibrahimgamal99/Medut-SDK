@@ -299,6 +299,8 @@ struct echosdk_call {
 	                                             * first waited on a media-
 	                                             * encryption handshake; 0 = not
 	                                             * waiting on one */
+	uint8_t                    net_ice_state;      /* last echosdk_ice_state_t
+	                                                  reported by the agent */
 	bool                       net_ice_stale_sent; /* ICE_STALE emitted this gen */
 	bool                       net_ice_restarted;  /* ICE was restarted this gen */
 	bool                       net_mig_path_moved; /* the local address changed
@@ -640,6 +642,11 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc);
  * earlier and ending it is the app's decision. */
 void bsdk_netmon_call_ice_failed(struct call *bc, int err);
 
+/* Called from src/ice/ice_mod.c on every ICE liveness transition.  netmon
+ * records it so a stall repair can ask what the agent thinks of the path
+ * instead of inferring it from the RTP counter alone. */
+void bsdk_netmon_call_ice_state(struct call *bc, int prev, int now);
+
 /* ── dns.c ─────────────────────────────────────────────────────────────── */
 
 /* Opaque result types — defined in dns.c, used only within the module */
@@ -689,6 +696,26 @@ int  bsdk_ice_call_state(void *call);
 bool bsdk_ice_call_selected(void *call, struct sa *local, struct sa *remote,
 			    int *ltype, int *rtype, uint32_t *rtt_ms,
 			    uint32_t *generation);
+
+/* The *base* address of the selected local candidate — the address packets
+ * really leave from, which for a server- or peer-reflexive candidate is not
+ * the candidate's own address.  netmon compares this against the route it
+ * would pick now to decide whether the media path actually moved; comparing
+ * a reflexive address instead reads as "moved" on every check.  False when
+ * no pair is selected. */
+bool bsdk_ice_call_laddr(void *call, struct sa *base);
+
+/* True while an ICE call has not reached CONNECTED: its media path cannot
+ * carry RTP yet, so adapt.c must not count the wait as silence (the same
+ * reason bsdk_media_setup_pending() exists for the DTLS handshake). */
+bool bsdk_ice_setup_pending(void *call);
+
+/* A network change has been detected and settled.  Refreshes what the agent
+ * can refresh without new signalling — the server-reflexive candidates, whose
+ * NAT mapping a handover usually invalidates — so the re-INVITE netmon is
+ * about to send carries the mapping that is live now.  Restarting ICE is a
+ * separate, signalled decision and stays netmon's (bsdk_ice_restart). */
+void bsdk_ice_network_changed(void);
 
 /* Async RFC 3263 resolution. done_h fires on re_main thread.
  * port_hint > 0 skips NAPTR/SRV (explicit port in URI). */

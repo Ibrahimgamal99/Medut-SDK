@@ -2447,6 +2447,36 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
   /// true on the last event before teardown
   @ffi.Bool()
   external bool is_final;
+
+  /// ── ICE ───────────────────────────────────────────────────────────── */
+  /// /* The media path as the ICE agent sees it.  `ice_state` is
+  /// ECHOSDK_ICE_NEW and the rest zero on a call without ICE.
+  /// `remote_addr` above is the same address as `ice_remote_addr` on an
+  /// ICE call, and the signalled peer on a plain-RTP one.
+  @ffi.Int32()
+  external int ice_state;
+
+  @ffi.Int32()
+  external int ice_local_type;
+
+  @ffi.Int32()
+  external int ice_remote_type;
+
+  /// STUN RTT on the selected pair
+  @ffi.Float()
+  external double ice_rtt_ms;
+
+  /// ICE restarts so far; 1 = initial session
+  @ffi.Uint32()
+  external int ice_generation;
+
+  /// selected local candidate "ip:port"
+  @ffi.Array.multi([64])
+  external ffi.Array<ffi.Char> ice_local_addr;
+
+  /// selected remote candidate "ip:port"
+  @ffi.Array.multi([64])
+  external ffi.Array<ffi.Char> ice_remote_addr;
 }
 
 final class echosdk_ev_log_t extends ffi.Struct {

@@ -195,6 +195,13 @@ def _raw_stats_to_event(s) -> MediaStatsEvent:
         stats_tick              = s.stats_tick,
         call_duration_ms        = s.call_duration_ms,
         is_final                = bool(s.is_final),
+        ice_state               = _ICE_STATE[s.ice_state] if 0 <= s.ice_state < len(_ICE_STATE) else "new",
+        ice_local_type          = _ICE_CAND[s.ice_local_type] if 0 <= s.ice_local_type < len(_ICE_CAND) else "none",
+        ice_remote_type         = _ICE_CAND[s.ice_remote_type] if 0 <= s.ice_remote_type < len(_ICE_CAND) else "none",
+        ice_rtt_ms              = s.ice_rtt_ms,
+        ice_generation          = s.ice_generation,
+        ice_local_addr          = _s(s.ice_local_addr) or "",
+        ice_remote_addr         = _s(s.ice_remote_addr) or "",
     )
 
 

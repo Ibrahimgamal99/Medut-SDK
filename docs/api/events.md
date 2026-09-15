@@ -505,6 +505,12 @@ inference from RTP.  Payload `echosdk_ev_ice_state_t`:
 | `rtt_ms` | STUN round trip on the selected pair |
 | `error` | `ECHOSDK_ERR_TIMEOUT` on `FAILED`, else `ECHOSDK_OK` |
 
+The same view is on every `ECHOSDK_EV_MEDIA_STATS` tick as `ice_state`,
+`ice_local_type` / `ice_remote_type`, `ice_local_addr` / `ice_remote_addr`,
+`ice_rtt_ms` and `ice_generation`, so a quality readout can show the path
+without tracking the event stream.  On an ICE call `remote_addr` is the
+selected remote candidate; on a plain-RTP call it is the signalled peer.
+
 `FAILED` never ends the call: where a pair was validated earlier the stream is
 still held on it and audio usually survives; redialling is the app's decision.
 `echosdk_call_ice_state()` returns the current value from any thread.

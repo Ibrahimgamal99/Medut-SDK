@@ -106,6 +106,15 @@ void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 	g_ice_failed_calls++;
 }
 
+static int g_ice_state_reports;
+static int g_last_ice_state = -1;
+void bsdk_netmon_call_ice_state(struct call *bc, int prev, int now)
+{
+	(void)bc; (void)prev;
+	g_ice_state_reports++;
+	g_last_ice_state = now;
+}
+
 /* The SDK's call registry and event queue: the module looks the baresip
  * call up to record its ICE state and to post ECHOSDK_EV_ICE_STATE.  No
  * wrappers exist here, so nothing is found and nothing is posted. */
@@ -265,14 +274,11 @@ static bool both_completed(void *arg)
 	       bsdk_ice_call_state(&ab[1]->call) == ICEA_STATE_COMPLETED;
 }
 
-/* The full baresip choreography for an A→B call on loopback. */
-static void connect_call(struct side *a, struct side *b)
+/* The choreography from A's offer onward, for a caller already attached. */
+static void connect_call_from(struct side *a, struct side *b)
 {
 	struct side *ab[2] = { a, b };
 
-	CHECK(0 == side_attach(a, true));
-	CHECK(run_until(estab_once, a, 2000));       /* A's offer released */
-	CHECK(a->estab_err == 0);
 	CHECK(0 == sdp_transfer(a, b, true));
 
 	CHECK(0 == side_attach(b, false));
@@ -282,6 +288,16 @@ static void connect_call(struct side *a, struct side *b)
 	CHECK(0 == vt()->updateh(a->sess));          /* A applies the answer */
 
 	CHECK(run_until(both_completed, ab, 4000));
+}
+
+
+/* The full baresip choreography for an A→B call on loopback. */
+static void connect_call(struct side *a, struct side *b)
+{
+	CHECK(0 == side_attach(a, true));
+	CHECK(run_until(estab_once, a, 2000));       /* A's offer released */
+	CHECK(a->estab_err == 0);
+	connect_call_from(a, b);
 }
 
 /* ── Tests ───────────────────────────────────────────────────────────────── */
@@ -522,6 +538,75 @@ static void test_incoming_holds_connh_until_answer(void)
 }
 
 
+static void test_pr2_seams(void)
+{
+	/* The three answers netmon and adapt.c ask the agent for:
+	 *   - the *base* of the selected local candidate, so "did the media
+	 *     path move" compares routable addresses;
+	 *   - whether ICE is still setting up, so a stall clock does not count
+	 *     the check phase as silence;
+	 *   - every liveness transition, so a stall can be attributed. */
+	struct side a, b;
+	struct sa base, l, r;
+	int before;
+
+	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+
+	/* before anything is selected */
+	CHECK(!bsdk_ice_call_laddr(&a.call, &base));
+
+	before = g_ice_state_reports;
+	CHECK(0 == side_attach(&a, true));
+	CHECK(run_until(estab_once, &a, 1000));
+
+	/* gathering, not yet connected: setup is pending */
+	CHECK(bsdk_ice_setup_pending(&a.call));
+	CHECK(g_ice_state_reports > before);       /* transitions reported */
+
+	connect_call_from(&a, &b);
+
+	/* connected: no longer pending, and the base is a real address */
+	CHECK(!bsdk_ice_setup_pending(&a.call));
+	CHECK(bsdk_ice_call_laddr(&a.call, &base));
+	CHECK(bsdk_ice_call_selected(&a.call, &l, &r, NULL, NULL, NULL, NULL));
+	/* loopback host candidate: base == the candidate itself */
+	CHECK(sa_cmp(&base, &l, SA_ALL));
+	CHECK(sa_port(&base) == sa_port(&a.laddr));
+	CHECK(g_last_ice_state == ICEA_STATE_COMPLETED);
+
+	/* a network change re-gathers without touching credentials, the
+	 * selected pair or the generation */
+	{
+		uint32_t gen_before = 0, gen_after = 0;
+		char ufrag[ICEA_UFRAG_LEN + 1];
+		struct sa r_before, r_after;
+
+		CHECK(bsdk_ice_call_selected(&a.call, NULL, &r_before, NULL, NULL,
+					     NULL, &gen_before));
+		{
+			/* no STUN server configured here, so this is a no-op
+			 * by design — it must still be safe to call */
+			bsdk_ice_network_changed();
+		}
+		run_for(100);
+		CHECK(bsdk_ice_call_selected(&a.call, NULL, &r_after, NULL, NULL,
+					     NULL, &gen_after));
+		CHECK(gen_after == gen_before);
+		CHECK(sa_cmp(&r_after, &r_before, SA_ALL));
+		CHECK(bsdk_ice_call_state(&a.call) == ICEA_STATE_COMPLETED);
+		(void)ufrag;
+	}
+
+	/* a call with no ICE answers "not pending" and "no base" */
+	CHECK(!bsdk_ice_setup_pending(&b.call) ||
+	      bsdk_ice_call_state(&b.call) >= ICEA_STATE_CONNECTED);
+
+	side_close(&a);
+	side_close(&b);
+}
+
+
 static void test_teardown_either_order(void)
 {
 	struct side a, b;
@@ -575,6 +660,7 @@ int main(void)
 	test_restart_contract();
 	test_plain_rtp_peer();
 	test_incoming_holds_connh_until_answer();
+	test_pr2_seams();
 	test_teardown_either_order();
 	test_module_close();
 

@@ -250,3 +250,30 @@ played as silence. Offering Opus is what makes such a link survivable.
   renegotiation; the codec list is fixed when the call is answered.
 - **It does not restart ICE.** See
   [Network handover](network_handover.md#ice-calls).
+
+## A stall is not always yours to repair
+
+`ECHOSDK_QUALITY_MEDIA_STALL` says inbound RTP stopped.  It does not say why,
+and the two causes want opposite responses:
+
+* **Your path broke** — a NAT rebinding, a multi-WAN router moving your flow,
+  an interface that went away.  The repair is a new offer, and the SDK makes
+  one (see [Network handover](network_handover.md)).
+* **The far end went quiet** — a peer that muted, stopped sending without
+  signalling hold, or is waiting on something of its own.  There is nothing to
+  repair, and offering anyway costs audio: Asterisk answers a re-offer with
+  `a=connection:new`, rebuilds its RTP instance, and a call that was merely
+  quiet comes back silent.
+
+The ICE agent answers the question.  While its connectivity checks are still
+being answered on the selected pair — `ECHOSDK_ICE_CONNECTED` or
+`ECHOSDK_ICE_COMPLETED` — the path is alive in both directions and the SDK
+declines the repair, logging *"the far end has gone quiet, not our path"*.
+The quality alert still reaches the app, because a user staring at a silent
+call wants to be told.  `ECHOSDK_ICE_DISCONNECTED` or `ECHOSDK_ICE_FAILED` is
+the opposite verdict and the repair runs as before, as it does for a call
+without ICE.
+
+So: treat `MEDIA_STALL` as "no audio is arriving", and read
+`echosdk_call_ice_state()` (or the `ice_state` field on the stats tick) to
+learn whose problem it is.

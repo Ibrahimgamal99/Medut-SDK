@@ -244,6 +244,21 @@ class MediaStats {
   /// True on the last stats event before call teardown.
   final bool isFinal;
 
+  // ICE — the media path as the agent sees it.  [IceState.newState] and
+  // zeroes on a call without ICE.  On an ICE call [remoteAddr] above is the
+  // same address as [iceRemoteAddr].
+  final IceState iceState;
+  final IceCandType iceLocalType;
+  final IceCandType iceRemoteType;
+
+  /// STUN round trip on the selected pair, ms.
+  final double iceRttMs;
+
+  /// ICE restarts so far; 1 is the initial session.
+  final int iceGeneration;
+  final String iceLocalAddr;
+  final String iceRemoteAddr;
+
   MediaStats({
     required this.call,
     required this.packetsSent,
@@ -291,6 +306,13 @@ class MediaStats {
     required this.statsTick,
     required this.callDurationMs,
     required this.isFinal,
+    required this.iceState,
+    required this.iceLocalType,
+    required this.iceRemoteType,
+    required this.iceRttMs,
+    required this.iceGeneration,
+    required this.iceLocalAddr,
+    required this.iceRemoteAddr,
   });
 }
 
@@ -1708,6 +1730,17 @@ class EchoSDK {
 String? _str(Pointer<Char> p) =>
     p == nullptr ? null : p.cast<Utf8>().toDartString();
 
+/// Read a fixed-size NUL-terminated char array out of an FFI struct field.
+String _charArr(Array<Char> a, int len) {
+  final b = StringBuffer();
+  for (var i = 0; i < len; i++) {
+    final c = a[i];
+    if (c == 0) break;
+    b.writeCharCode(c);
+  }
+  return b.toString();
+}
+
 MediaStats _decodeStats(echosdk_ev_media_stats_t s, Call call) {
   final addr = StringBuffer();
   for (var i = 0; i < 64; i++) {
@@ -1762,5 +1795,12 @@ MediaStats _decodeStats(echosdk_ev_media_stats_t s, Call call) {
     statsTick: s.stats_tick,
     callDurationMs: s.call_duration_ms,
     isFinal: s.is_final,
+    iceState: IceState.fromRaw(s.ice_state),
+    iceLocalType: IceCandType.fromRaw(s.ice_local_type),
+    iceRemoteType: IceCandType.fromRaw(s.ice_remote_type),
+    iceRttMs: s.ice_rtt_ms,
+    iceGeneration: s.ice_generation,
+    iceLocalAddr: _charArr(s.ice_local_addr, 64),
+    iceRemoteAddr: _charArr(s.ice_remote_addr, 64),
   );
 }

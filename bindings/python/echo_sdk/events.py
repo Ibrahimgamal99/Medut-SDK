@@ -132,6 +132,16 @@ class MediaStatsEvent:
     stats_tick: int
     call_duration_ms: int
     is_final: bool
+    # ICE -- the media path as the agent sees it.  ice_state is "new" and the
+    # rest zero on a call without ICE.  remote_addr above is the same address
+    # as ice_remote_addr on an ICE call.
+    ice_state: str = "new"
+    ice_local_type: str = "none"
+    ice_remote_type: str = "none"
+    ice_rtt_ms: float = 0.0
+    ice_generation: int = 0
+    ice_local_addr: str = ""
+    ice_remote_addr: str = ""
 
 
 @dataclass
@@ -363,6 +373,9 @@ class CallStats:
         # session history
         "mos_lq_min", "mos_lq_avg", "stats_tick",
         "call_duration_ms", "is_final",
+        # ICE
+        "ice_state", "ice_local_type", "ice_remote_type", "ice_rtt_ms",
+        "ice_generation", "ice_local_addr", "ice_remote_addr",
     )
 
     def __init__(self):
@@ -389,6 +402,10 @@ class CallStats:
         self.ssrc_tx = 0;             self.ssrc_rx = 0;  self.remote_addr = ""
         self.mos_lq_min = _nan;       self.mos_lq_avg = _nan
         self.stats_tick = 0;          self.call_duration_ms = 0;  self.is_final = False
+        self.ice_state = "new";       self.ice_local_type = "none"
+        self.ice_remote_type = "none"; self.ice_rtt_ms = 0.0
+        self.ice_generation = 0
+        self.ice_local_addr = "";     self.ice_remote_addr = ""
 
     def _update(self, ev: "MediaStatsEvent") -> None:
         with self._lock:
@@ -438,6 +455,13 @@ class CallStats:
             self.stats_tick             = ev.stats_tick
             self.call_duration_ms       = ev.call_duration_ms
             self.is_final               = ev.is_final
+            self.ice_state              = ev.ice_state
+            self.ice_local_type         = ev.ice_local_type
+            self.ice_remote_type        = ev.ice_remote_type
+            self.ice_rtt_ms             = ev.ice_rtt_ms
+            self.ice_generation         = ev.ice_generation
+            self.ice_local_addr         = ev.ice_local_addr
+            self.ice_remote_addr        = ev.ice_remote_addr
 
     def print(self) -> None:
         """Print a formatted stats block to stdout."""

@@ -603,6 +603,19 @@ typedef struct {
 	uint32_t stats_tick;        /* which poll this is (1-based) */
 	uint64_t call_duration_ms;  /* elapsed ms since CALL_ESTABLISHED */
 	bool     is_final;          /* true on the last event before teardown */
+
+	/* ── ICE ───────────────────────────────────────────────────────────── */
+	/* The media path as the ICE agent sees it.  `ice_state` is
+	 * ECHOSDK_ICE_NEW and the rest zero on a call without ICE.
+	 * `remote_addr` above is the same address as `ice_remote_addr` on an
+	 * ICE call, and the signalled peer on a plain-RTP one. */
+	echosdk_ice_state_t     ice_state;
+	echosdk_ice_cand_type_t ice_local_type;
+	echosdk_ice_cand_type_t ice_remote_type;
+	float    ice_rtt_ms;        /* STUN RTT on the selected pair */
+	uint32_t ice_generation;    /* ICE restarts so far; 1 = initial session */
+	char     ice_local_addr[64];  /* selected local candidate "ip:port" */
+	char     ice_remote_addr[64]; /* selected remote candidate "ip:port" */
 } echosdk_ev_media_stats_t;
 
 typedef struct {

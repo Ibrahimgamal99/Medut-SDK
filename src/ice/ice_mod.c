@@ -525,7 +525,12 @@ static void on_state(struct icea_gen *gen, enum icea_state prev,
 	agg = sess_state(s);
 	if (agg != s->state) {
 		enum icea_state before = s->state;
+
 		s->state = agg;
+		/* netmon reads this to tell "our path died" from "the far end
+		 * went quiet" when it is asked to repair a stall. */
+		bsdk_netmon_call_ice_state((struct call *)s->call, (int)before,
+					   (int)agg);
 		emit_ice_state(s, m, before, agg);
 	}
 }
@@ -1442,6 +1447,88 @@ bool bsdk_ice_call_selected(void *call, struct sa *local, struct sa *remote,
 	if (rtt_ms)     *rtt_ms = p->rtt_ms;
 	if (generation) *generation = m->cur->seq;
 	return true;
+}
+
+
+bool bsdk_ice_call_laddr(void *call, struct sa *base)
+{
+	struct icea_sess *s = sess_find(call);
+	const struct icea_media *m;
+	const struct icea_pair *p;
+
+	if (!s || !base || list_isempty(&s->medial))
+		return false;
+	m = s->medial.head->data;
+	if (!m->cur || !m->cur->selected[0])
+		return false;
+
+	p = m->cur->selected[0];
+	/* The base of a srflx/prflx candidate is the host candidate it was
+	 * discovered through — the address the packets actually leave from. */
+	*base = p->lc->base ? p->lc->base->addr : p->lc->addr;
+	return sa_isset(base, SA_ADDR);
+}
+
+
+bool bsdk_ice_setup_pending(void *call)
+{
+	struct icea_sess *s = sess_find(call);
+	struct le *le;
+
+	if (!s)
+		return false;
+
+	LIST_FOREACH(&s->medial, le) {
+		const struct icea_media *m = le->data;
+
+		if (!m->cur || m->plain)
+			continue;
+		if (m->cur->state < ICEA_STATE_CONNECTED)
+			return true;
+	}
+	return false;
+}
+
+
+void bsdk_ice_network_changed(void)
+{
+	struct le *le;
+
+	LIST_FOREACH(&g_sessl, le) {
+		struct icea_sess *s = le->data;
+		struct le *mle;
+
+		if (!s->servers_ready || list_isempty(&s->serverl))
+			continue;
+
+		/* Re-run server-reflexive gathering on the ports we already
+		 * have.  The sockets are wildcard-bound and follow the new
+		 * default route by themselves, so nothing needs re-creating —
+		 * but the NAT mapping behind them is usually gone, and the
+		 * candidate we would otherwise re-offer is the old one.
+		 *
+		 * Per-interface sockets, and with them gathering on an
+		 * interface that is not carrying the signalling, are a
+		 * separate change; this is what can be refreshed without
+		 * new credentials or a new generation. */
+		LIST_FOREACH(&s->medial, mle) {
+			struct icea_media *m = mle->data;
+			struct le *ple;
+
+			if (!m->cur || m->plain)
+				continue;
+
+			LIST_FOREACH(&m->cur->portl, ple) {
+				struct icea_port *port = ple->data;
+				port->gathered = false;
+			}
+			m->cur->gathered = false;
+			(void)media_start_gather(m);
+		}
+
+		info("EchoSDK/ice: network changed — re-gathering reflexive"
+		     " candidates\n");
+	}
 }
 
 

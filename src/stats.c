@@ -383,9 +383,46 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 	s->payload_type = stream_pt_enc(strm);
 
-	const struct sa *raddr = stream_raddr(strm);
-	if (raddr)
-		re_snprintf(s->remote_addr, sizeof(s->remote_addr), "%J", raddr);
+	/* ── ICE ───────────────────────────────────────────────────────
+	 *
+	 * Ask the agent, not the stream.  Everything above ICE talks to one
+	 * constant virtual peer address so that a pair switch or an ICE
+	 * restart cannot re-key the media encryption (src/ice/ice_mod.c), so
+	 * stream_raddr() on an ICE call is that placeholder and never a
+	 * routable address.  `remote_addr` has always meant "where is the
+	 * audio going", and for an ICE call that is the selected pair. */
+	{
+		struct sa ice_l, ice_r;
+		int ltype = 0, rtype = 0;
+		uint32_t rtt = 0, gen = 0;
+
+		s->ice_state       = (echosdk_ice_state_t)
+		                     bsdk_ice_call_state(lc->bc);
+		s->ice_local_type  = ECHOSDK_ICE_CAND_NONE;
+		s->ice_remote_type = ECHOSDK_ICE_CAND_NONE;
+
+		if (bsdk_ice_call_selected(lc->bc, &ice_l, &ice_r, &ltype,
+		                           &rtype, &rtt, &gen)) {
+			s->ice_local_type  = (echosdk_ice_cand_type_t)ltype;
+			s->ice_remote_type = (echosdk_ice_cand_type_t)rtype;
+			s->ice_rtt_ms      = (float)rtt;
+			s->ice_generation  = gen;
+			re_snprintf(s->ice_local_addr,
+			            sizeof(s->ice_local_addr), "%J", &ice_l);
+			re_snprintf(s->ice_remote_addr,
+			            sizeof(s->ice_remote_addr), "%J", &ice_r);
+			re_snprintf(s->remote_addr, sizeof(s->remote_addr),
+			            "%J", &ice_r);
+			return ac;
+		}
+	}
+
+	{
+		const struct sa *raddr = stream_raddr(strm);
+		if (raddr)
+			re_snprintf(s->remote_addr, sizeof(s->remote_addr),
+			            "%J", raddr);
+	}
 
 	return ac;
 }

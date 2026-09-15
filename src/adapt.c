@@ -331,8 +331,17 @@ static void stall_tick(struct echosdk_call *lc,
 	 *
 	 * A renegotiation that puts the encryption back into handshake (an ICE
 	 * restart, a re-INVITE that re-keys) raises the flag again, so the same
-	 * edge covers the second and later handshakes on one call. */
-	pending = bsdk_media_setup_pending(lc);
+	 * edge covers the second and later handshakes on one call.
+	 *
+	 * ICE counts as setup for the same reason, and not only on DTLS calls:
+	 * connectivity checks have to nominate a pair before a packet can
+	 * arrive on it.  A call with SDES or plain RTP over ICE has no
+	 * handshake to wait for, so the DTLS edge alone left its whole check
+	 * phase on the clock — the same bug, on the accounts where it was
+	 * invisible.  An ICE restart drops the state back below CONNECTED and
+	 * therefore re-arms this edge too. */
+	pending = bsdk_media_setup_pending(lc) ||
+	          (lc->bc && bsdk_ice_setup_pending(lc->bc));
 
 	if (lc->stall_setup_pending && !pending) {
 		lc->stall_setup_pending = false;

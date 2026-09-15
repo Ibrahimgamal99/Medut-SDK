@@ -289,6 +289,13 @@ typedef struct {
  uint32_t stats_tick;
  uint64_t call_duration_ms;
  bool is_final;
+ echosdk_ice_state_t ice_state;
+ echosdk_ice_cand_type_t ice_local_type;
+ echosdk_ice_cand_type_t ice_remote_type;
+ float ice_rtt_ms;
+ uint32_t ice_generation;
+ char ice_local_addr[64];
+ char ice_remote_addr[64];
 } echosdk_ev_media_stats_t;
 
 typedef struct {

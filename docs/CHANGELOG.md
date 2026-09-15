@@ -8,6 +8,69 @@ All notable changes to EchoSDK are documented here.
 
 ### Changed
 
+- **A media stall is no longer always treated as the SDK's own to repair.**
+  `ECHOSDK_QUALITY_MEDIA_STALL` means inbound RTP stopped; it never said
+  whether the path broke or the far end simply went quiet, and the SDK had no
+  way to tell — libre's ICE sent Binding *Indications* and learned nothing
+  from them, so every stall got a re-offer.  Against this PBX that trade is a
+  bad one: Asterisk answers a re-offer with `a=connection:new`, rebuilds its
+  RTP instance, and a call that was merely quiet comes back silent (five
+  repairs across three calls on 2026-09-10, every one of them permanently
+  silent afterwards) — while a browser on the same PBX is fine, because
+  nothing in a browser stack re-offers four seconds into a call whose ICE is
+  connected.  The new ICE agent can answer the question, so
+  `bsdk_netmon_call_stalled()` now asks it: while the agent reports
+  `CONNECTED` or `COMPLETED` the checks on the selected pair are still being
+  answered, the path is alive in both directions, and the repair is declined
+  with *"the far end has gone quiet, not our path"*.  The quality alert still
+  reaches the app.  `DISCONNECTED`, `FAILED` and a call without ICE fall
+  through to the repair exactly as before.  Verified on a live call to the
+  production PBX with the stall forced: alert raised, repair declined, no
+  re-INVITE on the wire.
+
+- **The stall clock now waits for ICE as well as for DTLS.**  It was already
+  restarted on the edge where the media encryption finishes handshaking,
+  because none of the time before that could have carried RTP.  Connectivity
+  checks are the same kind of wait and were not covered, so a call with SDES
+  or plain RTP over ICE still had its whole check phase sitting on the clock —
+  the same bug, on the accounts where it happened to be invisible.
+
+### Added
+
+- **`ECHOSDK_EV_MEDIA_STATS` carries the ICE view of the media path**:
+  `ice_state`, `ice_local_type` / `ice_remote_type`, `ice_local_addr` /
+  `ice_remote_addr`, `ice_rtt_ms` and `ice_generation`, so a quality readout
+  can show the selected pair and its STUN round trip without following the
+  event stream.  Appended to the struct; existing fields do not move.
+
+### Fixed
+
+- **`remote_addr` on the stats tick reported the internal placeholder address
+  (`192.0.2.1:9`) for an ICE call.**  Everything above ICE now talks to one
+  constant virtual peer so that a pair switch or a restart cannot re-key the
+  media encryption, which means `stream_raddr()` is that placeholder and never
+  a routable address.  The field is filled from the agent's selected pair
+  instead, and still from the signalled peer on a plain-RTP call.  Introduced
+  with the new ICE agent in this same release, so no shipped version is
+  affected.
+
+- **A media stall on an ICE call compared the wrong local address when
+  deciding whether the media path had moved**, which decides between an ICE
+  restart and a plain re-offer.  A server- or peer-reflexive candidate carries
+  the NAT's address, which never equals anything the routing table can return,
+  so the comparison read "moved" on every check and routed every stall through
+  the restart the rule above exists to avoid.  It now compares the *base* of
+  the selected local candidate — the address packets really leave from.
+
+- **A handover re-offered the NAT mapping that had just died.**  The ICE agent
+  now re-runs its reflexive gathering when the network has changed and settled,
+  before any call is migrated, so the re-INVITE carries the mapping that is
+  live now.  One STUN request per port; no new credentials, no new generation
+  and nothing signalled on its own — whether a call needs a full ICE restart
+  is still decided per call.
+
+### Changed
+
 - **ICE is now EchoSDK's own agent (`src/ice/`), replacing baresip's `ice`
   module and the 1.6k-line `ice_shim.c` that compensated for it.**  The old
   agent could never say whether the media path was alive: after its check
