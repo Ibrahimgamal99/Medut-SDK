@@ -8,6 +8,25 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **An answered incoming call connected, negotiated ICE, and then carried no
+  media at all: `tx 0 rx 0` for the whole call.**  Connectivity checks run
+  while the phone rings, but the connected handler is held back until our
+  answer is out, because dtls_srtp would otherwise send its ClientHello before
+  the peer had our fingerprint and setup role.  Releasing that hold keyed on
+  the call having left `CALL_STATE_INCOMING` — which it never does in time:
+  baresip runs the media-NAT `updateh` from `call_answer()`, one step *before*
+  `sdp_encode()` and `sipsess_answer()`, and the state only becomes
+  `ESTABLISHED` on the ACK, which brings no `updateh` with it.  So the hold was
+  tested one call frame too early and never revisited: `stream_mnat_connected()`
+  was never called, `stream_is_ready()` stayed false, the ACK ran
+  `audio_stop()`, and no DTLS handshake was ever started.  The release now keys
+  on the answer itself — an `updateh` in the incoming state *is* baresip
+  building the answer — and, for the order FreeSWITCH produces, a pair that is
+  selected after the answer has gone out starts media on the spot instead of
+  waiting for an `updateh` that is never coming.  Tests: `test_ice_mod.c`, both
+  orders, with the call state kept where baresip keeps it (answering by
+  flipping the state first is what hid this).
+
 - **A NAT'd call reported its ICE state flapping `completed → disconnected →
   completed` for as long as it lasted.**  A received packet proves liveness for
   a 5-tuple, and a 5-tuple is (socket, remote), not (candidate, remote): every

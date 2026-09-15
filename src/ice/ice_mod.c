@@ -67,6 +67,7 @@ struct icea_sess {
 	bool await_answer;            /* a restart offer is on the wire          */
 	bool reoffered;               /* the candidate re-offer was requested    */
 	bool primed;                  /* checks started while ringing            */
+	bool answered;                /* our SDP answer has been generated       */
 	bool bounce_restart;          /* what tmr_bounce should do              */
 	bool bounce_connh;
 	bool bounce_gather;
@@ -134,6 +135,18 @@ static bool call_is_incoming(const struct icea_sess *s)
 {
 	return s->call &&
 	       call_state((const struct call *)s->call) == CALL_STATE_INCOMING;
+}
+
+
+/* Has the peer been given our answer — fingerprint, setup role, credentials —
+ * so that media may start?  True once we are out of the incoming state (a
+ * delayed-offer INVITE answers in the ACK), and from the moment baresip runs
+ * updateh to build the answer itself: call_answer() calls us one step before
+ * sdp_encode() and sipsess_answer(), so by the time anything else in this
+ * module runs — a bounce, a socket callback — the answer is on the wire. */
+static bool answer_is_out(const struct icea_sess *s)
+{
+	return s->answered || !call_is_incoming(s);
 }
 
 
@@ -213,6 +226,7 @@ static void fire_connh(struct icea_media *m)
 
 	m->connh(&m->vpeer[0], m->ncomp > 1 ? &m->vpeer[1] : NULL, m->arg);
 	m->connh_fired = true;
+	m->held        = false;
 }
 
 
@@ -580,7 +594,7 @@ static void on_selected(struct icea_gen *gen, unsigned compid, void *arg)
 	 * the peer has our answer (fingerprint, setup role, ufrag), lose it,
 	 * and burn its restart budget (2026-08-31). */
 	if (!m->connh_fired && p->ws == ICEA_WS_WRITABLE) {
-		if (call_is_incoming(s)) {
+		if (!answer_is_out(s)) {
 			if (!m->held)
 				info("EchoSDK/ice: '%s' concluded on %J while"
 				     " ringing — media starts with the answer\n",
@@ -1208,6 +1222,12 @@ static int icea_updateh(struct mnat_sess *sess)
 		return 0;
 	}
 
+	/* Incoming and being asked to update: baresip is building our answer
+	 * (call_answer() -> call_apply_sdp()).  Whatever runs after this call
+	 * stack may start media. */
+	if (call_is_incoming(s))
+		s->answered = true;
+
 	LIST_FOREACH(&s->medial, le) {
 		struct icea_media *m = le->data;
 		bool changed = false;
@@ -1295,8 +1315,10 @@ static int icea_updateh(struct mnat_sess *sess)
 		if (m->connh_fired && !m->held)
 			fire_connh(m);
 
-		/* held during ringing: deliver once the answer is out */
-		if (m->held && !call_is_incoming(s)) {
+		/* held during ringing: deliver once the answer is out.  The
+		 * bounce is what makes this safe while we are still inside
+		 * call_answer(): it runs after the 200 has been sent. */
+		if (m->held && answer_is_out(s)) {
 			s->bounce_connh = true;
 			tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 		}

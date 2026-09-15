@@ -504,10 +504,52 @@ static void test_plain_rtp_peer(void)
 }
 
 
+/* Both incoming tests keep B in CALL_STATE_INCOMING across updateh, because
+ * baresip does: call_answer() runs call_apply_sdp() — and so updateh — one
+ * step before sdp_encode() and sipsess_answer(), and the state only becomes
+ * ESTABLISHED on the ACK, which brings no updateh with it.  Answering by
+ * flipping the state first is what hid the bug below until 2026-09-15. */
+
 static void test_incoming_holds_connh_until_answer(void)
 {
-	/* B is the callee and still ringing when its checks conclude:
-	 * media must not start before its answer is out. */
+	/* B is the callee and its checks conclude while it is still ringing:
+	 * media must not start before its answer is out, and must start as
+	 * soon as it is. */
+	struct side a, b;
+
+	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+
+	CHECK(0 == side_attach(&a, true));
+	CHECK(run_until(estab_once, &a, 1000));
+	CHECK(0 == sdp_transfer(&a, &b, true));
+	CHECK(0 == side_attach(&b, false));
+	CHECK(run_until(estab_once, &b, 1000));      /* B gathered → primed */
+
+	/* B's candidates reach A while B is still ringing, so B's checks
+	 * conclude with the answer still unsent. */
+	CHECK(0 == sdp_transfer(&b, &a, false));
+	CHECK(0 == vt()->updateh(a.sess));
+	CHECK(run_until(connh_fired, &a, 4000));
+	CHECK(bsdk_ice_call_state(&b.call) == ICEA_STATE_COMPLETED);
+	CHECK(b.connh_calls == 0);                   /* held: still ringing */
+
+	/* B answers.  Still INCOMING here, and nothing calls updateh again. */
+	CHECK(0 == vt()->updateh(b.sess));
+	CHECK(run_until(connh_fired, &b, 1000));
+	CHECK(b.call.st == CALL_STATE_INCOMING);
+
+	side_close(&a);
+	side_close(&b);
+}
+
+
+static void test_incoming_connh_when_checks_conclude_after_answer(void)
+{
+	/* The other order, and the one FreeSWITCH produces: B's answer goes
+	 * out first and the checks conclude a moment later.  There is no
+	 * further updateh to release anything, so on_selected has to start
+	 * media itself (2026-09-15: a 25 s call, ICE completed, tx 0 rx 0). */
 	struct side a, b;
 	struct side *ab[2] = { &a, &b };
 
@@ -519,19 +561,14 @@ static void test_incoming_holds_connh_until_answer(void)
 	CHECK(0 == sdp_transfer(&a, &b, true));
 	CHECK(0 == side_attach(&b, false));
 	CHECK(run_until(estab_once, &b, 1000));      /* B gathered → primed */
-	/* B's checks run while ringing (prime), but A has no answer yet so
-	 * only B → A checks happen; give it a moment */
-	run_for(300);
-	CHECK(b.connh_calls == 0);
 
-	/* B answers */
-	b.call.st = CALL_STATE_ESTABLISHED;
-	CHECK(0 == vt()->updateh(b.sess));
+	CHECK(0 == vt()->updateh(b.sess));           /* B answers */
 	CHECK(0 == sdp_transfer(&b, &a, false));
-	CHECK(0 == vt()->updateh(a.sess));
+	CHECK(0 == vt()->updateh(a.sess));           /* A applies the answer */
+
 	CHECK(run_until(both_completed, ab, 4000));
 	CHECK(run_until(connh_fired, &b, 1000));
-	CHECK(b.connh_calls >= 1);
+	CHECK(b.call.st == CALL_STATE_INCOMING);
 
 	side_close(&a);
 	side_close(&b);
@@ -660,6 +697,7 @@ int main(void)
 	test_restart_contract();
 	test_plain_rtp_peer();
 	test_incoming_holds_connh_until_answer();
+	test_incoming_connh_when_checks_conclude_after_answer();
 	test_pr2_seams();
 	test_teardown_either_order();
 	test_module_close();
