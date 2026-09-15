@@ -6,6 +6,36 @@ All notable changes to EchoSDK are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A NAT'd call reported its ICE state flapping `completed → disconnected →
+  completed` for as long as it lasted.**  A received packet proves liveness for
+  a 5-tuple, and a 5-tuple is (socket, remote), not (candidate, remote): every
+  local candidate on one port shares that port's socket, so the host,
+  server-reflexive and peer-reflexive pairs to one remote are the same path on
+  the wire.  Receipt was credited only to the first — highest-priority — match,
+  which behind a NAT is the host pair, while the *selected* pair is reflexive.
+  Inbound media therefore refreshed a pair nobody was using and the selected
+  pair was left with only its own check response, at a 2500 ms cadence against
+  a 2500 ms receiving window: the state lapsed about 2.5 s after each response
+  and recovered exactly one round trip later, for ever.  `disconnected` drops
+  the check scheduler into its weak cadence and now also tells netmon that a
+  media stall is the SDK's to repair, so a stall coinciding with a flap would
+  have drawn exactly the re-offer that change exists to avoid.  Found against
+  FreeSWITCH (mod_sofia 1.11.1); Asterisk on the same network had hidden it,
+  because there the selected pair is host/host and the first match *was* the
+  selected pair.  Test: `test_ice_agent.c` (a NAT'd pair kept receiving under
+  data alone with the scheduler stopped).
+
+- **The candidate re-offer compared the selected local candidate against an
+  address the peer had never been sent.**  `signalled` is seeded from the SDP
+  session address — the placeholder port 9, or the private host address — and
+  the offer that goes out carries the reflexive address gathering has just
+  found, so the log read *"selected local candidate 41.33.94.42:61491 was never
+  signalled (offered 10.100.2.179:9)"* on an offer that had in fact carried
+  213.212.207.242:61491.  Every SDP write now re-baselines it from what the SDP
+  holds at that moment, as the previous implementation did.
+
 ### Changed
 
 - **A media stall is no longer always treated as the SDK's own to repair.**
