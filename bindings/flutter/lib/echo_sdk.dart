@@ -1570,7 +1570,12 @@ class EchoSDK {
         target = _accounts[ic.account.address];
         final call = _trackCall(ic.call, target);
         call.state = CallState.ringing;
-        unawaited(_audioSession(true));
+        // Deliberately NOT activating the voice session here. No media flows on
+        // an unanswered incoming call, and on Android MODE_IN_COMMUNICATION
+        // makes the audio policy route the ringtone strategy to the phone
+        // route -- the app's ringtone comes out of the EARPIECE instead of the
+        // loudspeaker. [Call.answer] awaits the activation before the 200 OK,
+        // so the mode is still in force by the time the devices open.
         decoded = IncomingCallEvent(
             call, _str(ic.from_uri) ?? '', _str(ic.display_name));
         break;
