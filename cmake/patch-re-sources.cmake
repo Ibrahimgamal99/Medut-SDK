@@ -347,3 +347,344 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 }
 ]=]
 "WebSocket REGISTER Contact: per-instance host, not the local address")
+
+
+# ---------------------------------------------------------------------------
+# O. sipreg/reg.c — a registration client that is going away must not
+#    un-REGISTER the binding its successor holds
+#
+# With the per-instance Contact of hunk N, every REGISTER this instance sends
+# names the same binding, whichever registration client sends it.  libre still
+# treats the client being freed as the binding's owner and un-REGISTERs it:
+#
+#   - baresip's reg_register() frees the old client and allocates the new one
+#     on every ua_register() — each handover, each retry, each keepalive
+#     recovery.  The un-REGISTER goes out first and briefly empties the AOR.
+#   - When the old client still has a request in flight, the un-REGISTER is
+#     deferred until that request is answered or times out.  After a
+#     handover the request sat on a flushed connection, so that is Timer F,
+#     32 s later — long after the new client registered.  The late
+#     expires=0 then deletes the new binding (RFC 3261 s10.3: a zero expiry
+#     removes the binding whatever the Call-ID), and the device stays
+#     "registered" with no contact at the registrar and no incoming calls.
+#     An app that rebuilds its account (destroy + create) hits the same path
+#     through the client's destructor, including the 401 re-challenge of an
+#     in-flight REGISTER, which re-sends as an authenticated expires=0.
+#     Observed on the wire (2026-09-28): REGISTER expires=0 and a new
+#     REGISTER for the identical Contact, back to back, on every handover.
+#
+# So for an instance Contact the departing client sends nothing: the
+# successor's REGISTER refreshes the binding in place.  An explicit
+# sipreg_unregister() — sign-out, account destroy after unregister — is
+# unaffected, and so is every address-based Contact, where the old binding is
+# a different URI and removing it is the point.
+# ---------------------------------------------------------------------------
+echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+static int request(struct sipreg *reg, bool reset_ls);
+]=]
+[=[
+static int request(struct sipreg *reg, bool reset_ls);
+/* EchoSDK-patched: see echosdk_contact_is_instance() below. */
+static bool echosdk_contact_is_instance(const struct sipreg *reg);
+]=]
+"forward declaration of echosdk_contact_is_instance")
+
+echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	if (reg->terminated && !reg->registered)
+		goto out;
+]=]
+[=[
+	/* EchoSDK-patched: a terminated client with an instance Contact does
+	 * not answer a challenge either — the retry would go out as an
+	 * authenticated expires=0 for the binding a successor now holds. */
+	if (reg->terminated &&
+	    (!reg->registered || echosdk_contact_is_instance(reg)))
+		goto out;
+]=]
+"terminated instance-Contact registration: no re-challenge")
+
+echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	else if (reg->terminated) {
+		if (!reg->registered || request(reg, true))
+			mem_deref(reg);
+	}
+]=]
+[=[
+	else if (reg->terminated) {
+		/* EchoSDK-patched: the deferred un-REGISTER of a freed client.
+		 * For an instance Contact it would land after the successor's
+		 * REGISTER and delete that binding. */
+		if (!reg->registered || echosdk_contact_is_instance(reg) ||
+		    request(reg, true))
+			mem_deref(reg);
+	}
+]=]
+"terminated instance-Contact registration: no deferred un-REGISTER")
+
+echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+void sipreg_unregister(struct sipreg *reg)
+{
+	if (!reg)
+		return;
+
+	reg->expires = 0;
+
+	(void)sipreg_send(reg);
+}
+]=]
+[=[
+void sipreg_unregister(struct sipreg *reg)
+{
+	if (!reg)
+		return;
+
+	reg->expires = 0;
+
+	(void)sipreg_send(reg);
+}
+
+
+/* EchoSDK-patched: does this registration's Contact name the instance rather
+ * than the local address?
+ *
+ * True for a WebSocket registration carrying the per-instance ".invalid"
+ * host (see send_handler()).  That Contact is the same URI on every network
+ * and from every registration client of this instance, so any later REGISTER
+ * from it refreshes the very binding this client holds. */
+static bool echosdk_contact_is_instance(const struct sipreg *reg)
+{
+	char host[64];
+
+	if (!reg)
+		return false;
+
+	if (reg->tp != SIP_TRANSP_WS && reg->tp != SIP_TRANSP_WSS)
+		return false;
+
+	return 0 == echosdk_ws_contact_host(host, sizeof(host), reg);
+}
+
+
+/**
+ * EchoSDK-patched: free a registration client that a new one is replacing
+ *
+ * Like mem_deref(), except that a client whose Contact names the instance
+ * sends no un-REGISTER on the way out: its successor is about to REGISTER
+ * the same binding, and removing it first only leaves the AOR empty until
+ * that REGISTER is answered.  Any other client is un-REGISTERed as usual.
+ *
+ * @param reg   SIP Registration client
+ *
+ * @return NULL, for assignment
+ */
+struct sipreg *sipreg_release(struct sipreg *reg)
+{
+	if (reg && echosdk_contact_is_instance(reg))
+		reg->registered = false;
+
+	return mem_deref(reg);
+}
+]=]
+"sipreg_release(): free a replaced client without un-REGISTERing")
+
+echosdk_patch("${SOURCE_DIR}/include/re_sipreg.h"
+[=[
+void sipreg_unregister(struct sipreg *reg);
+]=]
+[=[
+void sipreg_unregister(struct sipreg *reg);
+/* EchoSDK-patched: see src/sipreg/reg.c */
+struct sipreg *sipreg_release(struct sipreg *reg);
+]=]
+"sipreg_release() declaration")
+
+
+# ---------------------------------------------------------------------------
+# P. sip/keepalive + sipreg — a registration hears about its connection closing
+#
+# A registrar reaches a TCP/TLS/WS client down the connection its REGISTER
+# arrived on, so when that connection closes the binding is dead: every INVITE
+# the registrar sends goes nowhere.  libre only notices the close if the
+# registration is watching its connection, and it only watches under RFC 5626
+# outbound — when the 200 OK carries `Require: outbound` — and never over
+# WebSocket (sip_keepalive_start() answers EPROTONOSUPPORT).  Asterisk does not
+# do outbound.  So a WebSocket that died under a registration was invisible:
+# the client stayed "registered", the next request (a keepalive OPTIONS)
+# silently opened a *new* connection and was answered, and the registrar kept
+# routing calls to the dead one until the REGISTER refresh minutes later.
+# Observed on-device (2026-09-28, Android, FreePBX over WSS): the connection
+# aborted with ECONNABORTED 0.4 s after a handover's REGISTER, two wake pushes
+# for the same call were each "ready" within 800 ms, and no INVITE arrived —
+# the call was missed.
+#
+# A browser does not have this hole: SIP.js re-registers when its WebSocket
+# closes.  This gives libre the same: sip_keepalive_watch() puts a watch-only
+# entry on the connection's keepalive list — no CRLF pings, which a server
+# that never agreed to outbound need not answer — and conn_close() already
+# signals that list.  sipreg arms it on every successful REGISTER over a
+# connection-oriented transport, and its existing flow-failure handler turns
+# the close into a registration failure, which the SDK retries at once.
+# A transport flush (handover) frees the list without signalling it, so the
+# SDK's own re-REGISTER is not doubled.
+# ---------------------------------------------------------------------------
+echosdk_patch("${SOURCE_DIR}/src/sip/sip.h"
+[=[
+int  sip_keepalive_tcp(struct sip_keepalive *ka, struct sip_conn *conn,
+		       uint32_t interval);
+]=]
+[=[
+int  sip_keepalive_tcp(struct sip_keepalive *ka, struct sip_conn *conn,
+		       uint32_t interval);
+/* EchoSDK-patched: see sip_keepalive_watch() */
+int  sip_keepalive_conn_watch(struct sip_keepalive *ka, struct sip_conn *conn);
+]=]
+"sip_keepalive_conn_watch() declaration")
+
+echosdk_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+		tmr_start(&conn->tmr_ka, sip_keepalive_wait(conn->ka_interval),
+			  conn_keepalive_handler, conn);
+	}
+
+	return 0;
+}
+]=]
+[=[
+		tmr_start(&conn->tmr_ka, sip_keepalive_wait(conn->ka_interval),
+			  conn_keepalive_handler, conn);
+	}
+
+	return 0;
+}
+
+
+/* EchoSDK-patched: be told when this connection closes, and nothing else —
+ * no keepalive pings.  conn_close() signals conn->kal; a connection freed
+ * by a transport flush drops the list without signalling it. */
+int  sip_keepalive_conn_watch(struct sip_keepalive *ka, struct sip_conn *conn)
+{
+	if (!ka || !conn)
+		return EINVAL;
+
+	list_append(&conn->kal, &ka->le, ka);
+
+	return 0;
+}
+]=]
+"sip_keepalive_conn_watch(): watch a connection for close")
+
+echosdk_patch("${SOURCE_DIR}/src/sip/keepalive.c"
+[=[
+uint64_t sip_keepalive_wait(uint32_t interval)
+{
+	return (uint64_t) interval * (800 + rand_u16() % 201);
+}
+]=]
+[=[
+uint64_t sip_keepalive_wait(uint32_t interval)
+{
+	return (uint64_t) interval * (800 + rand_u16() % 201);
+}
+
+
+/**
+ * EchoSDK-patched: call a handler when the connection a message arrived on
+ * closes
+ *
+ * The close-detection half of sip_keepalive_start(), without its keepalive
+ * pings, for a connection-oriented transport including WebSocket.  Ownership
+ * is sip_keepalive_start()'s: the connection owns the entry, *kap is cleared
+ * when it goes, and mem_deref(*kap) stops watching.
+ *
+ * @param kap  Pointer to allocated keepalive object
+ * @param sip  SIP Stack instance
+ * @param msg  SIP Message received on the connection to watch
+ * @param kah  Handler, called once with the close reason
+ * @param arg  Handler argument
+ *
+ * @return 0 if success, EPROTONOSUPPORT for a connectionless transport
+ */
+int sip_keepalive_watch(struct sip_keepalive **kap, struct sip *sip,
+			const struct sip_msg *msg,
+			sip_keepalive_h *kah, void *arg)
+{
+	struct sip_keepalive *ka;
+	int err;
+
+	if (!kap || !sip || !msg || !kah || !msg->sock)
+		return EINVAL;
+
+	switch (msg->tp) {
+
+	case SIP_TRANSP_TCP:
+	case SIP_TRANSP_TLS:
+	case SIP_TRANSP_WS:
+	case SIP_TRANSP_WSS:
+		break;
+
+	default:
+		return EPROTONOSUPPORT;
+	}
+
+	ka = mem_zalloc(sizeof(*ka), destructor);
+	if (!ka)
+		return ENOMEM;
+
+	ka->kah = kah;
+	ka->arg = arg;
+
+	err = sip_keepalive_conn_watch(ka, (struct sip_conn *)msg->sock);
+	if (err) {
+		mem_deref(ka);
+		return err;
+	}
+
+	ka->kap = kap;
+	*kap = ka;
+
+	return 0;
+}
+]=]
+"sip_keepalive_watch(): close notification without pings")
+
+echosdk_patch("${SOURCE_DIR}/include/re_sip.h"
+[=[
+int sip_keepalive_start(struct sip_keepalive **kap, struct sip *sip,
+			const struct sip_msg *msg, uint32_t interval,
+			sip_keepalive_h *kah, void *arg);
+]=]
+[=[
+int sip_keepalive_start(struct sip_keepalive **kap, struct sip *sip,
+			const struct sip_msg *msg, uint32_t interval,
+			sip_keepalive_h *kah, void *arg);
+/* EchoSDK-patched: see src/sip/keepalive.c */
+int sip_keepalive_watch(struct sip_keepalive **kap, struct sip *sip,
+			const struct sip_msg *msg,
+			sip_keepalive_h *kah, void *arg);
+]=]
+"sip_keepalive_watch() declaration")
+
+echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+		if (reg->regid > 0 && !reg->terminated && !reg->ka)
+			start_outbound(reg, msg);
+		goto out;
+]=]
+[=[
+		if (reg->regid > 0 && !reg->terminated && !reg->ka)
+			start_outbound(reg, msg);
+
+		/* EchoSDK-patched: without outbound, still hear about the
+		 * connection this binding lives on closing — keepalive_handler()
+		 * turns that into a registration failure, as it does for an
+		 * outbound flow.  A no-op over UDP.  See sip_keepalive_watch(). */
+		if (!reg->terminated && !reg->ka)
+			(void)sip_keepalive_watch(&reg->ka, reg->sip, msg,
+						  keepalive_handler, reg);
+		goto out;
+]=]
+"sipreg: watch the registration's connection for close")

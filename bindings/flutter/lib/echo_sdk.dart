@@ -992,8 +992,11 @@ class EchoSDK {
     //
     // On a REATTACHED stack the same report is worth keeping: the native side
     // may be holding a cached WSS connection that died while no isolate was
-    // listening, and this refresh is what flushes it. Gated here rather than in
-    // the plugins because this is the only layer that knows which case it is.
+    // listening, and this report is what finds it. It is cheap when nothing
+    // died — with the address set unchanged, the native side only probes the
+    // existing connection and hands over just if the probe goes unanswered
+    // (echosdk_network_changed in echosdk.h). Gated here rather than in the
+    // plugins because this is the only layer that knows which case it is.
     // A window, not "drop the first callback": Android delivers no initial
     // report when there is no network at start, and a later real change must
     // not be the one that gets swallowed.

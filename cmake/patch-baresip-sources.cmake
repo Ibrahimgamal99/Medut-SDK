@@ -165,3 +165,52 @@ else()
   file(WRITE "${DTLS_SRTP_C}" "${DCONTENT}")
   message(STATUS "patch-baresip-sources: patched ${DTLS_SRTP_C} (dtls handshake recovery)")
 endif()
+
+# ---------------------------------------------------------------------------
+# Job 3: reg.c — re-registering must not un-REGISTER the binding it refreshes
+#
+# reg_register() frees the account's registration client and allocates a new
+# one on every ua_register(): each handover, retry and keepalive recovery.
+# Freed with mem_deref(), the old client un-REGISTERs its binding on the way
+# out, and with the per-instance WebSocket Contact (patch-re-sources.cmake,
+# hunk N) that binding is the one the new client is about to REGISTER — so
+# the AOR goes empty for a round trip, or for good when the un-REGISTER is
+# deferred behind an in-flight request (hunk O).  sipreg_release() is libre's
+# EchoSDK-patched free for exactly this hand-off.
+# ---------------------------------------------------------------------------
+
+set(REG_C "${SOURCE_DIR}/src/reg.c")
+if(NOT EXISTS "${REG_C}")
+  message(FATAL_ERROR "patch-baresip-sources: ${REG_C} does not exist")
+endif()
+
+file(READ "${REG_C}" RCONTENT)
+set(_REG_OLD [=[
+	failed = sipreg_failed(reg->sipreg);
+	reg->sipreg = mem_deref(reg->sipreg);
+	err = sipreg_alloc(&reg->sipreg, uag_sip(), reg_uri,
+]=])
+set(_REG_NEW [=[
+	failed = sipreg_failed(reg->sipreg);
+	/* EchoSDK-patched: the new client refreshes this one's binding; see
+	 * sipreg_release() in libre. */
+	reg->sipreg = sipreg_release(reg->sipreg);
+	err = sipreg_alloc(&reg->sipreg, uag_sip(), reg_uri,
+]=])
+
+string(FIND "${RCONTENT}" "${_REG_NEW}" _REG_DONE)
+if(NOT _REG_DONE EQUAL -1)
+  message(STATUS "patch-baresip-sources: ${REG_C} already patched (sipreg_release)")
+else()
+  string(FIND "${RCONTENT}" "${_REG_OLD}" _pos)
+  if(_pos EQUAL -1)
+    message(FATAL_ERROR
+      "patch-baresip-sources: anchor not found in ${REG_C} for sipreg_release.\n"
+      "The pinned baresip revision has moved reg_register(). Re-derive this "
+      "patch — building without it lets every re-REGISTER remove its own "
+      "WebSocket binding.")
+  endif()
+  string(REPLACE "${_REG_OLD}" "${_REG_NEW}" RCONTENT "${RCONTENT}")
+  file(WRITE "${REG_C}" "${RCONTENT}")
+  message(STATUS "patch-baresip-sources: patched ${REG_C} (sipreg_release)")
+endif()

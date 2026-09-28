@@ -8,6 +8,94 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **Calls were missed after the registration's connection closed, while the
+  app still showed "registered".**  A registrar reaches a TCP/TLS/WebSocket
+  client down the connection its REGISTER arrived on. When that connection
+  closes the binding is dead, but nothing told the registration.  libre only
+  watches a registration's connection under RFC 5626 outbound, which needs a
+  `Require: outbound` answer that Asterisk never sends, and it never watches
+  over WebSocket.  So the account stayed REGISTERED.  The next request, a
+  keepalive OPTIONS or a wake-push probe, quietly opened a new connection and
+  was answered.  The registrar kept sending INVITEs to the dead one until the
+  REGISTER refresh minutes later.
+
+  Observed on-device (2026-09-28, Android, FreePBX over WSS):
+  - The connection aborted (`ECONNABORTED`) 0.4 s after a handover's
+    REGISTER.
+  - Two wake pushes for the same call each reported "ready" within 800 ms.
+  - The push deadline's check was also answered over a fresh connection.
+  - No INVITE arrived, and the call was missed.
+
+  `sip_keepalive_watch()` now puts a watch-only entry, with no CRLF pings, on
+  the connection a successful REGISTER was answered on.  libre's existing
+  `conn_close()` signal turns the close into a registration failure, and the
+  SDK retries it at once on a new connection: RECONNECTING, then REGISTERED
+  about 2 s later.  This is the SIP.js rule, where the client re-registers when
+  its WebSocket closes.  A handover's transport flush frees the watch without
+  signalling it, so a handover still re-registers exactly once.  Patch:
+  `cmake/patch-re-sources.cmake` hunk P.
+
+- **The app sat on "Reconnecting…" for network reports that changed
+  nothing.**  Every `echosdk_network_changed()` ran a full handover:
+  RECONNECTING, a transport flush, an un-REGISTER plus re-REGISTER, and a
+  re-INVITE per call, even when the address set was exactly the one the
+  transports were bound to.  A phone produces such reports all the time. The
+  Flutter plugins replay the current network on every engine attach,
+  push-woken headless engines included. iOS reports a VPN or a second radio
+  next to an unchanged primary network. Hosts also call it defensively on
+  resume and after a push.  Measured on the wire (2026-09-28, FreePBX over
+  WSS, same Wi-Fi, same IP): 1.6 s of RECONNECTING and a new WebSocket for
+  each one.
+
+  With the address set unchanged, the SDK now checks the path first. It sends
+  one OPTIONS per registered account over the connection that account already
+  has, and if every account answers within 3 s nothing is done.  A connection
+  that has died without closing, such as one cached across an engine re-attach
+  or behind a black-holed NAT, stays silent, and the report becomes the
+  handover it always was, about 3 s later.  The check only runs where an
+  answer proves enough:
+  - WS/WSS/TCP/TLS accounts, because the registrar reaches them down that
+    connection.
+  - Every account already REGISTERED.
+  - Every live call on ICE.
+
+  UDP accounts and plain-RTP calls keep the unconditional handover.  This is
+  the browser's rule: a SIP.js client keeps its WebSocket until the WebSocket
+  fails, and never re-registers because the OS mentioned the network.
+
+- **A handover was followed, 32 s later, by a second reconnect.**  The
+  transport flush destroys connections without failing the transactions on
+  them.  So an OPTIONS keepalive probe that was in flight on the old connection
+  timed out at Timer F, long after the new REGISTER had succeeded. The probe
+  handler read that as the path dying again and posted RECONNECTING plus
+  another re-REGISTER.  Probes now carry a generation that
+  `bsdk_account_keepalive_cancel()` advances, and an answer from an earlier
+  generation is ignored.  The schedule keeps running around a stale probe
+  instead of stalling behind it.  A failed probe also now reaches the app as
+  one RECONNECTING event instead of two: attempt 0 with no countdown, then the
+  same reconnect again with one.
+
+- **A re-registration could delete its own WebSocket binding, leaving the
+  device "registered" with no contact at the registrar and no incoming
+  calls.**  baresip frees the account's registration client and allocates a
+  new one on every `ua_register()`: each handover, retry and keepalive
+  recovery.  Freeing it un-REGISTERs its binding.  Since the WS Contact became
+  the per-instance `<uuid>.invalid` host, that binding is the very one the new
+  client registers.  So the AOR went empty for a round trip on every handover
+  (seen on the wire: `expires=0` and a new REGISTER for the identical Contact,
+  back to back).  It went empty for good when the old client still had a
+  request in flight: the un-REGISTER was deferred until that request finished,
+  which after a flush means Timer F, 32 s after the new binding was made.
+  An app that rebuilds its account (destroy + create) hit the same path,
+  including through the 401 re-challenge of an in-flight REGISTER.  libre gains
+  `sipreg_release()`, which baresip's `reg_register()` now uses. A departing
+  client with an instance Contact sends nothing: no un-REGISTER, no deferred
+  un-REGISTER, no re-challenge.  The successor's REGISTER refreshes the binding
+  in place.  An explicit unregister and shutdown still remove it (checked on
+  the wire from a second instance), and address-based Contacts behave as
+  before.  Patches: `cmake/patch-re-sources.cmake` hunk O,
+  `cmake/patch-baresip-sources.cmake` job 3.
+
 - **An answered incoming call connected, negotiated ICE, and then carried no
   media at all: `tx 0 rx 0` for the whole call.**  Connectivity checks run
   while the phone rings, but the connected handler is held back until our

@@ -981,6 +981,17 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 
 	acct->ka_in_flight = false;
 
+	/* Sent before the keepalive was last cancelled — by a handover, a failed
+	 * REGISTER, an unregister.  The handover case is the one that bites: its
+	 * transport flush destroys the connection without failing what is
+	 * pending on it, so this is Timer F firing 32 s later for a socket that
+	 * is already gone.  Acting on it reported a second reconnect, and a
+	 * second re-REGISTER, right after the first one had succeeded.  The
+	 * path it describes is not the one we are on; whoever cancelled owns
+	 * the schedule now. */
+	if (acct->ka_sent_gen != acct->ka_gen)
+		return;
+
 	if (!err && msg) {
 		/* Reachable.  Normally nothing to report — an app that wants to
 		 * see the probes can watch SIP tracing.
@@ -1052,6 +1063,22 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 	str_ncpy(acct->reg_error_str, "keepalive probe timed out",
 	         sizeof(acct->reg_error_str));
 
+	if (g_bsdk.cfg.keepalive_reregister && acct->reg_wanted) {
+		/* Straight to a retry rather than an immediate ua_register(): the
+		 * retry path is what walks the SRV list and applies the backoff, and
+		 * a proxy that just stopped answering is exactly when both matter.
+		 *
+		 * Armed before the failure is reported, as REGISTER_FAIL does
+		 * (event.c): scheduling settles the attempt and the countdown, and
+		 * schedule_retry() posts the RECONNECTING itself.  Reported first,
+		 * every probe failure reached the app twice — attempt 0 with no
+		 * countdown, then the same reconnect again with one. */
+		bsdk_account_schedule_retry(acct);
+	}
+	else {
+		bsdk_account_keepalive_arm(acct);
+	}
+
 	ev.type            = ECHOSDK_EV_REG_STATE;
 	ev.u.reg.state     = acct->reg_state;
 	ev.u.reg.error     = ECHOSDK_ERR_TIMEOUT;
@@ -1059,28 +1086,46 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 	ev.u.reg.account   = acct;
 	if (bsdk_account_reg_ev_prepare(acct, &ev))
 		bsdk_event_post(&ev);
+}
 
-	if (g_bsdk.cfg.keepalive_reregister && acct->reg_wanted) {
-		/* Straight to a retry rather than an immediate ua_register(): the
-		 * retry path is what walks the SRV list and applies the backoff, and
-		 * a proxy that just stopped answering is exactly when both matter. */
-		bsdk_account_schedule_retry(acct);
-	}
-	else {
-		bsdk_account_keepalive_arm(acct);
-	}
+int bsdk_account_probe_send(struct echosdk_account *acct,
+                            options_resp_h *resph, void *arg)
+{
+	char uri[320];
+	const char *host;
+
+	if (!acct || acct->destroyed || !acct->ua)
+		return EINVAL;
+
+	host = (acct->cfg.server_host && acct->cfg.server_host[0])
+	       ? acct->cfg.server_host : acct->parsed_host;
+	if (!host || !host[0])
+		return EINVAL;
+
+	/* Address the domain, not a specific proxy: baresip routes the request
+	 * through the account's outbound proxy, which is what we are probing. */
+	if (re_snprintf(uri, sizeof(uri), "sip:%s", host) < 0)
+		return ENOMEM;
+
+	return ua_options_send(acct->ua, uri, resph, arg);
 }
 
 static void keepalive_handler(void *arg)
 {
 	struct echosdk_account *acct = arg;
-	char uri[320];
-	const char *host;
+	int err;
 
 	if (acct->destroyed || !acct->ua || !acct->reg_wanted)
 		return;
-	if (acct->ka_in_flight)
-		return;   /* previous probe still outstanding */
+	if (acct->ka_in_flight) {
+		/* Previous probe still outstanding.  A current one re-arms from
+		 * its own answer.  One from before the last cancel says nothing
+		 * about this path and may not come back until Timer F, so keep
+		 * the schedule running around it instead of stalling on it. */
+		if (acct->ka_sent_gen != acct->ka_gen)
+			bsdk_account_keepalive_arm(acct);
+		return;
+	}
 
 	/* RTP on an active call already holds the NAT binding open, and an
 	 * OPTIONS competing with media for a congested uplink is exactly the
@@ -1090,20 +1135,14 @@ static void keepalive_handler(void *arg)
 		return;
 	}
 
-	host = (acct->cfg.server_host && acct->cfg.server_host[0])
-	       ? acct->cfg.server_host : acct->parsed_host;
-	if (!host || !host[0])
-		return;
-
-	/* Address the domain, not a specific proxy: baresip routes the request
-	 * through the account's outbound proxy, which is what we are probing. */
-	if (re_snprintf(uri, sizeof(uri), "sip:%s", host) < 0)
-		return;
-
 	acct->ka_in_flight = true;
-	if (ua_options_send(acct->ua, uri, keepalive_resp_handler, acct)) {
+	acct->ka_sent_gen  = acct->ka_gen;
+	err = bsdk_account_probe_send(acct, keepalive_resp_handler, acct);
+	if (err) {
 		acct->ka_in_flight = false;
-		bsdk_account_keepalive_arm(acct);
+		/* No host to probe is not going to change on the next tick. */
+		if (err != EINVAL)
+			bsdk_account_keepalive_arm(acct);
 	}
 }
 
@@ -1123,8 +1162,13 @@ void bsdk_account_keepalive_arm(struct echosdk_account *acct)
 
 void bsdk_account_keepalive_cancel(struct echosdk_account *acct)
 {
-	if (acct)
-		tmr_cancel(&acct->ka_tmr);
+	if (!acct)
+		return;
+
+	tmr_cancel(&acct->ka_tmr);
+	/* A probe still in flight now answers for a path we have stopped
+	 * asking about — see keepalive_resp_handler(). */
+	acct->ka_gen++;
 }
 
 /**

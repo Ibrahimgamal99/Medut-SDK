@@ -110,16 +110,30 @@
  * See the hold in send_migration(). */
 #define BSDK_NET_MIG_SECURE_HOLD_MS 12000
 
+/* How long a reported network change waits for the path check (see
+ * start_path_check()) before treating the silence as a dead connection.
+ *
+ * The probe is one OPTIONS over a connection that is already up, so a live
+ * path answers in two round trips — the proxy's digest challenge and the
+ * retry — which is well under a second even on a congested cellular link.
+ * Erring short is safe: a check that runs out of time does exactly what every
+ * report did before the check existed. */
+#define BSDK_NET_CHECK_MS 3000
+
 struct bsdk_netmon {
 	struct tmr tmr_poll;    /* periodic interface scan                     */
 	struct tmr tmr_settle;  /* debounce / retry of the handover itself     */
 	struct tmr tmr_verify;  /* per-call migration progress tick            */
+	struct tmr tmr_check;   /* path check deadline                         */
 
 	bool     started;
 	bool     reset_pending; /* addresses changed, handover still owed      */
 	bool     force;         /* app asserted a change; run even if addrs eq */
 	bool     announced;     /* CHANGE_DETECTED already emitted this round  */
 	bool     down;          /* no usable local address                     */
+	bool     checking;      /* path check in flight                        */
+	uint32_t check_gen;     /* stamps this round's probes; bumped to end it */
+	uint32_t check_left;    /* probes of this round not yet answered       */
 
 	uint32_t gen;           /* handover generation; stamps per-call state  */
 	uint32_t attempt;       /* consecutive failed transport resets         */
@@ -1613,6 +1627,18 @@ static void settle_handler(void *arg)
 	apply_handover();
 }
 
+/* End a path check without a verdict: answers still on the wire are ignored
+ * from here on (their generation no longer matches). */
+static void check_abandon(void)
+{
+	if (!g_nm.checking)
+		return;
+
+	tmr_cancel(&g_nm.tmr_check);
+	g_nm.checking = false;
+	g_nm.check_gen++;
+}
+
 static void netmon_trigger(bool forced)
 {
 	if (!g_nm.started)
@@ -1627,6 +1653,10 @@ static void netmon_trigger(bool forced)
 		return;
 
 	if (!g_nm.announced) {
+		/* The handover about to run answers whatever a pending check
+		 * was asking. */
+		check_abandon();
+
 		g_nm.announced      = true;
 		g_nm.handover_start = tmr_jiffies();
 		update_cur_laddr();
@@ -1635,6 +1665,145 @@ static void netmon_trigger(bool forced)
 	}
 
 	tmr_start(&g_nm.tmr_settle, g_nm.settle_ms, settle_handler, NULL);
+}
+
+/* ── Path check ──────────────────────────────────────────────────────────────
+ *
+ * echosdk_network_changed() says the OS saw *something* move.  On a phone most
+ * of those reports are not a move of ours: the platform monitor replays the
+ * current network every time it is registered (every engine attach of a
+ * Flutter app, a push-woken headless engine included), iOS reports a VPN or a
+ * second radio appearing next to an unchanged primary, and hosts call it on
+ * resume or after a push as a precaution.  Each one used to be a full
+ * handover — RECONNECTING, a transport flush, a re-REGISTER, a re-INVITE per
+ * call — on a path that never broke, which is the "always reconnecting" the
+ * user sees.
+ *
+ * A browser does none of that.  It keeps its WebSocket until the WebSocket
+ * itself fails, and ICE carries the media across the network underneath.
+ *
+ * So when the address set is exactly the one the transports are bound to, ask
+ * the path instead of assuming it died: one OPTIONS per registered account,
+ * over the connection it already has.  An answer from every account means the
+ * connection the registrar routes us by is alive, and nothing is done.  Any
+ * failure, or silence for BSDK_NET_CHECK_MS, and the report is handled as the
+ * handover it was sent as.  A dead socket is precisely what the check finds:
+ * the request goes into a connection with nobody on the far end and nothing
+ * comes back.
+ *
+ * Only asked where an answer proves enough:
+ *   - connection-oriented transports.  A registrar reaches a WS/TCP/TLS
+ *     client down the connection it registered on, so a live connection is a
+ *     live binding.  Over UDP the answer comes back through whatever NAT
+ *     mapping exists now, while the registrar may still hold the old one.
+ *     "The" connection matters: when the one a binding lives on closes, the
+ *     next request quietly opens a new one, which would answer this probe
+ *     for a binding that is gone.  libre's sipreg watches its connection and
+ *     fails the registration the moment it closes (patch-re-sources.cmake,
+ *     hunk P), so such an account is already RECONNECTING by the time a
+ *     check could run, and the check below declines it.
+ *   - every account already REGISTERED.  One that is recovering is owed the
+ *     fresh attempt a handover gives it (reregister_accounts()).
+ *   - every live call on ICE.  The agent keeps checking its own pair and
+ *     reports the path through ECHOSDK_EV_ICE_STATE; a plain-RTP call only
+ *     moves when it is re-INVITEd, so it keeps the unconditional handover.
+ */
+
+static void check_done(bool ok)
+{
+	check_abandon();
+
+	if (ok) {
+		info("EchoSDK/netmon: network change reported, but every "
+		     "connection to the registrar still answers — nothing "
+		     "to hand over\n");
+		return;
+	}
+
+	info("EchoSDK/netmon: network change reported and the path "
+	     "check failed — handing over\n");
+	netmon_trigger(true);
+}
+
+static void check_resp_handler(int err, const struct sip_msg *msg, void *arg)
+{
+	uint32_t gen = (uint32_t)(uintptr_t)arg;
+
+	if (!g_nm.started || !g_nm.checking || gen != g_nm.check_gen)
+		return;
+
+	/* Any response is an answer, as for the keepalive probe: a proxy that
+	 * refuses OPTIONS still had to receive it over this connection. */
+	if (err || !msg) {
+		check_done(false);
+		return;
+	}
+
+	if (g_nm.check_left && --g_nm.check_left == 0)
+		check_done(true);
+}
+
+static void check_timeout(void *arg)
+{
+	(void)arg;
+
+	if (!g_nm.started || !g_nm.checking)
+		return;
+
+	check_done(false);
+}
+
+/* @return true when a check is running and will answer this report. */
+static bool start_path_check(void)
+{
+	struct echosdk_account *acc[BSDK_NET_MAX_SNAP];
+	struct echosdk_call    *calls[BSDK_NET_MAX_SNAP];
+	size_t n, nc, i;
+	uint32_t gen;
+
+	/* A report landing while one is out is answered by that one. */
+	if (g_nm.checking)
+		return true;
+
+	n = snapshot_accounts(acc, RE_ARRAY_SIZE(acc));
+	if (!n)
+		return false;
+
+	for (i = 0; i < n; i++) {
+		if (acc[i]->reg_state != ECHOSDK_REG_REGISTERED)
+			return false;
+		if (acc[i]->parsed_transport == ECHOSDK_TRANSPORT_UDP)
+			return false;
+	}
+
+	nc = snapshot_calls(calls, RE_ARRAY_SIZE(calls));
+	for (i = 0; i < nc; i++) {
+		if (!call_uses_ice(calls[i]))
+			return false;
+	}
+
+	g_nm.checking   = true;
+	g_nm.check_left = (uint32_t)n;
+	gen = ++g_nm.check_gen;
+	tmr_start(&g_nm.tmr_check, BSDK_NET_CHECK_MS, check_timeout, NULL);
+
+	for (i = 0; i < n; i++) {
+		int err = bsdk_account_probe_send(acc[i], check_resp_handler,
+		                                  (void *)(uintptr_t)gen);
+
+		/* Ended from inside the send — a synchronous failure already
+		 * started the handover. */
+		if (!g_nm.checking || gen != g_nm.check_gen)
+			return true;
+
+		if (err) {
+			/* Cannot even ask: no better off than before the check. */
+			check_abandon();
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static void poll_handler(void *arg)
@@ -1660,6 +1829,7 @@ int bsdk_netmon_init(void)
 	tmr_init(&g_nm.tmr_poll);
 	tmr_init(&g_nm.tmr_settle);
 	tmr_init(&g_nm.tmr_verify);
+	tmr_init(&g_nm.tmr_check);
 
 	g_nm.poll_s         = cfg->net_monitor_interval_s;
 	g_nm.settle_ms      = cfg->net_settle_ms ? cfg->net_settle_ms
@@ -1697,6 +1867,7 @@ void bsdk_netmon_close(void)
 	tmr_cancel(&g_nm.tmr_poll);
 	tmr_cancel(&g_nm.tmr_settle);
 	tmr_cancel(&g_nm.tmr_verify);
+	tmr_cancel(&g_nm.tmr_check);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
@@ -1704,6 +1875,28 @@ void bsdk_netmon_close(void)
 static void changed_fn(void *arg)
 {
 	(void)arg;
+
+	if (!g_nm.started)
+		return;
+
+	/* Already handing over, or waiting for an address to appear: the report
+	 * joins that round, as it always has. */
+	if (g_nm.announced || g_nm.reset_pending || g_nm.force || g_nm.down) {
+		netmon_trigger(true);
+		return;
+	}
+
+	/* The addresses moved.  That is a handover whatever the connections
+	 * would say — every transport is bound to the old set. */
+	if (scan_addresses()) {
+		g_nm.reset_pending = true;
+		netmon_trigger(true);
+		return;
+	}
+
+	if (start_path_check())
+		return;
+
 	netmon_trigger(true);
 }
 

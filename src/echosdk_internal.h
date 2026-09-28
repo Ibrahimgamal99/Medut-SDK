@@ -201,6 +201,12 @@ struct echosdk_account {
 	 * signal that such a path recovered without a re-REGISTER, so it is
 	 * what turns RECONNECTING back into REGISTERED. */
 	bool                      ka_failed;
+	/* Bumped by bsdk_account_keepalive_cancel(); ka_sent_gen is its value
+	 * when the in-flight probe went out.  A mismatch marks that probe as
+	 * asking about a path we have since stopped probing — typically one a
+	 * handover flushed, whose Timer F still fires 32 s later. */
+	uint32_t                  ka_gen;
+	uint32_t                  ka_sent_gen;
 };
 
 /* ── Call ──────────────────────────────────────────────────────────────── */
@@ -501,6 +507,12 @@ void bsdk_account_reconnect_reset(struct echosdk_account *acct);
  * registered. */
 void bsdk_account_keepalive_arm(struct echosdk_account *acct);
 void bsdk_account_keepalive_cancel(struct echosdk_account *acct);
+/* Send the keepalive probe's request — OPTIONS to the account's domain via
+ * its outbound proxy — with the caller's own response handler, outside the
+ * keepalive schedule.  netmon.c uses it to ask whether a connection survived
+ * a reported network change.  re_main thread only. */
+int bsdk_account_probe_send(struct echosdk_account *acct,
+                            options_resp_h *resph, void *arg);
 /* Kick off the one-shot SRV lookup that feeds failover, if eligible. */
 void bsdk_account_srv_resolve(struct echosdk_account *acct);
 
