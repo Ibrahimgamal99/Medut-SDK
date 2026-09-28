@@ -90,6 +90,8 @@ typedef enum {
  ECHOSDK_ERR_WS_PROTOCOL_REJECTED = -8,
  ECHOSDK_ERR_TIMEOUT = -9,
  ECHOSDK_ERR_ALREADY = -10,
+
+ ECHOSDK_ERR_FORBIDDEN = -11,
 } echosdk_error_t;
 
 typedef enum {

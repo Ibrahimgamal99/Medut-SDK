@@ -200,6 +200,7 @@ Monitor retries via `retry_attempt` and `retry_delay_ms` in `ECHOSDK_EV_REG_STAT
 | `ECHOSDK_ERR_DNS` | Cannot resolve server hostname | Check DNS / network |
 | `ECHOSDK_ERR_TRANSPORT` | TCP/TLS/WebSocket connection failed | Check firewall, TLS cert |
 | `ECHOSDK_ERR_AUTH` | SIP authentication failed | Verify credentials |
+| `ECHOSDK_ERR_FORBIDDEN` | Server refused this request (403) — on a call, a dialplan or policy refusal | Not a credentials problem; surface the refusal, not a login prompt |
 | `ECHOSDK_ERR_TIMEOUT` | No response (timer B/F expired) | Check server reachability |
 | `ECHOSDK_ERR_SERVER_5XX` | Server error | Check server logs |
 | `ECHOSDK_ERR_WS_PROTOCOL_REJECTED` | WebSocket upgrade rejected | Check `ws_origin`, server config |

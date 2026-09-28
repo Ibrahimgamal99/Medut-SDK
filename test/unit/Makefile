@@ -2,7 +2,8 @@ CC      ?= gcc
 CFLAGS  := -Wall -Wextra -std=c11 -O2 -g
 LDFLAGS := -lm
 
-TESTS := test_mos test_url_parser test_mwi_parser test_codec_str test_transport_str
+TESTS := test_mos test_url_parser test_mwi_parser test_codec_str test_transport_str \
+         test_sip_status
 
 # test_ws_pin links the real src/ws_path.c, so it needs the re/baresip headers
 # and libs a host build installs. Built only when that sysroot is present
@@ -31,6 +32,11 @@ test_codec_str: test_codec_str.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 test_transport_str: test_transport_str.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Includes src/sip_status.h directly — the header is free of re/baresip so the
+# shipped mapping is the one under test, with no sysroot needed.
+test_sip_status: test_sip_status.c ../../src/sip_status.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 # No --wrap: ws_path.c owns the public websock_connect/sip_dialog_route names

@@ -293,7 +293,11 @@ enum EchoSDKError {
   server5xx(c.echosdk_error_t.ECHOSDK_ERR_SERVER_5XX),
   wsProtocolRejected(c.echosdk_error_t.ECHOSDK_ERR_WS_PROTOCOL_REJECTED),
   timeout(c.echosdk_error_t.ECHOSDK_ERR_TIMEOUT),
-  already(c.echosdk_error_t.ECHOSDK_ERR_ALREADY);
+  already(c.echosdk_error_t.ECHOSDK_ERR_ALREADY),
+
+  /// 403 Forbidden — the server refused this request, not the credentials.
+  /// On a call: a dialplan or policy refusal ("you may not dial that").
+  forbidden(c.echosdk_error_t.ECHOSDK_ERR_FORBIDDEN);
 
   final int raw;
   const EchoSDKError(this.raw);

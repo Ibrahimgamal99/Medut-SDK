@@ -18,6 +18,7 @@ const char *echosdk_strerror(int err)
 	case ECHOSDK_ERR_WS_PROTOCOL_REJECTED: return "WebSocket protocol rejected";
 	case ECHOSDK_ERR_TIMEOUT:              return "timeout";
 	case ECHOSDK_ERR_ALREADY:              return "already initialized";
+	case ECHOSDK_ERR_FORBIDDEN:            return "forbidden (403)";
 	default: {
 		static char buf[32];
 		re_snprintf(buf, sizeof(buf), "unknown error %d", err);

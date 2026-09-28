@@ -77,6 +77,40 @@ all three languages side by side.
 
 ---
 
+## Dial refusals (Echo convention)
+
+The Echo dialplan refuses a call the caller is not allowed to place with
+**403 Forbidden**, which the SDK reports as `ECHOSDK_ERR_FORBIDDEN` on
+`ECHOSDK_EV_CALL_STATE` / `FAILED`. It is not `ECHOSDK_ERR_AUTH`: the account
+is registered and its credentials are fine, so the app should say something
+like *"Not allowed to call"* and never a login prompt. (`ECHOSDK_ERR_AUTH` is
+still what 401 and 407 produce, and what a registration rejected with 403
+produces — there the account itself was refused.)
+
+403 carries no room for an explanation the user can read, so the reason travels
+separately. **Today it does not travel over SIP at all**: the dialplan emits a
+`dial_blocked` event, which reaches the app over Echo's own websocket, outside
+the SDK. An app on the SDK therefore has the refusal but not yet its reason,
+and should show the generic text until the websocket event arrives.
+
+**Planned:** the dialplan also sends a SIP MESSAGE from
+`sip:echo-dial-blocked@<pbx>`, addressed to the device that dialled so that a
+web and a mobile client on one extension do not receive each other's messages.
+That needs nothing new from the SDK when it lands — it arrives as
+`ECHOSDK_EV_MESSAGE`, with `from_uri` naming the sender and `body` holding the
+text — so an app can be written against it now:
+
+- On `FAILED` with `ECHOSDK_ERR_FORBIDDEN`, show the generic refusal.
+- On a message from `echo-dial-blocked@…`, show its body as the reason,
+  replacing the generic text if the failure has already been shown, or keeping
+  it ready for the failure that is about to arrive. The two are independent and
+  either can arrive first, so neither may wait on the other.
+
+Matching only on the user part (`echo-dial-blocked`) keeps the check working
+across the PBX hostnames a deployment uses.
+
+---
+
 ## Guides
 
 - [NAT traversal (ICE / STUN / TURN)](guides/nat_traversal.md)

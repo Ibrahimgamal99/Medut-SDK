@@ -70,6 +70,30 @@ All notable changes to EchoSDK are documented here.
 
 ### Changed
 
+- **A call rejected with 403 Forbidden is no longer reported as a login
+  failure.**  `ECHOSDK_ERR_AUTH` is what an app acts on by asking for
+  credentials, and 401/407 — challenges this account could not answer — earn
+  it.  403 does not: the server understood the request and refused *that*,
+  which on an INVITE is a dialplan or policy decision ("you may not dial
+  that").  Echo's dialplan refuses a blocked number exactly this way, so every
+  blocked dial sent the user to a credentials prompt over an account that was
+  registered and working.  A failed call now reports the new
+  `ECHOSDK_ERR_FORBIDDEN` (-11) instead, appended at the end of
+  `echosdk_error_t` so an app built against an older header keeps its own
+  numbering, and mirrored into the C++, Python and Flutter bindings.
+  *Registration* still reports 403 as `ECHOSDK_ERR_AUTH` — there it really
+  does mean the account itself was rejected, and new credentials really are
+  the fix.  The mapping moved to `src/sip_status.h`, free of re/baresip so the
+  shipped code is what the test exercises.  Test: `test_sip_status.c`.
+
+  The *reason* for a refusal is out of band, and today it does not come over
+  SIP: the dialplan emits a `dial_blocked` event that reaches the app over
+  Echo's own websocket. Sending it as a SIP MESSAGE from
+  `sip:echo-dial-blocked@<pbx>` is planned, and will need nothing new from the
+  SDK — the existing `ECHOSDK_EV_MESSAGE` already carries the sender in
+  `from_uri` and the text in `body`, and can arrive before or after the call
+  failure. See "Dial refusals" in `docs/index.md`.
+
 - **A media stall is no longer always treated as the SDK's own to repair.**
   `ECHOSDK_QUALITY_MEDIA_STALL` means inbound RTP stopped; it never said
   whether the path broke or the far end simply went quiet, and the SDK had no

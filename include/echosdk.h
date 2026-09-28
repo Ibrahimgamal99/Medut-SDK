@@ -218,6 +218,14 @@ typedef enum {
 	ECHOSDK_ERR_WS_PROTOCOL_REJECTED = -8,
 	ECHOSDK_ERR_TIMEOUT              = -9,
 	ECHOSDK_ERR_ALREADY              = -10,
+	/* 403 Forbidden: the request was understood and the credentials were
+	 * fine — the server refused this particular request.  On a call that
+	 * is a dialplan or policy refusal ("you may not dial that"), which is
+	 * not a reason to ask anyone for new credentials.  Registration keeps
+	 * reporting 403 as ECHOSDK_ERR_AUTH, where it does mean the account
+	 * itself was rejected.  Appended at the end of the enum so an app
+	 * built against an older header keeps its own numbering. */
+	ECHOSDK_ERR_FORBIDDEN            = -11,
 } echosdk_error_t;
 
 /* ── Call states ──────────────────────────────────────────────────────────── */

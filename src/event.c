@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "echosdk_internal.h"
+#include "sip_status.h"
 
 /* ── Queued-event allocation ─────────────────────────────────────────────── */
 
@@ -269,18 +270,6 @@ void bsdk_event_post(const echosdk_event_t *ev)
 	bsdk_event_post_qev(qev);  /* warns and frees qev on failure */
 }
 
-/* Parse the leading 3-digit SIP status from a reason string like "403 Forbidden".
- * Returns 0 if the string doesn't start with a valid 3-digit code. */
-static int sip_reason_code(const char *reason)
-{
-	if (!reason) return 0;
-	char *end;
-	long code = strtol(reason, &end, 10);
-	if (end == reason || end - reason != 3 || code < 100 || code > 699)
-		return 0;
-	return (int)code;
-}
-
 /* ── bevent handler (runs on re_main) ────────────────────────────────────── */
 
 /**
@@ -413,7 +402,7 @@ static void bevent_handler(enum bevent_ev bev,
 		ev.type            = ECHOSDK_EV_REG_STATE;
 		ev.u.reg.account   = acct;
 		/* Classify error by 3-digit SIP status code */
-		int code = sip_reason_code(reason);
+		int code = bsdk_sip_reason_code(reason);
 		if (code == 401 || code == 403 || code == 407)
 			ev.u.reg.error = ECHOSDK_ERR_AUTH;
 		else if (code >= 500 && code < 600)
@@ -557,7 +546,7 @@ static void bevent_handler(enum bevent_ev bev,
 		/* Classify by SIP status: 487 → CANCELLED, 4xx/5xx/6xx → FAILED, else → ENDED.
 		 * OS-level transport errors arrive as reason strings without a SIP code (e.g.
 		 * "Connection reset by peer [104]") — detect them by a trailing "[<errno>]". */
-		int scode = sip_reason_code(reason);
+		int scode = bsdk_sip_reason_code(reason);
 		bool is_transport_err = (scode == 0 && reason &&
 		                         strrchr(reason, '[') && strrchr(reason, ']') > strrchr(reason, '['));
 
@@ -591,18 +580,9 @@ static void bevent_handler(enum bevent_ev bev,
 		else
 			ev.u.call_state.state = ECHOSDK_CALL_ENDED;
 
-		if (scode == 401 || scode == 403 || scode == 407)
-			ev.u.call_state.error = ECHOSDK_ERR_AUTH;
-		/* 408 is what the setup watchdog cancels with, and what a proxy
-		 * sends when its own transaction timed out — both are timeouts,
-		 * not the malformed-request sense of ECHOSDK_ERR_INVAL. */
-		else if (scode == 408)
-			ev.u.call_state.error = ECHOSDK_ERR_TIMEOUT;
-		else if (scode >= 500 && scode < 600)
-			ev.u.call_state.error = ECHOSDK_ERR_SERVER_5XX;
-		else if (scode >= 400)
-			ev.u.call_state.error = ECHOSDK_ERR_INVAL;
-		else if (is_transport_err && !peer_hangup)
+		ev.u.call_state.error = bsdk_sip_call_error(scode);
+		if (ev.u.call_state.error == ECHOSDK_OK &&
+		    is_transport_err && !peer_hangup)
 			ev.u.call_state.error = ECHOSDK_ERR_TRANSPORT;
 
 		if (lc) {
