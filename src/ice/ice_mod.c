@@ -59,6 +59,7 @@ struct icea_sess {
 	struct tmr tmr_gather;        /* gathering deadline                      */
 	struct tmr tmr_bounce;        /* leave baresip's call stack first        */
 	struct tmr tmr_reoffer;       /* re-offer held for the DTLS handshake    */
+	struct tmr tmr_media;         /* media-start watchdog, from the answer   */
 	uint64_t reoffer_due;
 
 	bool released;                /* the offer has been handed to baresip    */
@@ -99,6 +100,7 @@ struct icea_media {
 	bool vpeer_set;
 	bool connh_fired;
 	bool held;                    /* connh deferred until our answer is out */
+	bool nomedia_warned;          /* watchdog reported no writable pair      */
 	bool plain;                   /* peer without ICE: pass through          */
 	bool in_inject;               /* recv helper: this datagram is ours     */
 
@@ -886,12 +888,91 @@ static void prime_conncheck(struct icea_sess *s)
 		if (!m->cur)
 			continue;
 		(void)icea_sdp_read_remote(m->cur, s->sdp, m->sdpm, NULL);
+		/* the caller cannot answer these before it has our answer */
+		icea_gen_set_early(m->cur, !s->answered);
 		if (icea_sdp_peer_supports_ice(m->cur, m->sdpm))
 			media_maybe_start_checks(m);
 	}
 	s->primed = true;
 	info("EchoSDK/ice: running the connectivity checks while the call"
 	     " rings\n");
+}
+
+
+/* ── Media-start watchdog ────────────────────────────────────────────────── */
+
+/* Has this stream had its answer, and is it still waiting for ICE to hand
+ * the media a path?  A stream whose peer has not answered yet (an outbound
+ * call still ringing) is not waiting on us. */
+static bool media_start_pending(const struct icea_sess *s,
+				const struct icea_media *m)
+{
+	return answer_is_out(s) && m->cur && m->cur->remote_ready &&
+	       !m->connh_fired && !m->plain;
+}
+
+
+/* dtls_srtp's handshake watchdog starts with the handshake, and the
+ * handshake starts only when we fire connh.  A path ICE settled on without
+ * telling the stream therefore left the call silent with nothing in the log
+ * to say so (2026-09-29: ICE completed, no `start DTLS`, no warning).  This
+ * covers the gap before that, from the answer on.  A writable pair with no
+ * media is our own bug: say so, and start it.  No writable pair yet is
+ * reported once and watched until there is one. */
+static void media_watchdog_h(void *arg)
+{
+	struct icea_sess *s = arg;
+	struct le *le;
+	bool pending = false;
+
+	LIST_FOREACH(&s->medial, le) {
+		struct icea_media *m = le->data;
+		const struct icea_pair *p;
+
+		if (!media_start_pending(s, m))
+			continue;
+
+		p = m->cur->selected[0];
+		if (p && p->ws == ICEA_WS_WRITABLE) {
+			warning("EchoSDK/ice: '%s': ICE is %s on %J but media"
+				" never started — starting it now\n",
+				sdp_media_name(m->sdpm),
+				icea_state_name(m->cur->state), &p->rc->addr);
+			fire_connh(m);
+			continue;
+		}
+
+		pending = true;
+		if (!m->nomedia_warned) {
+			m->nomedia_warned = true;
+			warning("EchoSDK/ice: '%s': no writable ICE pair %u ms"
+				" after the answer (ICE %s) — no audio until"
+				" there is one\n", sdp_media_name(m->sdpm),
+				ICEA_MEDIA_START_DEADLINE_MS,
+				icea_state_name(m->cur->state));
+		}
+	}
+
+	if (pending)
+		tmr_start(&s->tmr_media, ICEA_MEDIA_START_POLL_MS,
+			  media_watchdog_h, s);
+}
+
+
+static void arm_media_watchdog(struct icea_sess *s)
+{
+	struct le *le;
+
+	if (tmr_isrunning(&s->tmr_media))
+		return;
+
+	LIST_FOREACH(&s->medial, le) {
+		if (media_start_pending(s, le->data)) {
+			tmr_start(&s->tmr_media, ICEA_MEDIA_START_DEADLINE_MS,
+				  media_watchdog_h, s);
+			return;
+		}
+	}
 }
 
 
@@ -986,6 +1067,7 @@ static void sess_destructor(void *data)
 	tmr_cancel(&s->tmr_gather);
 	tmr_cancel(&s->tmr_bounce);
 	tmr_cancel(&s->tmr_reoffer);
+	tmr_cancel(&s->tmr_media);
 	list_unlink(&s->le);
 
 	/* the media wrappers belong to baresip's streams, which may outlive
@@ -1059,6 +1141,7 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	tmr_init(&s->tmr_gather);
 	tmr_init(&s->tmr_bounce);
 	tmr_init(&s->tmr_reoffer);
+	tmr_init(&s->tmr_media);
 	list_init(&s->medial);
 	list_init(&s->serverl);
 
@@ -1224,9 +1307,15 @@ static int icea_updateh(struct mnat_sess *sess)
 
 	/* Incoming and being asked to update: baresip is building our answer
 	 * (call_answer() -> call_apply_sdp()).  Whatever runs after this call
-	 * stack may start media. */
-	if (call_is_incoming(s))
+	 * stack may start media, and from here on the caller can answer our
+	 * checks, so an unanswered one counts again. */
+	if (call_is_incoming(s)) {
 		s->answered = true;
+		LIST_FOREACH(&s->medial, le) {
+			struct icea_media *m = le->data;
+			icea_gen_set_early(m->cur, false);
+		}
+	}
 
 	LIST_FOREACH(&s->medial, le) {
 		struct icea_media *m = le->data;
@@ -1323,6 +1412,8 @@ static int icea_updateh(struct mnat_sess *sess)
 			tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 		}
 	}
+
+	arm_media_watchdog(s);
 
 	return err;
 }

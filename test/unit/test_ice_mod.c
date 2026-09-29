@@ -41,8 +41,18 @@ void _debug(bool safe, const char *fmt, ...)
 { va_list ap; (void)safe; va_start(ap, fmt); vlog_stub("dbg", fmt, ap); va_end(ap); }
 void _info(bool safe, const char *fmt, ...)
 { va_list ap; (void)safe; va_start(ap, fmt); vlog_stub("inf", fmt, ap); va_end(ap); }
+/* the media-start watchdog's two warnings, counted */
+static unsigned g_warn_no_pair, g_warn_never_started;
 void _warning(bool safe, const char *fmt, ...)
-{ va_list ap; (void)safe; va_start(ap, fmt); vlog_stub("WRN", fmt, ap); va_end(ap); }
+{
+	va_list ap;
+	(void)safe;
+	if (strstr(fmt, "no writable ICE pair"))
+		g_warn_no_pair++;
+	if (strstr(fmt, "never started"))
+		g_warn_never_started++;
+	va_start(ap, fmt); vlog_stub("WRN", fmt, ap); va_end(ap);
+}
 
 static struct list g_mnatl;
 struct list *baresip_mnatl(void) { return &g_mnatl; }
@@ -575,6 +585,172 @@ static void test_incoming_connh_when_checks_conclude_after_answer(void)
 }
 
 
+/* A caller that reads nothing until the callee picks up, and then reads its
+ * backlog oldest first — Asterisk, whose answers to the checks an inbound
+ * call primes while ringing all come after pickup (2026-09-29).  A receive
+ * helper below ICE holds every datagram on the caller's socket and replays
+ * them, one per ms, once released. */
+struct holdq {
+	struct udp_sock *us;
+	struct udp_helper *uh;
+	struct list pktl;
+	struct tmr tmr;
+	bool hold;
+};
+
+struct heldpkt {
+	struct le le;
+	struct sa src;
+	struct mbuf *mb;
+};
+
+static void heldpkt_destructor(void *arg)
+{
+	struct heldpkt *hp = arg;
+	list_unlink(&hp->le);
+	mem_deref(hp->mb);
+}
+
+static bool holdq_recv_h(struct sa *src, struct mbuf *mb, void *arg)
+{
+	struct holdq *q = arg;
+	struct heldpkt *hp;
+
+	if (!q->hold && list_isempty(&q->pktl))
+		return false;
+
+	hp = mem_zalloc(sizeof(*hp), heldpkt_destructor);
+	if (!hp)
+		return true;
+	hp->src = *src;
+	hp->mb  = mbuf_alloc(mbuf_get_left(mb));
+	mbuf_write_mem(hp->mb, mbuf_buf(mb), mbuf_get_left(mb));
+	hp->mb->pos = 0;
+	list_append(&q->pktl, &hp->le, hp);
+	return true;
+}
+
+static void holdq_drain(void *arg)
+{
+	struct holdq *q = arg;
+	struct le *le = list_head(&q->pktl);
+	struct heldpkt *hp;
+
+	if (!le)
+		return;
+	hp = le->data;
+	list_unlink(&hp->le);          /* so the replay is not queued again */
+	udp_recv_helper(q->us, &hp->src, hp->mb, q->uh);
+	mem_deref(hp);
+
+	if (!list_isempty(&q->pktl))
+		tmr_start(&q->tmr, 1, holdq_drain, q);
+}
+
+static void holdq_init(struct holdq *q, struct udp_sock *us)
+{
+	memset(q, 0, sizeof(*q));
+	q->us   = us;
+	q->hold = true;
+	list_init(&q->pktl);
+	tmr_init(&q->tmr);
+	CHECK(0 == udp_register_helper(&q->uh, us, -100, NULL,
+				       holdq_recv_h, q));
+}
+
+static void holdq_release(struct holdq *q)
+{
+	q->hold = false;
+	tmr_start(&q->tmr, 1, holdq_drain, q);
+}
+
+static void holdq_close(struct holdq *q)
+{
+	tmr_cancel(&q->tmr);
+	list_flush(&q->pktl);
+	q->uh = mem_deref(q->uh);
+}
+
+
+static void test_incoming_long_ring_backlog(void)
+{
+	/* The silent calls: B rings for more than 5 s while its checks pile
+	 * up unanswered at A, then A answers the backlog oldest first.  Media
+	 * has to start, and without the watchdog having to start it. */
+	struct side a, b;
+	struct side *ab[2] = { &a, &b };
+	struct holdq q;
+	unsigned no_pair = g_warn_no_pair, never = g_warn_never_started;
+
+	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	holdq_init(&q, a.sock);
+
+	CHECK(0 == side_attach(&a, true));
+	CHECK(run_until(estab_once, &a, 1000));
+	CHECK(0 == sdp_transfer(&a, &b, true));
+	CHECK(0 == side_attach(&b, false));
+	CHECK(run_until(estab_once, &b, 1000));      /* B gathered → primed */
+
+	run_for(5600);                               /* ringing */
+	CHECK(b.connh_calls == 0);
+	CHECK(list_count(&q.pktl) > 5);              /* A has read none of it */
+
+	CHECK(0 == vt()->updateh(b.sess));           /* B answers */
+	CHECK(0 == sdp_transfer(&b, &a, false));
+	CHECK(0 == vt()->updateh(a.sess));
+	holdq_release(&q);
+
+	CHECK(run_until(connh_fired, &b, 1500));
+	CHECK(run_until(both_completed, ab, 2000));
+	CHECK(g_warn_no_pair == no_pair);
+	CHECK(g_warn_never_started == never);
+
+	holdq_close(&q);
+	side_close(&a);
+	side_close(&b);
+}
+
+
+static void test_media_watchdog_reports_no_pair(void)
+{
+	/* B has answered and A still reads nothing, so neither side has a
+	 * writable pair: each watchdog says so once, however long it lasts,
+	 * and media starts as soon as A does read. */
+	struct side a, b;
+	struct holdq q;
+	unsigned no_pair = g_warn_no_pair, never = g_warn_never_started;
+
+	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	holdq_init(&q, a.sock);
+
+	CHECK(0 == side_attach(&a, true));
+	CHECK(run_until(estab_once, &a, 1000));
+	CHECK(0 == sdp_transfer(&a, &b, true));
+	CHECK(0 == side_attach(&b, false));
+	CHECK(run_until(estab_once, &b, 1000));
+
+	CHECK(0 == vt()->updateh(b.sess));           /* B answers at once */
+	CHECK(0 == sdp_transfer(&b, &a, false));
+	CHECK(0 == vt()->updateh(a.sess));
+
+	run_for(ICEA_MEDIA_START_DEADLINE_MS - 500);
+	CHECK(g_warn_no_pair == no_pair);            /* not before the deadline */
+	run_for(500 + 2 * ICEA_MEDIA_START_POLL_MS);
+	CHECK(g_warn_no_pair == no_pair + 2);        /* once a side, not per poll */
+	CHECK(b.connh_calls == 0);
+
+	holdq_release(&q);
+	CHECK(run_until(connh_fired, &b, 1500));
+	CHECK(g_warn_never_started == never);        /* ICE started it itself */
+
+	holdq_close(&q);
+	side_close(&a);
+	side_close(&b);
+}
+
+
 static void test_pr2_seams(void)
 {
 	/* The three answers netmon and adapt.c ask the agent for:
@@ -698,6 +874,8 @@ int main(void)
 	test_plain_rtp_peer();
 	test_incoming_holds_connh_until_answer();
 	test_incoming_connh_when_checks_conclude_after_answer();
+	test_incoming_long_ring_backlog();
+	test_media_watchdog_reports_no_pair();
 	test_pr2_seams();
 	test_teardown_either_order();
 	test_module_close();

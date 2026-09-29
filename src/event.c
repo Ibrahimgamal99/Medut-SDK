@@ -491,11 +491,23 @@ static void bevent_handler(enum bevent_ev bev,
 		qev->ev.type = ECHOSDK_EV_INCOMING_CALL;
 		qev->ev.u.incoming.account = acct;
 		qev->ev.u.incoming.call    = new_lc;
+		/* Pack strings into buf: from_uri\0display_name\0 */
+		size_t off = 0;
+
 		const char *peer = call_peeruri(bc);
 		if (peer) {
 			str_ncpy(qev->buf, peer, sizeof(qev->buf));
 			qev->ev.u.incoming.from_uri = qev->buf;
+			off += strlen(qev->buf) + 1;
 		}
+
+		/* From-header display name; NULL when the peer sent none. */
+		const char *pname = call_peername(bc);
+		if (pname && off < sizeof(qev->buf)) {
+			str_ncpy(qev->buf + off, pname, sizeof(qev->buf) - off);
+			qev->ev.u.incoming.display_name = qev->buf + off;
+		}
+
 		if (!bsdk_event_post_qev(qev)) {
 			bsdk_call_unregister(new_lc);
 			mem_deref(new_lc);

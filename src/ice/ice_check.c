@@ -82,7 +82,7 @@ static unsigned count_unanswered(const struct icea_gen *gen,
 
 	LIST_FOREACH(&gen->pingl, le) {
 		const struct icea_ping *ping = le->data;
-		if (ping->pair == p)
+		if (ping->pair == p && !ping->early)
 			n++;
 	}
 	return n;
@@ -125,6 +125,7 @@ static int send_ping(struct icea_gen *gen, struct icea_pair *p, bool use_cand)
 	ping->pair       = p;
 	ping->sent       = icea_now();
 	ping->nominating = use_cand;
+	ping->early      = gen->early_checks;
 
 	/* Headroom for a TURN channel header on relay pairs; unused else. */
 	presz = p->lc->type == ICE_CAND_TYPE_RELAY ? 4 : 0;
@@ -157,7 +158,8 @@ static int send_ping(struct icea_gen *gen, struct icea_pair *p, bool use_cand)
 	/* Record before sending: a peer on the same host answers inside
 	 * udp_send(), and the response must find its transaction. */
 	list_append(&gen->pingl, &ping->le, ping);
-	p->unanswered++;
+	if (!ping->early)
+		p->unanswered++;
 	p->last_ping_sent = ping->sent;
 	p->triggered      = false;
 	if (p->state == ICE_CANDPAIR_WAITING || p->state == ICE_CANDPAIR_FROZEN)
@@ -166,7 +168,8 @@ static int send_ping(struct icea_gen *gen, struct icea_pair *p, bool use_cand)
 	mb->pos = presz;
 	err = icea_send_stun(p->lc->port, &p->rc->addr, mb);
 	if (err) {
-		p->unanswered--;
+		if (!ping->early)
+			p->unanswered--;
 		goto out;
 	}
 
@@ -302,6 +305,9 @@ static void handle_success(struct icea_gen *gen, struct icea_pair *p,
 	struct le *le, *tmp;
 	uint32_t rtt = (uint32_t)(now - ping->sent);
 	bool nominating = ping->nominating;
+	/* An early check answered once the early phase is over waited on the
+	 * peer, not on the path: its rtt is how long the phone rang. */
+	bool sample = !ping->early || gen->early_checks;
 
 	/* Credit this response and every older ping on the same pair:
 	 * they were not lost, the answers just crossed (libwebrtc's
@@ -314,10 +320,12 @@ static void handle_success(struct icea_gen *gen, struct icea_pair *p,
 	ping = NULL;
 	p->unanswered = count_unanswered(gen, p);
 
-	if (p->rtt_samples++ == 0)
-		p->rtt_ms = rtt;
-	else
-		p->rtt_ms = (3 * p->rtt_ms + rtt) / 4;
+	if (sample) {
+		if (p->rtt_samples++ == 0)
+			p->rtt_ms = rtt;
+		else
+			p->rtt_ms = (3 * p->rtt_ms + rtt) / 4;
+	}
 
 	p->last_resp_recv  = now;
 	p->last_consent_ok = now;
@@ -693,6 +701,20 @@ int icea_gen_start_checks(struct icea_gen *gen)
 
 	tmr_start(&gen->tmr_tick, 0, tick, gen);
 	return 0;
+}
+
+
+/* Checks sent while `on` go to a peer that cannot answer them yet: an
+ * inbound call ringing, whose caller does not have our answer.  Asterisk
+ * holds them and answers the backlog, oldest first, on pickup.  They still
+ * prove the pair when those answers come, but none counts as lost and none
+ * measures the rtt.  Counted, a ring over 5 s left the selected pair
+ * unreliable at the first answer and the call silent (2026-09-29), and a
+ * longer ring timed every pair out while the phone was still ringing. */
+void icea_gen_set_early(struct icea_gen *gen, bool on)
+{
+	if (gen)
+		gen->early_checks = on;
 }
 
 

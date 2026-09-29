@@ -85,6 +85,12 @@ extern "C" {
 #define ICEA_REOFFER_SECURE_DEADLINE_MS 12000
 #define ICEA_REOFFER_POLL_MS               50
 
+/* How long after the answer a stream may go without ICE handing it a path
+ * before the media-start watchdog speaks up, and how often it looks again.
+ * ICE against the PBX completes 6-15 ms after the 200 OK. */
+#define ICEA_MEDIA_START_DEADLINE_MS     3000
+#define ICEA_MEDIA_START_POLL_MS         1000
+
 /* Virtual peer address handed upward (DTLS/SRTP/RTP see only this).  RFC 5737
  * / RFC 3849 documentation ranges: never a real host, so no collision with a
  * LAN peer's source.  Port 9 (discard) keeps sa_isset(SA_ALL) true. */
@@ -225,6 +231,8 @@ struct icea_ping {
 	struct icea_pair *pair;      /* borrowed; pairs outlive pingl           */
 	uint64_t sent;
 	bool nominating;             /* USE-CANDIDATE was set                   */
+	bool early;                  /* sent before the peer could answer it:
+	                                never counted as lost, no rtt sample    */
 };
 
 /** A candidate pair with libwebrtc's per-connection bookkeeping. */
@@ -260,6 +268,7 @@ struct icea_gen_cb {
 	void (*gathered)(struct icea_gen *gen, void *arg);
 	void (*state)(struct icea_gen *gen, enum icea_state prev,
 		      enum icea_state now, void *arg);
+	/* The selected pair changed, or the selected pair became writable. */
 	void (*selected)(struct icea_gen *gen, unsigned compid, void *arg);
 	/* Deliver application data that arrived on one of the generation's own
 	 * ports; the owner injects it into the stream socket above ICE. */
@@ -288,6 +297,10 @@ struct icea_gen {
 	struct list portl, lcandl, rcandl, pairl, pingl;   /* owned            */
 	struct icea_pair *selected[ICEA_MAX_COMP];          /* borrowed         */
 	uint64_t selected_since[ICEA_MAX_COMP];
+	bool sel_writable[ICEA_MAX_COMP]; /* selected pair writable when last
+	                                     reported to the owner            */
+	bool early_checks;              /* checks go to a peer that cannot
+	                                   answer yet (see icea_gen_set_early) */
 	struct stun *stun;              /* owned; gathering transactions only   */
 	unsigned gather_pending;
 	struct tmr tmr_tick;            /* the scheduler                        */
@@ -356,6 +369,7 @@ uint64_t icea_pair_calc_prio(enum ice_role role, uint32_t lprio, uint32_t rprio)
 /* ice_check.c */
 int  icea_gen_start_checks(struct icea_gen *gen);
 void icea_gen_hold(struct icea_gen *gen);
+void icea_gen_set_early(struct icea_gen *gen, bool on);
 bool icea_check_recv_response(struct icea_gen *gen, struct icea_port *port,
 			      const struct sa *src, const struct stun_msg *msg);
 void icea_check_tick_now(struct icea_gen *gen);

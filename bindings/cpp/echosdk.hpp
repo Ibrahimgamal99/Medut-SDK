@@ -2124,6 +2124,19 @@ ECHOSDK_EXPORT int echosdk_call_get_stats(echosdk_call_handle_t     call,
  * cfg.net_settle_ms.  Returns immediately — progress is reported through
  * ECHOSDK_EV_NETWORK events.
  *
+ * A report that changed nothing costs nothing.  When the local address set
+ * is the one the transports are already bound to, every account is
+ * REGISTERED over a connection-oriented transport (WS/WSS/TCP/TLS) and every
+ * live call runs ICE, the SDK first sends one OPTIONS per account over its
+ * existing connection.  If they all answer within 3 s the connections
+ * survived, and no handover runs — no NET event, no RECONNECTING, no
+ * re-REGISTER.  Any failure or timeout and the report is handled as the
+ * handover below.  A browser behaves the same way: it keeps its WebSocket
+ * until the WebSocket itself fails.  Reports that the platform monitors
+ * repeat on every engine attach, a VPN coming up next to an unchanged
+ * primary network, or a host calling this defensively on resume therefore no
+ * longer tear down a working registration.
+ *
  * The handover performs, in order:
  *   1. re-scan local addresses and refresh the DNS resolver list
  *   2. flush and re-bind all SIP transports (drops dead TCP/TLS/WS sockets)

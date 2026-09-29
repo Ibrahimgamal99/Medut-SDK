@@ -30,7 +30,7 @@ static uint64_t oldest_unanswered(const struct icea_gen *gen,
 
 	LIST_FOREACH(&gen->pingl, le) {      /* oldest first */
 		const struct icea_ping *ping = le->data;
-		if (ping->pair == p)
+		if (ping->pair == p && !ping->early)
 			return ping->sent;
 	}
 	return 0;
@@ -149,6 +149,7 @@ static void reselect(struct icea_gen *gen, unsigned compid, uint64_t now)
 	struct icea_pair *cur = gen->selected[compid - 1];
 	struct icea_pair *best = cur;
 	struct le *le;
+	bool was_writable = gen->sel_writable[compid - 1];
 
 	LIST_FOREACH(&gen->pairl, le) {
 		struct icea_pair *p = le->data;
@@ -161,16 +162,31 @@ static void reselect(struct icea_gen *gen, unsigned compid, uint64_t now)
 			best = p;
 	}
 
-	if (best == cur)
-		return;
-
 	/* Leaving a pair that merely stopped receiving waits a moment
 	 * (libwebrtc receiving_switching_delay), unless the newcomer is the
 	 * nominated one or the current pair is no longer writable. */
-	if (cur && !cur->receiving && cur->ws == ICEA_WS_WRITABLE &&
-	    !nominated_for_us(gen, best) &&
+	if (best != cur && cur && !cur->receiving &&
+	    cur->ws == ICEA_WS_WRITABLE && !nominated_for_us(gen, best) &&
 	    now - icea_pair_last_received(cur) < gen->conf->switching_delay_ms)
+		best = cur;
+
+	gen->sel_writable[compid - 1] = best && best->ws == ICEA_WS_WRITABLE;
+
+	/* The same pair turning writable is news to the owner too: media
+	 * starts on a writable pair, and a pair can be selected before it is
+	 * one.  A peer answering a backlog of checks credits the oldest
+	 * first, so the pair is unreliable at the first answer and writable
+	 * a few ms later with nothing else changed — every inbound call that
+	 * rang for more than 5 s came up silent (2026-09-29). */
+	if (best == cur) {
+		if (cur && gen->sel_writable[compid - 1] && !was_writable) {
+			ICEA_DEBUG(gen, "ice[gen %u]: selected {%u} is writable\n",
+				   gen->seq, compid);
+			if (gen->cb.selected)
+				gen->cb.selected(gen, compid, gen->cb.arg);
+		}
 		return;
+	}
 
 	gen->selected[compid - 1] = best;
 	gen->selected_since[compid - 1] = now;

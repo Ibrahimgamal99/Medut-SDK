@@ -5,7 +5,8 @@
  * joined by a simulator that delivers every datagram asynchronously
  * (a tmr, so a reply can never land before its request was recorded),
  * applies a cone NAT to a node when asked, drops packets by probability,
- * and can kill a node outright.  Timers are compressed through
+ * can kill a node outright, and can hold a node's inbound packets until
+ * released (a PBX that reads nothing until the call is picked up).  Timers are compressed through
  * struct icea_conf so a 15 s libwebrtc timeout is 1.5 s here.
  *
  * Credentials and candidates are exchanged directly, the way SDP would
@@ -66,6 +67,9 @@ struct node {
 	char name[8];
 	struct icea_port *port;  /* the agent port bound to this node        */
 	bool stun_server;        /* answers Binding Requests with the source */
+	bool hold;               /* queue inbound until node_release()       */
+	struct list backlog;     /* held packets, oldest first               */
+	struct tmr tmr_drain;
 };
 
 struct pkt {
@@ -109,11 +113,49 @@ static void pkt_deliver(void *arg)
 {
 	struct pkt *pkt = arg;
 
+	/* A held node reads nothing, and after its release anything new
+	 * queues behind the backlog, as in a socket buffer. */
+	if (pkt->to->hold || !list_isempty(&pkt->to->backlog)) {
+		list_unlink(&pkt->le);
+		list_append(&pkt->to->backlog, &pkt->le, pkt);
+		return;
+	}
+
 	if (!pkt->to->dead) {
 		pkt->to->rx++;
 		udp_recv_packet(pkt->to->us, &pkt->src, pkt->mb);
 	}
 	mem_deref(pkt);
+}
+
+
+/* The backlog is read one packet per ms, oldest first, so the answers to it
+ * reach the other side spread out rather than in one burst. */
+static void node_drain(void *arg)
+{
+	struct node *n = arg;
+	struct le *le = list_head(&n->backlog);
+	struct pkt *pkt;
+
+	if (!le)
+		return;
+
+	pkt = le->data;
+	if (!n->dead) {
+		n->rx++;
+		udp_recv_packet(n->us, &pkt->src, pkt->mb);
+	}
+	mem_deref(pkt);
+
+	if (!list_isempty(&n->backlog))
+		tmr_start(&n->tmr_drain, 1, node_drain, n);
+}
+
+
+static void node_release(struct node *n)
+{
+	n->hold = false;
+	tmr_start(&n->tmr_drain, 1, node_drain, n);
 }
 
 
@@ -190,6 +232,8 @@ static void sim_recv(const struct sa *src, struct mbuf *mb, void *arg)
 static void node_destructor(void *arg)
 {
 	struct node *n = arg;
+	tmr_cancel(&n->tmr_drain);
+	list_flush(&n->backlog);
 	list_unlink(&n->le);
 	mem_deref(n->us);
 }
@@ -207,6 +251,8 @@ static struct node *node_new(const char *name, const char *priv, uint16_t port,
 		n->nat = NAT_CONE;
 	}
 	n->delay_ms = 2;
+	list_init(&n->backlog);
+	tmr_init(&n->tmr_drain);
 	CHECK(0 == udp_alloc_sockless(&n->us, sim_send, sim_recv, n));
 	list_append(&g_nodes, &n->le, n);
 	return n;
@@ -273,6 +319,9 @@ struct agent {
 	struct icea_port *port[ICEA_MAX_COMP];
 	unsigned state_changes;
 	unsigned selected_changes;
+	bool media_ready;          /* a report found the selected pair writable */
+	bool selected_unwritable;  /* a report found it anything else          */
+	uint32_t rtt_at_ready;     /* its rtt at the first writable report     */
 	unsigned data_rx;
 	enum icea_state last_state;
 };
@@ -289,8 +338,18 @@ static void cb_state(struct icea_gen *gen, enum icea_state prev,
 static void cb_selected(struct icea_gen *gen, unsigned compid, void *arg)
 {
 	struct agent *a = arg;
-	(void)gen; (void)compid;
+	const struct icea_pair *p = gen->selected[compid - 1];
+
 	a->selected_changes++;
+
+	/* ice_mod.c's on_selected() starts media on exactly this */
+	if (p && p->ws == ICEA_WS_WRITABLE) {
+		if (!a->media_ready)
+			a->rtt_at_ready = p->rtt_ms;
+		a->media_ready = true;
+	}
+	else if (p)
+		a->selected_unwritable = true;
 }
 
 static void cb_data(struct icea_gen *gen, unsigned compid,
@@ -706,6 +765,102 @@ static void test_early_inbound_check(void)
 	agent_close(&a);
 	agent_close(&b);
 	nodes_flush();
+}
+
+
+/* ── Inbound call against a PBX that answers checks only after pickup ──────
+ *
+ * A is the phone: the answerer, controlled, checking from the moment the
+ * call arrives (ice_mod.c primes the checks while it rings).  B is the PBX,
+ * which reads nothing until A's answer is out and then answers the backlog
+ * oldest first (Asterisk, 2026-09-29: the rtt of the first success was the
+ * ring time).  In fast_conf 500 ms stands for the real 5 s before a pair
+ * with unanswered checks is unreliable, 1500 for the 15 s to its timeout,
+ * and 3000 for the 30 s to dead.
+ */
+struct ring_result {
+	bool completed;
+	bool media_ready;          /* told of a writable selected pair         */
+	bool selected_unwritable;  /* told of an unwritable one               */
+	bool failed_ringing;       /* ICE failed before the answer went out   */
+	uint32_t rtt_at_ready;     /* selected pair's rtt when media could start */
+};
+
+static void ring_then_answer(unsigned ring_ms, bool early,
+			     struct ring_result *r)
+{
+	struct node *na = node_new("A", "10.0.0.1", 5000, NULL, 0);
+	struct node *nb = node_new("B", "10.0.0.2", 6000, NULL, 0);
+	struct agent a, b;
+
+	memset(r, 0, sizeof(*r));
+	nb->hold = true;
+
+	agent_init(&a, &fast_conf, ICE_ROLE_CONTROLLED, 1, &na);
+	agent_init(&b, &fast_conf, ICE_ROLE_CONTROLLING, 1, &nb);
+	agent_learn(&a, &b);                     /* A read B's offer */
+	icea_gen_set_early(a.gen, early);
+	CHECK(0 == icea_gen_start_checks(a.gen));
+
+	run_for(ring_ms);
+	r->failed_ringing = a.gen->state == ICEA_STATE_FAILED;
+
+	/* pickup: A's answer goes out, B reads its backlog and checks too */
+	icea_gen_set_early(a.gen, false);
+	agent_learn(&b, &a);
+	CHECK(0 == icea_gen_start_checks(b.gen));
+	node_release(nb);
+
+	r->completed = run_until(a_completed, &a, 2000);
+	run_for(300);
+	r->media_ready         = a.media_ready;
+	r->selected_unwritable = a.selected_unwritable;
+	r->rtt_at_ready        = a.rtt_at_ready;
+
+	agent_close(&a);
+	agent_close(&b);
+	nodes_flush();
+}
+
+
+static void test_backlog_answered_after_pickup(void)
+{
+	/* Checks counted as usual.  Past 500 ms of ringing the first answer
+	 * leaves the pair unreliable when it is selected, and writable a few
+	 * ms later with nothing else changed; the owner has to hear of that
+	 * too, or media never starts (the silent calls of 2026-09-29). */
+	static const unsigned rings[] = { 100, 400, 600, 900 };
+
+	for (size_t i = 0; i < RE_ARRAY_SIZE(rings); i++) {
+		struct ring_result r;
+
+		ring_then_answer(rings[i], false, &r);
+		CHECK(r.completed);
+		CHECK(r.media_ready);
+		if (rings[i] >= 600)
+			CHECK(r.selected_unwritable);   /* the case in point */
+	}
+}
+
+
+static void test_ringing_checks_are_early(void)
+{
+	/* Checks sent while the phone rings, as ice_mod.c marks them: none
+	 * counts as lost, so the pair is writable when it is first reported,
+	 * a ring past the dead time does not fail ICE before the answer, and
+	 * the rtt is not the ring time. */
+	static const unsigned rings[] = { 600, 900, 3500 };
+
+	for (size_t i = 0; i < RE_ARRAY_SIZE(rings); i++) {
+		struct ring_result r;
+
+		ring_then_answer(rings[i], true, &r);
+		CHECK(r.completed);
+		CHECK(r.media_ready);
+		CHECK(!r.selected_unwritable);
+		CHECK(!r.failed_ringing);
+		CHECK(r.rtt_at_ready < 100);
+	}
 }
 
 
@@ -1140,6 +1295,8 @@ int main(void)
 	test_two_components();
 	test_unknown_source_request_is_rejected();
 	test_early_inbound_check();
+	test_backlog_answered_after_pickup();
+	test_ringing_checks_are_early();
 	test_liveness_disconnect_and_fail();
 	test_silent_switch_for_controlled();
 	test_renomination_switches();
