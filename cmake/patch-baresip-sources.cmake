@@ -1,7 +1,9 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Two jobs:
+# Apply EchoSDK's baresip patches at build time.  Four jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
+#   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
+#   4. Start RTCP on a DTLS call that multiplexes it (rtcp-mux).
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -213,4 +215,58 @@ else()
   string(REPLACE "${_REG_OLD}" "${_REG_NEW}" RCONTENT "${RCONTENT}")
   file(WRITE "${REG_C}" "${RCONTENT}")
   message(STATUS "patch-baresip-sources: patched ${REG_C} (sipreg_release)")
+endif()
+
+# ---------------------------------------------------------------------------
+# Job 4: dtls_srtp — under rtcp-mux the RTP handshake secures RTCP as well
+#
+# call.c starts RTCP on MENC_EVENT_SECURE only when the event text names
+# "RTCP", which dtls_srtp sends when the separate RTCP component's handshake
+# completes.  Under rtcp-mux media_start() never starts that component — RTCP
+# rides the RTP socket and is keyed by the RTP handshake (srtp.c protects both
+# through the one helper) — so the only event is "audio,RTP" and RTCP is never
+# started.  A DTLS call then sends no SR or RR for its whole life, unless a
+# re-INVITE happens to run update_media() once the stream is secure.
+#
+# With no SR from us, every report block the peer sends carries LSR = 0, libre
+# never computes an RTT (re/src/rtp/sess.c handle_rr_block), and rtt_ms reads
+# 0 on every DTLS call; the PBX gets no RTCP from us either, so its own QoS
+# has no RTT for the leg.  Upstream baresip main carries the same text.
+#
+# Own anchor check rather than a hunk in Job 2: that job is skipped wholesale
+# on any tree already carrying "EchoSDK-patched", so a hunk added there would
+# never reach an existing checkout.
+# ---------------------------------------------------------------------------
+
+file(READ "${DTLS_SRTP_C}" MCONTENT)
+set(_MUX_OLD [=[
+		if (re_snprintf(buf, sizeof(buf), "%s,%s",
+				sdp_media_name(ds->sdpm),
+				comp->is_rtp ? "RTP" : "RTCP"))
+]=])
+set(_MUX_NEW [=[
+		/* EchoSDK-patched: under rtcp-mux this handshake keys RTCP too
+		 * and there is no RTCP component to report it, while call.c
+		 * starts RTCP only on an event that names it. */
+		if (re_snprintf(buf, sizeof(buf), "%s,%s",
+				sdp_media_name(ds->sdpm),
+				!comp->is_rtp ? "RTCP" :
+				ds->mux ? "RTP,RTCP" : "RTP"))
+]=])
+
+string(FIND "${MCONTENT}" "${_MUX_NEW}" _MUX_DONE)
+if(NOT _MUX_DONE EQUAL -1)
+  message(STATUS "patch-baresip-sources: ${DTLS_SRTP_C} already patched (rtcp-mux secure event)")
+else()
+  string(FIND "${MCONTENT}" "${_MUX_OLD}" _pos)
+  if(_pos EQUAL -1)
+    message(FATAL_ERROR
+      "patch-baresip-sources: anchor not found in ${DTLS_SRTP_C} for the "
+      "rtcp-mux secure event.\nThe pinned baresip revision has moved "
+      "dtls_estab_handler(). Re-derive this patch — building without it "
+      "leaves every rtcp-mux DTLS call sending no RTCP.")
+  endif()
+  string(REPLACE "${_MUX_OLD}" "${_MUX_NEW}" MCONTENT "${MCONTENT}")
+  file(WRITE "${DTLS_SRTP_C}" "${MCONTENT}")
+  message(STATUS "patch-baresip-sources: patched ${DTLS_SRTP_C} (rtcp-mux secure event)")
 endif()
