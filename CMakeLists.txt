@@ -580,6 +580,13 @@ if("opus" IN_LIST ECHOSDK_MODULES)
     list(APPEND _OPUS_PLATFORM_ARGS "-DOPUS_PRESUME_NEON=ON")
   endif()
 
+  # opus only applies -fvisibility=hidden when BUILD_SHARED_LIBS is on, but its
+  # aarch64 NEON MDCT (celt/arm/celt_tx_neon.S) assumes it: it reaches the C
+  # twiddle tables (celt_tx_tab_*) with a direct adrp/add, which lld rejects
+  # against a preemptible symbol once the static archive is linked into
+  # libechosdk.so. The public opus_* API keeps default visibility via
+  # OPUS_EXPORT, so the exported surface is unchanged apart from opus
+  # internals no longer leaking out of the .so.
   ExternalProject_Add(opus_project
     SOURCE_DIR "${ECHOSDK_OPUS_SOURCE_DIR}"
     BINARY_DIR "${CMAKE_BINARY_DIR}/opus-build"
@@ -588,6 +595,7 @@ if("opus" IN_LIST ECHOSDK_MODULES)
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DCMAKE_INSTALL_PREFIX=${SYSROOT}
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+      -DCMAKE_C_VISIBILITY_PRESET=hidden
       -DOPUS_BUILD_SHARED_LIBRARY=OFF
       -DOPUS_BUILD_TESTING=OFF
       -DOPUS_INSTALL_PKG_CONFIG_MODULE=OFF

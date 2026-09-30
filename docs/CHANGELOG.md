@@ -18,6 +18,17 @@ All notable changes to EchoSDK are documented here.
   silence), and with FEC 3.1% of speech frames below 0 dB SNR against 13.1%
   with concealment alone — the loss-free call scored 4.2%.
 
+- **A burst of loss played as silence, or left the call permanently
+  delayed.**  Concealment only ran once the packet after a gap arrived — too
+  late for any burst longer than the playout buffer, whose silence was then
+  followed by the late frames queuing up: the buffer overfilled and never
+  drained.  Measured on a live echo call, a 400 ms burst added 120 ms and a
+  3 s outage 80 ms of delay for the rest of the call.  The gap is now
+  concealed when the audio device needs it (as WebRTC's NetEQ does), and
+  late concealment is capped to what the buffer is actually missing: 400 ms
+  bursts are concealed with no silent gap and no added delay; an outage gets
+  1 s of fading concealment, then silence, and no added delay either.
+
 - **Every `opus.*` setting and `opus_expected_loss_pct` was ignored.**  They
   were written to baresip's config after the opus module had loaded and read
   its own, so FEC, DTX, CBR, stereo, bitrate and complexity never reached the

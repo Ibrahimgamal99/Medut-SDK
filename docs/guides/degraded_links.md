@@ -249,6 +249,23 @@ While FEC is in use, adaptive bitrate stops at 20 kbps rather than
 at 12 kbps, and at 16 kbps only if it was already on — so backing off further
 for loss would switch off the one thing repairing it.
 
+### Bursts of loss
+
+In-band FEC carries one frame back, so in a burst it can rebuild only the last
+lost frame; the rest are concealed. Concealment happens when the audio device
+needs the audio, the way WebRTC's NetEQ does it: when the playout buffer would
+run dry, the decoder fills it right then, instead of the device playing silence
+and the gap being concealed — too late, and piling up as delay — once the next
+packet arrives. Measured on a live call:
+
+| Burst | Heard | Delay afterwards |
+|---|---|---|
+| up to 400 ms | concealed, no silent gap | unchanged |
+| an outage of seconds | ~1 s of concealment fading out, then silence | unchanged |
+
+Past 1 s the stream is taken as stopped (hold, a dead path) rather than a
+burst, and concealment stops.
+
 ### A note on G.711
 
 Fixed-rate codecs have no bitrate to adapt and, in this build, no packet-loss
