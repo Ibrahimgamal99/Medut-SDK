@@ -257,7 +257,7 @@ static void test_fec_band_hysteresis(void)
  * `lost_pct` of them reported lost — the cadence measured against Asterisk. */
 struct feed {
 	struct bsdk_fec f;
-	uint32_t sent, lost;
+	uint32_t sent, lost, ehsn;
 	uint64_t now;
 	float    rtt;
 };
@@ -266,10 +266,11 @@ static bool report(struct feed *fd, float lost_pct)
 {
 	fd->sent += 250;
 	fd->lost += (uint32_t)(250.f * lost_pct / 100.f + 0.5f);
+	fd->ehsn += 250;              /* the peer's highest seq keeps up */
 	fd->now  += 5000;
 	fd->rtt  += 0.25f;            /* every report carries a fresh RTT */
-	return bsdk_adapt_fec_update(&fd->f, fd->sent, fd->lost, fd->rtt,
-	                             fd->now);
+	return bsdk_adapt_fec_update(&fd->f, fd->sent, fd->lost, fd->ehsn,
+	                             fd->rtt, fd->now);
 }
 
 /* A stats tick between two reports: time and packets move, the report does
@@ -278,8 +279,8 @@ static bool quiet_tick(struct feed *fd)
 {
 	fd->sent += 100;
 	fd->now  += 2000;
-	return bsdk_adapt_fec_update(&fd->f, fd->sent, fd->lost, fd->rtt,
-	                             fd->now);
+	return bsdk_adapt_fec_update(&fd->f, fd->sent, fd->lost, fd->ehsn,
+	                             fd->rtt, fd->now);
 }
 
 static void feed_init(struct feed *fd)
@@ -287,7 +288,7 @@ static void feed_init(struct feed *fd)
 	memset(fd, 0, sizeof(*fd));
 	fd->rtt = 6.f;
 	/* The first report is the baseline. */
-	(void)bsdk_adapt_fec_update(&fd->f, 0, 0, fd->rtt, 0);
+	(void)bsdk_adapt_fec_update(&fd->f, 0, 0, 0, fd->rtt, 0);
 }
 
 static void test_fec_off_on_clean_and_light_loss(void)
@@ -380,8 +381,50 @@ static void test_fec_no_rtt_no_decision(void)
 {
 	struct bsdk_fec f;
 	memset(&f, 0, sizeof(f));
-	CHECK(!bsdk_adapt_fec_update(&f, 500, 100, 0.f, 5000) && !f.active,
+	CHECK(!bsdk_adapt_fec_update(&f, 500, 100, 400, 0.f, 5000) && !f.active,
 	      "no receiver report yet (rtt 0): nothing decided");
+}
+
+/* A report whose highest sequence has not moved while we kept sending:
+ * nothing arrived.  The peer's own loss count says 0 then. */
+static bool dead_report(struct feed *fd, uint32_t sent)
+{
+	fd->sent += sent;             /* lost and ehsn stay where they were */
+	fd->now  += 5000;
+	fd->rtt  += 0.25f;
+	return bsdk_adapt_fec_update(&fd->f, fd->sent, fd->lost, fd->ehsn,
+	                             fd->rtt, fd->now);
+}
+
+static void test_fec_dead_uplink(void)
+{
+	struct feed fd;
+	feed_init(&fd);
+	(void)report(&fd, 0.f);
+
+	CHECK(dead_report(&fd, 250) && fd.f.dead, "dead uplink detected");
+	CHECK(fd.f.active && fd.f.level == 25,
+	      "dead uplink reads as 100%%: FEC on at 25 (got %d/%u)",
+	      fd.f.active, fd.f.level);
+
+	/* Back: the peer's count catches up with the whole outage at once. */
+	fd.sent += 250; fd.lost += 500; fd.ehsn += 750;
+	fd.now  += 5000; fd.rtt += 0.25f;
+	CHECK(!bsdk_adapt_fec_update(&fd.f, fd.sent, fd.lost, fd.ehsn, fd.rtt,
+	                             fd.now),
+	      "catch-up report after the outage is not a new loss reading");
+	CHECK(!fd.f.dead && fd.f.recovered, "recovered, and flagged for bitrate");
+}
+
+static void test_fec_not_sending_is_not_dead(void)
+{
+	struct feed fd;
+	feed_init(&fd);
+	(void)report(&fd, 0.f);
+
+	/* On hold: a report with no progress, but we sent next to nothing. */
+	(void)dead_report(&fd, 10);
+	CHECK(!fd.f.dead && !fd.f.active, "10 packets sent is not a dead uplink");
 }
 
 /* Off strips useinbandfec from the fmtp our encoder is handed. */
@@ -418,6 +461,8 @@ int main(void)
 	test_fec_hysteresis_band_keeps_it_on();
 	test_fec_no_rtt_no_decision();
 	test_fmtp_strip_inbandfec();
+	test_fec_dead_uplink();
+	test_fec_not_sending_is_not_dead();
 
 	printf("%d passed, %d failed\n", g_pass, g_fail);
 	return g_fail ? 1 : 0;

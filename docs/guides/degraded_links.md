@@ -183,6 +183,8 @@ or a WS/WSS URL.
 ## 5. Use less bandwidth when there is less bandwidth
 
 ```c
+cfg.opus.bitrate           = 32000;   /* default: where speech quality levels off */
+cfg.opus.stereo            = false;   /* default: mono both ways */
 cfg.adaptive_bitrate       = true;    /* default */
 cfg.adapt_min_bitrate      = 12000;   /* default */
 cfg.adapt_max_bitrate      = 32000;   /* default */
@@ -247,7 +249,27 @@ A non-zero `opus_expected_loss_pct` pins the redundancy instead.
 While FEC is in use, adaptive bitrate stops at 20 kbps rather than
 `adapt_min_bitrate`. libopus only codes FEC above a loss-dependent rate — never
 at 12 kbps, and at 16 kbps only if it was already on — so backing off further
-for loss would switch off the one thing repairing it.
+for random loss would switch off the one thing repairing it.
+
+Congestion is different: there the loss comes from sending more than the link
+carries, and it eases when the bitrate drops. So when two reports at the floor
+still show loss above `adapt_loss_down_pct`, but a third less than before the
+step that brought it there, the SDK takes it as congestion: FEC off, floor
+released, and the bitrate keeps stepping down. It comes back up in the usual
+25% steps, and FEC may return once it is above the floor again.
+
+| Link | Measured live | What adaptation does |
+|---|---|---|
+| 10% random loss | loss unchanged at the floor | holds 20 kbps, FEC on |
+| 32 kbps uplink cap | loss 37% → 16% at the floor | FEC off, down to 12 kbps, loss gone |
+| dead uplink | peer reports 0% | read as 100% loss at the first report |
+
+A dead uplink needs its own test. A receiver counts as lost only the gaps below
+the highest sequence number it has seen, so when nothing we send arrives, its
+reports say nothing was lost. The SDK watches that number instead: a report
+that has not moved past it while we kept sending means nothing got through.
+The first report after the link returns carries the whole outage in its loss
+count; it is skipped, since the outage was acted on while it lasted.
 
 ### Bursts of loss
 

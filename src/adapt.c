@@ -86,6 +86,14 @@
  * tells that from a link that really degraded.  The gap between the on and
  * off thresholds keeps a link sitting near one of them from switching every
  * report, and 10 s is two clean reports at the usual 5 s RTCP interval. */
+/* A report showing no progress past packets the peer already had, while we
+ * sent at least this many since the last one, means none of them arrived. */
+#define BSDK_DEAD_PKTS 50u
+
+/* How long bitrate adaptation sits at the FEC floor before judging whether
+ * the loss it still sees is congestion: one more receiver report. */
+#define BSDK_CONGESTED_MS 6000u
+
 #define BSDK_FEC_ON_NOW_PCT 4.0f
 #define BSDK_FEC_ON_PCT     2.0f
 #define BSDK_FEC_OFF_PCT    1.0f
@@ -147,7 +155,12 @@ static bool fec_auto(void)
 /* The expected loss this call's encoder is sized for, followed or pinned. */
 static uint32_t fec_level_now(const struct echosdk_call *lc)
 {
-	return fec_auto() ? lc->fec.level : g_bsdk.cfg.opus_expected_loss_pct;
+	if (!fec_auto())
+		return g_bsdk.cfg.opus_expected_loss_pct;
+
+	/* On a link whose loss follows the bitrate, redundancy only adds to
+	 * the congestion (bitrate_tick()). */
+	return lc->fec.active && !lc->adapt_congested ? lc->fec.level : 0;
 }
 
 /* ── fmtp rewriting ──────────────────────────────────────────────────────── */
@@ -275,14 +288,14 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
 	 * would reset it.  Off means the flag itself is off, not just a 0%
 	 * budget. */
 	if (fec_auto()) {
-		if (!lc->fec.active) {
+		if (!fec_level_now(lc)) {
 			err = bsdk_adapt_fmtp_set(nofec, sizeof(nofec), params,
 			                          "useinbandfec", 0);
 			if (err)
 				return err;
 			params = nofec;
 		}
-		opus_packet_loss = (int32_t)lc->fec.level;
+		opus_packet_loss = (int32_t)fec_level_now(lc);
 	}
 
 	err = audio_encoder_set(au, ac, sc->pt, params);
@@ -474,6 +487,7 @@ static void bitrate_tick(struct echosdk_call *lc,
                           const echosdk_ev_media_stats_t *s)
 {
 	uint32_t min_br, max_br, cur, next;
+	float    loss;
 
 	if (!g_bsdk.cfg.adaptive_bitrate)
 		return;
@@ -485,32 +499,79 @@ static void bitrate_tick(struct echosdk_call *lc,
 	if (!s->packets_sent || s->rtt_ms <= 0.f)
 		return;
 
+	/* An uplink that delivers nothing reads 0% in the window: the peer
+	 * counts no gaps in what it never received (bsdk_adapt_fec_update()).
+	 * And the report after it comes back is that outage catching up. */
+	loss = lc->fec.dead ? 100.f : lc->fec.recovered ? 0.f : s->loss_pct;
+
 	min_br = adapt_min_br();
 	max_br = adapt_max_br();
-	if (fec_level_now(lc) && min_br < BSDK_FEC_MIN_BR)
-		min_br = BSDK_FEC_MIN_BR < max_br ? BSDK_FEC_MIN_BR : max_br;
 
 	/* An unadapted call is at its negotiated rate, which we treat as the
 	 * ceiling: the first step down must actually lower it. */
 	cur = lc->adapt_bitrate ? lc->adapt_bitrate : max_br;
 
+	/* The FEC floor, while FEC is actually coded: a peer without
+	 * useinbandfec=1 gets none, and holding its bitrate up buys nothing.
+	 *
+	 * Unless the loss turns out to follow the bitrate.  Random loss stays
+	 * put when the rate drops, and FEC is what repairs it; congestion eases
+	 * when it drops.  So at the floor, one report later, loss still above
+	 * the step-down threshold but a third lower than when we stepped here
+	 * is a link too narrow for the floor: release it, and FEC's bits with
+	 * it.  Two reports running, not the smoothed figure alone: a link that
+	 * has simply recovered also shows loss easing, and its next report
+	 * reads clean (seen live after an uplink outage).  Measured live on a 32 kbps uplink, the floor otherwise held the
+	 * call at 16-26% loss for as long as the cap lasted. */
+	if (bsdk_adapt_fec_status(lc, NULL) && min_br < BSDK_FEC_MIN_BR) {
+		uint64_t now = tmr_jiffies();
+
+		if (cur > BSDK_FEC_MIN_BR)
+			lc->adapt_floor_since = 0;
+		else if (!lc->adapt_floor_since)
+			lc->adapt_floor_since = now;
+		else if (now - lc->adapt_floor_since >= BSDK_CONGESTED_MS &&
+		         lc->fec.last_loss > adapt_down_pct() &&
+		         lc->fec.prev_loss > adapt_down_pct() &&
+		         lc->fec.smooth <= lc->adapt_step_loss * (2.f / 3.f)) {
+			lc->adapt_congested = true;
+			lc->fec_applied     = false;   /* re-apply without FEC */
+			info("EchoSDK: congested at %u bps (loss %.1f%%, "
+			     "%.1f%% before): FEC off, floor released\n",
+			     cur, lc->fec.smooth, lc->adapt_step_loss);
+		}
+
+		if (!lc->adapt_congested)
+			min_br = BSDK_FEC_MIN_BR < max_br ? BSDK_FEC_MIN_BR
+			                                  : max_br;
+	}
+
 	if (cur < min_br) {
 		/* FEC came on while the rate was below where it can be coded. */
 		next = min_br;
 	}
-	else if (s->loss_pct > adapt_down_pct()) {
+	else if (loss > adapt_down_pct()) {
 		lc->adapt_clean_ticks = 0;
+		/* What the floor test above compares against. */
+		if (cur > BSDK_FEC_MIN_BR)
+			lc->adapt_step_loss = lc->fec.smooth > loss
+			                    ? lc->fec.smooth : loss;
 		next = cur / 2;
 		if (next < min_br)
 			next = min_br;
 	}
-	else if (s->loss_pct <= adapt_up_pct()) {
+	else if (loss <= adapt_up_pct()) {
 		if (++lc->adapt_clean_ticks < adapt_recover_ticks())
 			return;
 		lc->adapt_clean_ticks = 0;
 		next = cur + cur / 4;
 		if (next > max_br)
 			next = max_br;
+		/* Back above the floor: FEC may come back if the loss does. */
+		if (lc->adapt_congested && next >= BSDK_FEC_MIN_BR) {
+			lc->adapt_congested = false;
+			lc->fec_applied     = false;
+		}
 	}
 	else {
 		/* Dead band: neither bad enough to back off nor clean enough to
@@ -528,7 +589,7 @@ static void bitrate_tick(struct echosdk_call *lc,
 		return;   /* fixed-rate codec or transient error — try again later */
 
 	info("EchoSDK: adaptive bitrate %u -> %u bps (loss %.1f%%)\n",
-	     cur, next, s->loss_pct);
+	     cur, next, loss);
 }
 
 /* ── FEC adaptation ──────────────────────────────────────────────────────── */
@@ -579,13 +640,15 @@ uint32_t bsdk_adapt_fec_level(float loss_pct, uint32_t cur)
  * between two reports: what the peer lost of what we sent in that time.
  */
 bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
-                           float rtt_ms, uint64_t now_ms)
+                           uint32_t ehsn, float rtt_ms, uint64_t now_ms)
 {
 	const bool     was_active = f->active;
 	const uint32_t was_level  = f->level;
-	uint32_t d_sent;
+	uint32_t d_sent, d_ehsn;
 	int64_t  d_lost;
 	float    loss;
+
+	f->recovered = false;
 
 	/* No receiver report yet: nothing to go on. */
 	if (rtt_ms <= 0.f)
@@ -595,27 +658,52 @@ bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
 		f->rep_seen      = true;
 		f->rep_sent      = sent;
 		f->rep_lost      = lost;
+		f->rep_ehsn      = ehsn;
 		f->rep_rtt       = rtt_ms;
 		f->last_lossy_ms = now_ms;
 		return false;
 	}
 
-	if (rtt_ms == f->rep_rtt && lost == f->rep_lost)
+	if (rtt_ms == f->rep_rtt && lost == f->rep_lost && ehsn == f->rep_ehsn)
 		return false;             /* the same report as last tick */
 
 	d_sent = sent - f->rep_sent;
 	d_lost = (int64_t)lost - (int64_t)f->rep_lost;
+	d_ehsn = ehsn - f->rep_ehsn;
 	f->rep_sent = sent;
 	f->rep_lost = lost;
+	f->rep_ehsn = ehsn;
 	f->rep_rtt  = rtt_ms;
 
 	if (!d_sent)
 		return false;
-	if (d_lost < 0)               /* duplicates can walk it back */
-		d_lost = 0;
-	loss = (float)d_lost * 100.f / (float)d_sent;
-	if (loss > 100.f)
+
+	if (!d_ehsn && d_sent >= BSDK_DEAD_PKTS) {
+		/* The peer has heard nothing past what it had last time, though
+		 * we kept sending: none of it arrived.  Its own loss count cannot
+		 * show that — a receiver counts only gaps below the highest
+		 * sequence it has seen — so this is the only way a dead uplink
+		 * does not read as a clean one. */
+		f->dead = true;
 		loss = 100.f;
+	}
+	else if (f->dead) {
+		/* Back.  This report's loss is the outage catching up, already
+		 * acted on while it lasted. */
+		f->dead      = false;
+		f->recovered = true;
+		return false;
+	}
+	else {
+		if (d_lost < 0)           /* duplicates can walk it back */
+			d_lost = 0;
+		loss = (float)d_lost * 100.f / (float)d_sent;
+		if (loss > 100.f)
+			loss = 100.f;
+	}
+
+	f->prev_loss = f->last_loss;
+	f->last_loss = loss;
 
 	if (loss >= BSDK_FEC_OFF_PCT)
 		f->last_lossy_ms = now_ms;
@@ -681,21 +769,17 @@ bool bsdk_adapt_fec_status(const struct echosdk_call *lc, uint32_t *level)
 		return false;
 
 	lvl = fec_level_now(lc);
-	if (fec_auto() && !lc->fec.active)
-		lvl = 0;
 	if (level)
 		*level = lvl;
 	return lvl > 0;
 }
 
-static void fec_tick(struct echosdk_call *lc,
-                     const echosdk_ev_media_stats_t *s)
+static void fec_tick(struct echosdk_call *lc, bool changed)
 {
 	if (!fec_auto())
 		return;
 
-	if (bsdk_adapt_fec_update(&lc->fec, s->packets_sent, s->packets_lost,
-	                          s->rtt_ms, tmr_jiffies()))
+	if (changed)
 		lc->fec_applied = false;
 
 	/* Applied once per call even with nothing measured yet: the global is
@@ -731,6 +815,9 @@ void bsdk_adapt_call_start(struct echosdk_call *lc)
 	lc->adapt_bitrate     = 0;
 	lc->adapt_clean_ticks = 0;
 	memset(&lc->fec, 0, sizeof(lc->fec));
+	lc->adapt_floor_since  = 0;
+	lc->adapt_step_loss    = 0.f;
+	lc->adapt_congested    = false;
 	lc->fec_applied        = false;
 	lc->fec_applied_active = false;
 	lc->fec_applied_level  = 0;
@@ -752,7 +839,11 @@ void bsdk_adapt_tick(struct echosdk_call *lc,
 		return;
 
 	stall_tick(lc, s);
-	fec_tick(lc, s);
+	/* The report tracker runs whatever the FEC mode: bitrate adaptation
+	 * reads a dead uplink and the smoothed loss from it too. */
+	fec_tick(lc, bsdk_adapt_fec_update(&lc->fec, s->packets_sent,
+	                                   s->packets_lost, lc->rtcp_ehsn,
+	                                   s->rtt_ms, tmr_jiffies()));
 	bitrate_tick(lc, s);
 }
 

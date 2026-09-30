@@ -696,3 +696,72 @@ echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 		goto out;
 ]=]
 "sipreg: watch the registration's connection for close")
+
+
+# ---------------------------------------------------------------------------
+# Q. rtp/sess — keep the highest sequence number the peer has received
+#
+# A receiver report counts as lost only the gaps below the highest sequence
+# number it has seen (RFC 3550 A.3).  When none of our packets arrive, that
+# number stops, and every report says nothing was lost: a dead uplink reads
+# as a clean one.  Measured live (2026-09-30, Asterisk echo): 45 s of 100%
+# uplink loss reported as 0%, then a single report of 100% once the link was
+# back.  libre parses the number (rtcp_rr.last_seq) and drops it; keeping it
+# lets src/adapt.c see a report that has not moved while we kept sending.
+# ---------------------------------------------------------------------------
+echosdk_patch("${SOURCE_DIR}/include/re_rtp.h"
+[=[
+	struct {
+		uint32_t sent;  /**< Tx RTP Packets                  */
+		int lost;       /**< Tx RTP Packets Lost             */
+		uint32_t jit;   /**< Tx Inter-arrival Jitter in [us] */
+	} tx;
+]=]
+[=[
+	struct {
+		uint32_t sent;  /**< Tx RTP Packets                  */
+		int lost;       /**< Tx RTP Packets Lost             */
+		uint32_t jit;   /**< Tx Inter-arrival Jitter in [us] */
+		/* EchoSDK-patched: see src/rtp/sess.c handle_rr_block() */
+		uint32_t ehsn;  /**< Highest seq. the peer has received */
+	} tx;
+]=]
+"rtcp_stats: peer's extended highest sequence number")
+
+echosdk_patch("${SOURCE_DIR}/src/rtp/rtcp.h"
+[=[
+	uint32_t rtt;             /**< Round-trip time in [us]             */
+};
+]=]
+[=[
+	uint32_t rtt;             /**< Round-trip time in [us]             */
+	uint32_t ehsn;            /**< EchoSDK-patched: peer's highest seq */
+};
+]=]
+"rtp_member: peer's extended highest sequence number")
+
+echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
+[=[
+	/* Lost */
+	mbr->cum_lost = rr->lost;
+]=]
+[=[
+	/* Lost */
+	mbr->cum_lost = rr->lost;
+
+	/* EchoSDK-patched: what the peer has heard of us at all */
+	mbr->ehsn = rr->last_seq;
+]=]
+"handle_rr_block: keep the peer's extended highest sequence number")
+
+echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
+[=[
+	stats->tx.lost = mbr->cum_lost;
+	stats->tx.jit  = mbr->jit;
+]=]
+[=[
+	stats->tx.lost = mbr->cum_lost;
+	stats->tx.jit  = mbr->jit;
+	stats->tx.ehsn = mbr->ehsn;   /* EchoSDK-patched */
+]=]
+"rtcp_stats: report the peer's extended highest sequence number")

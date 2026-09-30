@@ -8,6 +8,29 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **Calls were stereo, at ~99 kbps, whatever `opus.stereo` said.**  The
+  opus module asks for and sends stereo unless told otherwise, and the SDK
+  only ever told it "yes".  With a mono microphone that is the same voice
+  coded twice, at twice the automatic bitrate, for no measurable quality
+  (PESQ-WB 4.56 either way).  `opus.stereo = false`, the documented default,
+  now means mono both ways.
+
+- **A dead uplink looked like a clean one.**  A receiver counts as lost only
+  the gaps below the highest sequence number it has seen, so when none of our
+  packets arrive its reports say 0% — measured live: 45 s of total uplink
+  loss with no reaction, then a single report of 100% once the link was back,
+  which crashed the bitrate just after it had recovered.  libre now keeps
+  that highest sequence number (patch Q), and a report that has not moved
+  past it while we kept sending reads as 100% loss; the catch-up report
+  after the outage is skipped.
+
+- **On a narrow uplink, the FEC bitrate floor kept the call lossy.**  At a
+  32 kbps cap the floor held the encoder at 20 kbps — ~38 kbps with headers —
+  at 16-26% loss for as long as the cap lasted.  Loss that eases when the
+  bitrate drops is now taken as congestion: FEC off, floor released.  Same
+  cap, live: loss gone within ~16 s at ~11 kbps.  Random loss, which does not
+  ease, still holds the floor with FEC on.
+
 - **A lost Opus packet played as a gap.**  The vendored baresip never called
   the codec's concealment — the call was commented out in aureceiver.c — so a
   lost packet was 20 ms of missing audio on Opus as much as on G.711.  Fixed
@@ -190,6 +213,12 @@ All notable changes to EchoSDK are documented here.
   holds at that moment, as the previous implementation did.
 
 ### Changed
+
+- **Opus calls start at 32 kbps.**  `opus.bitrate` defaults to 32000, where
+  speech quality levels off (PESQ-WB 4.53, against 4.56 at the 50-99 kbps
+  Opus picks by itself), and which is also the adaptive ceiling: a call
+  starts where it can return to, and a sudden bandwidth drop costs far less
+  before the first RTCP report reaches us.  0 still lets Opus choose.
 
 - **Opus FEC switches itself on and off, and adaptive bitrate is on by
   default.**  `opus.fec` and `adaptive_bitrate` now default to true, and

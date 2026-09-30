@@ -217,12 +217,12 @@ typedef enum {
 } echosdk_ice_cand_type_t;
 
 typedef struct {
-	int  bitrate;    /* 0 = auto/VBR; otherwise bps, e.g. 32000 */
+	int  bitrate;    /* target bps (VBR); default 32000; 0 = Opus picks (~50 kbps mono) */
 	int  complexity; /* 0-10 CPU trade-off; -1 = opus default (9) */
 	bool cbr;        /* constant bitrate; false = VBR (default) */
 	bool dtx;        /* discontinuous transmission (silence suppression) */
 	bool fec;        /* in-band FEC; default true (echosdk_config_init) */
-	bool stereo;     /* stereo output; false = mono (default) */
+	bool stereo;     /* send and ask for stereo; false = mono (default) */
 } echosdk_opus_config_t;
 
 /* ── Error codes ──────────────────────────────────────────────────────────── */
@@ -1195,7 +1195,7 @@ typedef struct {
 	 * survivable.
 	 */
 	bool      adaptive_bitrate;
-	uint32_t  adapt_min_bitrate;    /* bps; 0 = 12000; 20000 while FEC is on */
+	uint32_t  adapt_min_bitrate;    /* bps; 0 = 12000; 20000 while FEC is on, unless congested */
 	uint32_t  adapt_max_bitrate;    /* bps; 0 = 32000  */
 	float     adapt_loss_down_pct;  /* step down above this; 0 = 5.0  */
 	float     adapt_loss_up_pct;    /* step up below this;   0 = 1.0  */

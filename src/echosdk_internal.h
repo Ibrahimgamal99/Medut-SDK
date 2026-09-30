@@ -231,7 +231,14 @@ struct bsdk_fec {
 	bool     rep_seen;
 	uint32_t rep_sent;      /* packets we had sent by then */
 	uint32_t rep_lost;      /* cumulative loss the peer reported */
+	uint32_t rep_ehsn;      /* highest sequence it had received */
 	float    rep_rtt;       /* its RTT; changes with every report */
+	/* A report that has not moved past a packet it already had, while we
+	 * kept sending: nothing we sent arrived.  See bsdk_adapt_fec_update(). */
+	bool     dead;
+	bool     recovered;     /* this tick's report ended a dead stretch */
+	float    last_loss;     /* the last two reports' loss %, unsmoothed */
+	float    prev_loss;
 };
 
 struct echosdk_call {
@@ -347,6 +354,11 @@ struct echosdk_call {
 	bool                       fec_applied;       /* encoder matches `fec` */
 	bool                       fec_applied_active;/* what it was last given */
 	uint32_t                   fec_applied_level;
+	uint32_t                   rtcp_ehsn;         /* peer's highest seq (stats.c) */
+	/* Bitrate adaptation at the FEC floor (adapt.c: bitrate_tick()). */
+	uint64_t                   adapt_floor_since; /* tmr_jiffies() it got there; 0 = not */
+	float                      adapt_step_loss;   /* smoothed loss when it stepped there */
+	bool                       adapt_congested;   /* loss follows the rate: floor released */
 	uint32_t                   stall_rx_packets;  /* rx count at last advance */
 	uint64_t                   stall_since;       /* tmr_jiffies() of last advance */
 	bool                       stall_active;      /* MEDIA_STALL alert outstanding */
@@ -657,10 +669,11 @@ int  bsdk_adapt_fmtp_set(char *buf, size_t sz, const char *src,
  * level applied now.  Exposed for the same test. */
 uint32_t bsdk_adapt_fec_level(float loss_pct, uint32_t cur);
 /* Feed the FEC state one stats tick: our sent count, the peer's cumulative
- * loss and RTT from its last receiver report, and the time.  Returns true
+ * loss, highest received sequence and RTT from its last receiver report, and
+ * the time.  Returns true
  * when FEC turned on or off, or its level changed.  Exposed for the test. */
 bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
-                           float rtt_ms, uint64_t now_ms);
+                           uint32_t ehsn, float rtt_ms, uint64_t now_ms);
 /* Whether this call's Opus encoder is sending FEC, and at what level — for
  * the stats tick.  False for a codec without FEC, or a peer that did not ask
  * for it (useinbandfec). */

@@ -278,6 +278,10 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 		/* Cumulative counters stay cumulative — same convention as
 		 * WebRTC getStats() and PJSIP. */
+		/* What the peer has received of us at all: its loss count cannot
+		 * show an uplink that delivers nothing (adapt.c). */
+		lc->rtcp_ehsn = rs->tx.ehsn;
+
 		int32_t cum_tx_lost = (int32_t)rs->tx.lost;
 		int32_t cum_rx_lost = (int32_t)rs->rx.lost;
 		s->packets_lost    = cum_tx_lost > 0 ? (uint32_t)cum_tx_lost : 0u;

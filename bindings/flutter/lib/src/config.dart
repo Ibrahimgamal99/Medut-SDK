@@ -10,7 +10,8 @@ import 'ffi_bindings.dart' as c;
 
 /// Opus encoder tuning (`echosdk_opus_config_t`).
 class OpusConfig {
-  /// 0 = auto/VBR; otherwise bits per second, e.g. 32000.
+  /// Target bits per second (VBR); default 32000, where Opus speech
+  /// quality levels off.  0 lets Opus pick (~50 kbps mono).
   final int bitrate;
 
   /// 0-10 CPU trade-off; -1 = opus default (9).
@@ -31,7 +32,7 @@ class OpusConfig {
   final bool stereo;
 
   const OpusConfig({
-    this.bitrate = 0,
+    this.bitrate = 32000,
     this.complexity = -1,
     this.cbr = false,
     this.dtx = false,
@@ -257,7 +258,8 @@ class EchoSDKConfig {
   final bool adaptiveBitrate;
 
   /// Adaptation floor in bps; 0 = SDK default (12000).  Raised to 20000
-  /// while Opus FEC is in use: below it libopus cannot code FEC.
+  /// while Opus FEC is in use (below it libopus cannot code FEC), unless the
+  /// loss turns out to be congestion.
   final int adaptMinBitrate;
 
   /// Adaptation ceiling in bps; 0 = SDK default (32000).

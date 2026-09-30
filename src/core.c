@@ -176,6 +176,11 @@ void echosdk_config_init(echosdk_config_t *cfg)
 	 * must set this to false — see the field docs. */
 	cfg->platform_audio_activate = true;
 	cfg->opus.complexity       = -1;
+	/* Where Opus speech quality levels off: PESQ-WB 4.53, against 4.56 at
+	 * the 50-99 kbps it picks by itself.  Also the adaptive ceiling
+	 * (adapt_max_bitrate), so a call starts where it can return to, and a
+	 * sudden bandwidth drop costs less before the first RTCP report. */
+	cfg->opus.bitrate          = 32000;
 	/* Ask the peer for in-band FEC.  Our own redundancy then follows the
 	 * loss it reports (adapt.c) while opus_expected_loss_pct stays 0. */
 	cfg->opus.fec              = true;
@@ -461,8 +466,14 @@ int echosdk_init(const echosdk_config_t *cfg)
 			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
 			                    "opus_packet_loss %u\n", pl);
 		}
-		if (op->stereo)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_stereo yes\n");
+		/* Both ways, always: the opus module asks for and sends stereo
+		 * unless told otherwise, which for a mono microphone is the same
+		 * voice coded twice — twice the automatic bitrate (99 kbps at
+		 * 48 kHz) for no measurable quality. */
+		olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
+		                    "opus_stereo %s\nopus_sprop_stereo %s\n",
+		                    op->stereo ? "yes" : "no",
+		                    op->stereo ? "yes" : "no");
 		if (olen > 0)
 			conf_configure_buf((const uint8_t *)obuf, (size_t)olen);
 	}

@@ -139,12 +139,12 @@ as convenience only — it is applied straight after `init()`, not marshalled in
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `opus.bitrate` | `int` | 0 | Target bitrate bps (0 = auto/VBR) |
+| `opus.bitrate` | `int` | 32000 | Target bitrate bps (VBR). 32 kbps is where speech quality levels off; 0 lets Opus pick (~50 kbps mono) |
 | `opus.complexity` | `int` | −1 | 0–10 CPU/quality trade-off (−1 = opus default: 9) |
 | `opus.cbr` | `bool` | false | Constant bitrate (false = VBR) |
 | `opus.dtx` | `bool` | false | Discontinuous transmission (silence suppression) |
 | `opus.fec` | `bool` | true | In-band forward error correction: ask the peer for it, and send our own sized by `opus_expected_loss_pct`. `false` turns it off both ways |
-| `opus.stereo` | `bool` | false | Stereo output (false = mono) |
+| `opus.stereo` | `bool` | false | Send and ask for stereo (false = mono both ways) |
 
 ### Jitter buffer
 
@@ -230,7 +230,7 @@ the address stays put and the link itself goes bad. Full guide:
 | `media_stall_ms` | `uint32_t` | 4000 | Fire `QUALITY_ALERT` with issue `MEDIA_STALL` after this long with no inbound RTP; fires again with `recovering` when it resumes. Non-fatal; 0 disables. Requires `stats_interval_ms` > 0 |
 | `rtp_timeout_s` | `uint32_t` | 0 | **End** the call after this long with no inbound RTP (baresip `avt.rtp_timeout`). 0 = never; 30–60 when wanted. Only sendrecv streams are checked, so a held call is never torn down |
 | `adaptive_bitrate` | `bool` | true | Step the audio encoder bitrate down under peer-reported loss and back up on recovery, via the codec's encoder-update path — no re-INVITE, no audio gap. Opus only; a fixed-rate codec has nothing to vary |
-| `adapt_min_bitrate` | `uint32_t` | 12000 | Adaptation floor, bps. Raised to 20000 while Opus FEC is in use: below it libopus cannot code FEC |
+| `adapt_min_bitrate` | `uint32_t` | 12000 | Adaptation floor, bps. Raised to 20000 while Opus FEC is in use (below it libopus cannot code FEC), unless the loss turns out to be congestion |
 | `adapt_max_bitrate` | `uint32_t` | 32000 | Adaptation ceiling, bps |
 | `adapt_loss_down_pct` | `float` | 5.0 | Halve the bitrate above this loss % |
 | `adapt_loss_up_pct` | `float` | 1.0 | Raise it (+25%) below this loss % |
