@@ -106,9 +106,54 @@ if(ECHOSDK_SRC_MODE)
   # ABI-critical: must match re and baresip — see the HAVE_UNIXSOCK note above.
   target_compile_definitions(echosdk_core PRIVATE ${_BSDK_UNIXSOCK_DEF})
 
-  # WebRTC AEC opt-in
+  # WebRTC AEC opt-in: EchoSDK's own filter over libwebrtc-audio-processing-1
+  # (src/webrtc_apm.cpp, driven from audio_processing.c), not baresip's
+  # webrtc_aec module — that one never enables the canceller.  The library
+  # is dlopen'ed through src/webrtc_shim.c, so it is a build-time dependency
+  # only.  The wrapper is the only C++ in the SDK and is built so that it
+  # needs no libstdc++; the PRE_LINK check below keeps it that way.
   if(ECHOSDK_WITH_WEBRTC_AEC)
-    target_compile_definitions(echosdk_core PRIVATE ECHOSDK_HAS_WEBRTC_AEC=1)
+    enable_language(CXX)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WEBRTC_AP REQUIRED webrtc-audio-processing-1)
+
+    # Pin the SONAME of the library these headers came from.  An older
+    # soversion has a different vtable order and Config layout.
+    find_library(_BSDK_WEBRTC_LIB NAMES webrtc-audio-processing-1
+                 HINTS ${WEBRTC_AP_LIBRARY_DIRS} REQUIRED)
+    execute_process(COMMAND ${CMAKE_OBJDUMP} -p ${_BSDK_WEBRTC_LIB}
+                    OUTPUT_VARIABLE _bsdk_od RESULT_VARIABLE _bsdk_rc)
+    string(REGEX MATCH "SONAME[ \t]+([^ \t\r\n]+)" _bsdk_m "${_bsdk_od}")
+    if(NOT _bsdk_rc EQUAL 0 OR NOT CMAKE_MATCH_1)
+      message(FATAL_ERROR "cannot read the SONAME of ${_BSDK_WEBRTC_LIB}")
+    endif()
+    set(_BSDK_WEBRTC_SONAME "${CMAKE_MATCH_1}")
+    message(STATUS "WebRTC AEC: ${_BSDK_WEBRTC_SONAME} "
+                   "(webrtc-audio-processing ${WEBRTC_AP_VERSION})")
+
+    add_library(bsdk_webrtc_apm OBJECT
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/webrtc_apm.cpp")
+    target_include_directories(bsdk_webrtc_apm SYSTEM PRIVATE
+      ${WEBRTC_AP_INCLUDE_DIRS})
+    target_compile_options(bsdk_webrtc_apm PRIVATE
+      ${WEBRTC_AP_CFLAGS_OTHER}
+      -fno-exceptions -fno-rtti -fno-threadsafe-statics)
+    set_target_properties(bsdk_webrtc_apm PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON)
+    target_sources(echosdk_core PRIVATE $<TARGET_OBJECTS:bsdk_webrtc_apm>)
+
+    add_custom_command(TARGET echosdk_core PRE_LINK
+      COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+              "-DOBJS=$<TARGET_OBJECTS:bsdk_webrtc_apm>"
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check-webrtc-apm-symbols.cmake"
+      COMMAND_EXPAND_LISTS
+      VERBATIM)
+
+    target_compile_definitions(echosdk_core PRIVATE
+      ECHOSDK_HAS_WEBRTC_AEC=1
+      ECHOSDK_WEBRTC_SONAME="${_BSDK_WEBRTC_SONAME}")
   endif()
 
   # Platform audio define so modules_init.c picks the right audio module.
@@ -172,18 +217,39 @@ option(ECHOSDK_BUILD_OPENSSL
        "Cross-build OpenSSL from third_party/openssl instead of using a system one"
        ${_build_openssl_default})
 option(ECHOSDK_SHARED "Also produce a shared library (.so/.dylib/.dll) from the merged archive" OFF)
-if(WIN32 OR ANDROID_ABI OR CMAKE_SYSTEM_NAME MATCHES "iOS")
-  set(_aec_default OFF)
-else()
+# WebRTC AEC: desktop Linux only.  src/webrtc_shim.c resolves the library's
+# symbols by their ELF names and loads it with dlopen by SONAME, neither of
+# which carries over to Mach-O or Windows.  Only the 1.x API is supported:
+# 2.x (pkg-config webrtc-audio-processing-2) returns scoped_refptr from
+# Create() and is a different ABI.
+set(_aec_default OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID_ABI)
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
     pkg_check_modules(WEBRTC_AP QUIET webrtc-audio-processing-1)
+    if(WEBRTC_AP_FOUND)
+      set(_aec_default ON)
+    else()
+      pkg_check_modules(WEBRTC_AP2 QUIET webrtc-audio-processing-2)
+      if(WEBRTC_AP2_FOUND)
+        message(STATUS "webrtc-audio-processing-2 found, but only 1.x is "
+                       "supported: building without WebRTC AEC")
+      endif()
+    endif()
   endif()
-  set(_aec_default ${WEBRTC_AP_FOUND})
 endif()
 option(ECHOSDK_WITH_WEBRTC_AEC
-       "Include WebRTC AEC module (desktop only; requires libwebrtc-audio-processing-1)"
+       "Include the WebRTC AEC/NS filter (desktop Linux only; requires webrtc-audio-processing-1)"
        ${_aec_default})
+if(ECHOSDK_WITH_WEBRTC_AEC)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID_ABI)
+    message(FATAL_ERROR "ECHOSDK_WITH_WEBRTC_AEC is supported on desktop Linux only")
+  endif()
+  if(NOT WEBRTC_AP_FOUND)
+    message(FATAL_ERROR "ECHOSDK_WITH_WEBRTC_AEC needs webrtc-audio-processing-1 "
+                        "(1.x; 2.x is not supported)")
+  endif()
+endif()
 
 set(ECHOSDK_RE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/re"
     CACHE PATH "Path to libre source tree")

@@ -436,12 +436,20 @@ void bsdk_re_loop_stop(void);
 
 int modules_init(void);
 
-/* True when the platform audio driver that modules_init() settled on captures
- * through the OS voice path, so the device has already cancelled the echo
- * before we see a sample (Android sles_vc, iOS audiounit).  Valid only after
- * modules_init(); false everywhere else, including the stock opensles
- * fallback and every desktop driver. */
+/* True when the platform audio driver captures through the OS voice path, so
+ * the device has already cancelled the echo (and run its NS/AGC) before we
+ * see a sample (Android sles_vc, iOS audiounit).  False everywhere else,
+ * including the stock opensles fallback and every desktop driver.
+ *
+ * Android starts out true once sles_vc is up and is then set per recorder
+ * from whether the VOICE_COMMUNICATION preset actually took — a vendor that
+ * rejects it records without any of that processing.  An atomic: safe from
+ * the audio threads. */
 bool bsdk_platform_has_aec(void);
+
+/* A new recorder reports whether it captures through the voice path.  Call on
+ * the re thread (recorders are created there). */
+void bsdk_platform_voice_path_report(bool active);
 
 /* Name of the platform device module modules_init() selected ("sles_vc",
  * "audiounit", "pulse", ...), or NULL when this build has none.  Used to
@@ -454,9 +462,12 @@ int  bsdk_audio_external_init(void);
 void bsdk_audio_external_close(void);
 
 /* True while the app-owned device is the one selected, i.e. between
- * echosdk_audio_use_external(true) and (false).  Reads conf_config(), so it
- * must be called on the re thread.  Defined in audio.c next to the switch. */
+ * echosdk_audio_use_external(true) and (false).  An atomic, so safe from the
+ * audio threads.  Defined in audio.c next to the switch. */
 bool bsdk_audio_external_selected(void);
+/* Re-reads the selection from conf_config() into that atomic.  Re thread;
+ * called after modules_init() picks the device and after every switch. */
+void bsdk_audio_external_sync(void);
 
 #ifdef __ANDROID__
 /* platform/android/sles_vc.c — OpenSLES driver with the Android
@@ -618,9 +629,34 @@ void bsdk_audio_processing_init(bool ns, bool agc,
                                 float mic_db, float spk_db);
 void bsdk_audio_processing_close(void);
 
-/* Whether the half-duplex TX suppressor should run: SUPPRESSOR mode AND no
- * platform echo canceller underneath us (see bsdk_platform_has_aec). */
-bool bsdk_aec_suppressor_wanted(echosdk_aec_mode_t mode);
+/* Runtime switches behind echosdk_set_ns/agc/aec[_mode].  Call on the re
+ * thread (the setters dispatch there, which keeps them in order).  They take
+ * effect on the next frame of every call, including calls already up: every
+ * filter stays in the chain and decides per frame from these inputs. */
+void bsdk_ap_set_ns(bool on);
+void bsdk_ap_set_agc(bool on);
+/* on while the app owns the device (echosdk_audio_use_external) on a
+ * platform whose driver cancels echo is also the app asking for the
+ * suppressor there — the one way it runs on such a platform. */
+void bsdk_ap_set_aec(bool on);
+/* After echosdk_audio_use_external() actually switched: back on the
+ * platform device, an app's suppressor request lapses. */
+void bsdk_ap_external_changed(bool external);
+
+/* Logs what the microphone goes through now, and why each filter is off. */
+void bsdk_ap_log_chain(const char *why);
+
+/* What runs on the next frame, from the current inputs.  Safe from any
+ * thread (atomic loads). */
+struct bsdk_ap_effective {
+	bool webrtc;       /* bsdk_webrtc processes at all                 */
+	bool webrtc_aec;   /*   with its echo canceller                    */
+	bool webrtc_ns;    /*   with its noise suppressor                  */
+	bool ns;           /* bsdk_ns gate                                 */
+	bool agc;          /* bsdk_agc                                     */
+	bool suppressor;   /* bsdk_aec half-duplex suppressor              */
+};
+void bsdk_ap_effective(struct bsdk_ap_effective *e);
 
 /* Atomic gain accessors used by the setters in audio.c. */
 void bsdk_mic_gain_store(float linear);

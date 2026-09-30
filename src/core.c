@@ -556,6 +556,9 @@ fail:
 	bsdk_event_close();
 	ua_close();
 	bsdk_call_global_reset();
+	/* Before mod_close: a retry re-registers auconv/auresamp, and ours
+	 * must go back in after them, not stay linked ahead. */
+	bsdk_audio_processing_close();
 	bsdk_ice_module_close();
 	mod_close();   /* see echosdk_shutdown(): a retry of init must reload */
 	bsdk_dns_close();

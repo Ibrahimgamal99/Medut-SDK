@@ -138,12 +138,17 @@ class EchoSDKConfig {
   /// the mic on top of a working canceller only costs full duplex.
   final AecMode aecMode;
 
-  /// Noise suppression on the TX path. Off by default, and normally left off
-  /// on mobile: the OS voice capture path already suppresses noise.
+  /// Noise suppression on the TX path. Off by default.
+  ///
+  /// Never stacked on the phone's own: while Android captures through
+  /// `VOICE_COMMUNICATION` (or iOS through `VoiceProcessingIO`) the OS already
+  /// suppresses noise, and the SDK keeps this off there even when it is true.
+  /// It applies while the app owns the device (app-owned audio), on an
+  /// Android device that refuses the voice preset, and on desktop.
   final bool noiseSuppression;
 
-  /// Automatic gain control on the TX path. Off by default, and normally left
-  /// off on mobile: the OS voice capture path already normalises level.
+  /// Automatic gain control on the TX path. Off by default. Like
+  /// [noiseSuppression], never stacked on the phone's own voice path.
   final bool autoGainControl;
 
   /// 0 = none .. 1 = maximum; SUPPRESSOR mode only, desktop only.

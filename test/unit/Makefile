@@ -12,7 +12,12 @@ SYSROOT ?= ../../build/linux-x86_64/sysroot
 ifneq ($(wildcard $(SYSROOT)/include/re/re.h),)
 TESTS += test_ws_pin test_audio_external test_fmtp_bitrate \
          test_dispatch_starve test_ice_sdp test_ice_pair test_ice_agent \
-         test_ice_mod
+         test_ice_mod test_audio_processing
+# The WebRTC run needs the library's headers to build; it SKIPs at runtime
+# when the library itself cannot be loaded.
+ifeq ($(shell pkg-config --exists webrtc-audio-processing-1 && echo y),y)
+TESTS += test_audio_processing_webrtc
+endif
 endif
 
 .PHONY: all clean test
@@ -114,6 +119,36 @@ test_ice_mod: test_ice_mod.c $(ICE_ENGINE_SRCS) ../../src/ice/ice_mod.c
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 
+# Links src/audio_processing.c against libre only; baresip's filter registry
+# and the platform hooks are stubbed in the test, and tmr_jiffies is wrapped
+# so the test owns the clock.
+AP_FLAGS := -Wno-unused-parameter -D_GNU_SOURCE \
+  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include -I../../src
+AP_LIBS  := -Wl,--wrap=tmr_jiffies -L$(SYSROOT)/lib -lre -lssl -lcrypto \
+  -lpthread -lz $(LDFLAGS)
+
+test_audio_processing: test_audio_processing.c ../../src/audio_processing.c
+	$(CC) $(CFLAGS) $(AP_FLAGS) -o $@ $^ $(AP_LIBS)
+
+# Same test with the WebRTC filter compiled in, through the real shim: the
+# wrapper needs no libstdc++, so it links as C, and loads the library by the
+# SONAME the headers belong to — exactly what the SDK does.
+CXX ?= g++
+WEBRTC_CFLAGS := $(shell pkg-config --cflags webrtc-audio-processing-1 2>/dev/null)
+WEBRTC_LIBDIR := $(shell pkg-config --variable=libdir webrtc-audio-processing-1 2>/dev/null)
+WEBRTC_SONAME := $(shell objdump -p $(WEBRTC_LIBDIR)/libwebrtc-audio-processing-1.so 2>/dev/null | awk '/SONAME/{print $$2}')
+
+webrtc_apm_test.o: ../../src/webrtc_apm.cpp ../../src/webrtc_apm.h
+	$(CXX) -std=c++17 -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics \
+	  $(subst -I,-isystem ,$(WEBRTC_CFLAGS)) -c -o $@ $<
+
+test_audio_processing_webrtc: test_audio_processing.c ../../src/audio_processing.c \
+                              ../../src/webrtc_shim.c webrtc_apm_test.o
+	$(CC) $(CFLAGS) $(AP_FLAGS) -DBSDK_TEST_WEBRTC \
+	  -DECHOSDK_PROFILE_DESKTOP=1 -DECHOSDK_HAS_WEBRTC_AEC=1 \
+	  -DECHOSDK_WEBRTC_SONAME=\"$(WEBRTC_SONAME)\" \
+	  -o $@ $^ $(AP_LIBS) -ldl
+
 test: all
 	@failed=0; \
 	for t in $(TESTS); do \
@@ -128,4 +163,4 @@ test: all
 	fi
 
 clean:
-	rm -f $(TESTS)
+	rm -f $(TESTS) webrtc_apm_test.o

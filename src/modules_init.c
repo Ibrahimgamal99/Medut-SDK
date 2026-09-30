@@ -56,13 +56,6 @@ static const char *DESKTOP_EXTRA[] = {
 	NULL
 };
 
-#if defined(ECHOSDK_PROFILE_DESKTOP) && defined(ECHOSDK_HAS_WEBRTC_AEC)
-/* Loaded only when aec_mode == WEBRTC at init time.  Not unloaded while the
- * stack is up; echosdk_shutdown() unloads every module with mod_close() so
- * the next echosdk_init() re-runs their init handlers. */
-static const char *WEBRTC_AEC_LIST[] = { "webrtc_aec", NULL };
-#endif
-
 /* Platform audio module selected at compile time */
 #if defined(ECHOSDK_AUDIO_OPENSLES)
 /* Android: OpenSLES works on every supported API level (minSdk 24).
@@ -100,14 +93,32 @@ static void load_list(const char **list)
 
 /* Whether the audio driver we ended up with captures through the OS voice
  * path, i.e. the device has already run its own AEC (and NS/AGC) before the
- * first sample reaches us.  Set by modules_init() below, read by
- * audio_processing.c to decide whether the software echo suppressor has any
- * work left to do. */
-static bool s_platform_aec;
+ * first sample reaches us.  Set by modules_init() below and, on Android, per
+ * recorder; read per frame by audio_processing.c to decide which of its own
+ * filters still have work to do. */
+static RE_ATOMIC bool s_platform_aec;
+static bool s_voice_path_reported;   /* re thread */
 
 bool bsdk_platform_has_aec(void)
 {
-	return s_platform_aec;
+	return re_atomic_rlx(&s_platform_aec);
+}
+
+void bsdk_platform_voice_path_report(bool active)
+{
+	bool was = re_atomic_rlx(&s_platform_aec);
+
+	re_atomic_rlx_set(&s_platform_aec, active);
+
+	/* Log the first report and every change, not every call. */
+	if (s_voice_path_reported && was == active)
+		return;
+	s_voice_path_reported = true;
+
+	if (!active)
+		warning("EchoSDK: recorder is not on the voice-communication "
+		        "path: no platform AEC/NS under us\n");
+	bsdk_ap_log_chain("recorder");
 }
 
 /* The device module the platform would use on its own, remembered so
@@ -123,7 +134,8 @@ int modules_init(void)
 {
 	const char *audio_mod = PLATFORM_AUDIO[0];
 
-	s_platform_aec = false;
+	re_atomic_rlx_set(&s_platform_aec, false);
+	s_voice_path_reported = false;
 
 	load_list(COMMON_MODULES);
 
@@ -136,8 +148,11 @@ int modules_init(void)
 	 * AEC/NS); fall back to the stock opensles module on failure. */
 	if (bsdk_sles_vc_init() == 0) {
 		audio_mod = "sles_vc";
-		/* VOICE_COMMUNICATION recording preset — the HAL's AEC/NS/AGC. */
-		s_platform_aec = true;
+		/* VOICE_COMMUNICATION recording preset — the HAL's AEC/NS/AGC.
+		 * Assumed until the first recorder says whether the preset
+		 * took (bsdk_platform_voice_path_report), so nothing of ours
+		 * stacks on it in the meantime. */
+		re_atomic_rlx_set(&s_platform_aec, true);
 	}
 	else {
 		/* The stock module records with the generic preset, so nothing
@@ -150,15 +165,12 @@ int modules_init(void)
 #endif
 
 #if defined(ECHOSDK_AUDIO_AUDIOUNIT)
-	/* iOS: audiounit's I/O unit is VoiceProcessingIO, which is Apple's
-	 * hardware echo canceller. (The define is only set for iOS — a macOS
-	 * build gets coreaudio, which is not echo-cancelled.) */
-	s_platform_aec = true;
-#endif
-
-#if defined(ECHOSDK_PROFILE_DESKTOP) && defined(ECHOSDK_HAS_WEBRTC_AEC)
-	if (g_bsdk.cfg.aec_mode == ECHOSDK_AEC_WEBRTC)
-		load_list(WEBRTC_AEC_LIST);
+	/* iOS: audiounit's I/O unit is VoiceProcessingIO, Apple's voice
+	 * processing (AEC, NS, AGC).  (The define is only set for iOS — a macOS
+	 * build gets coreaudio, which is not echo-cancelled.)  Only if the
+	 * module actually registered: otherwise nothing is under us. */
+	re_atomic_rlx_set(&s_platform_aec,
+	                  ausrc_find(baresip_ausrcl(), "audiounit") != NULL);
 #endif
 
 	/* Always available, never automatic: the app opts in with
@@ -194,6 +206,9 @@ int modules_init(void)
 			         sizeof(cfg->audio.play_dev));
 #endif
 	}
+
+	/* Not sticky across a restart: the device is the platform's again. */
+	bsdk_audio_external_sync();
 
 	return 0;
 }

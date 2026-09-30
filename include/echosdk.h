@@ -91,11 +91,17 @@ typedef enum {
  *   Zero external dependencies.  Ignored on Android and iOS, where the
  *   platform driver captures through the OS voice path (VOICE_COMMUNICATION /
  *   VoiceProcessingIO) and has already cancelled the echo in hardware —
- *   ducking the mic on top of that only costs full duplex.
- * ECHOSDK_AEC_WEBRTC: full-duplex WebRTC acoustic echo cancellation.
- *   Desktop only; requires ECHOSDK_WITH_WEBRTC_AEC build option and
- *   libwebrtc-audio-processing-1.  Returns ENOTSUP on mobile builds and
- *   when the option is off.
+ *   ducking the mic on top of that only costs full duplex.  On an Android
+ *   device that refuses the VOICE_COMMUNICATION preset there is no hardware
+ *   canceller, and the suppressor runs there.
+ * ECHOSDK_AEC_WEBRTC: full-duplex WebRTC acoustic echo cancellation (AEC3).
+ *   Desktop Linux only; requires the ECHOSDK_WITH_WEBRTC_AEC build option
+ *   and webrtc-audio-processing 1.x (2.x is not supported).  The library is
+ *   loaded at runtime: when it is missing, or the build does not have it,
+ *   init falls back to the suppressor and logs it.  With ns on, WebRTC's
+ *   noise suppressor runs instead of the built-in gate.
+ *   echosdk_set_aec_mode(WEBRTC) returns ENOTSUP when the build does not
+ *   have it.
  */
 /* ECHOSDK_NO_PACKED_ENUM: for binding generators (e.g. ffigen) that ignore
  * __attribute__((packed)) and would widen the field to 4 bytes, silently
@@ -883,8 +889,8 @@ typedef struct {
 
 	/* ── Audio processing ─────────────────────────────────────────── */
 	echosdk_aec_mode_t aec_mode;  /* echo cancellation backend; default SUPPRESSOR */
-	bool  ns;   /* noise suppression */
-	bool  agc;  /* automatic gain control */
+	bool  ns;   /* noise suppression; off on the mobile voice path, see echosdk_set_ns() */
+	bool  agc;  /* automatic gain control; off on the mobile voice path, see echosdk_set_agc() */
 	float aec_suppression_level;  /* 0=no suppression .. 1=maximum; default 1.0; SUPPRESSOR only */
 	float mic_gain_db;            /* TX manual gain dB, clamped [-20,+20]; 0=unity */
 	float speaker_gain_db;        /* RX manual gain dB, clamped [-20,+20]; 0=unity */
@@ -1798,7 +1804,10 @@ ECHOSDK_EXPORT int echosdk_account_set_100rel(echosdk_account_handle_t account,
  * The SDK's own half-duplex suppressor becomes available as a fallback while
  * the app owns the device, but stays off unless asked for with
  * echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR); it is switched off again when
- * the platform device comes back, so the two cancellers never stack.
+ * the platform device comes back, so the two cancellers never stack.  NS and
+ * AGC follow cfg.ns / cfg.agc while the app owns the device, and stop again
+ * when the platform's own come back.  All of it applies to calls already up,
+ * from their next frame.
  *
  * Returns 0, or an errno on failure.
  */
@@ -1868,9 +1877,17 @@ ECHOSDK_EXPORT int echosdk_audio_list_output_devices(echosdk_audio_device_t *dev
 
 /* ── Audio processing — runtime toggles ──────────────────────────────────── */
 
+/*
+ * echosdk_set_aec, _aec_mode, _ns and _agc reach calls that are already up,
+ * on their next audio frame — the filters stay in each call's chain and read
+ * the setting per frame.  They dispatch to the SIP thread, so none of the
+ * four is for an audio thread.
+ */
+
 /**
- * Enable or disable echo cancellation (takes effect on next audio frame).
- * Re-enables the aec_mode that was configured at echosdk_init().
+ * Enable or disable echo cancellation.
+ * Re-enables the echo control echosdk_init() settled on: the configured
+ * aec_mode, or the suppressor if WEBRTC fell back.
  * set_aec(false) → AEC_OFF; set_aec(true) → restores init mode.
  * Back-compat: behavior is identical to the former bool aec API.
  */
@@ -1878,10 +1895,13 @@ ECHOSDK_EXPORT void echosdk_set_aec(bool enable);
 
 /**
  * Switch the AEC backend.  Only AEC_OFF ↔ init_mode transitions are valid
- * at runtime — module_load is one-way.  Switching between SUPPRESSOR and
- * WEBRTC at runtime returns EINVAL.  WEBRTC returns ENOTSUP on mobile builds
- * and when ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
- * Requires bsdk_dispatch_sync — NOT safe to call from the audio thread.
+ * at runtime.  Switching between SUPPRESSOR and WEBRTC at runtime returns
+ * EINVAL.  WEBRTC returns ENOTSUP on mobile builds and when
+ * ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
+ *
+ * WEBRTC mode with AEC off keeps WebRTC's noise suppressor running if ns is
+ * on.  While the app owns the device (echosdk_audio_use_external) on Android
+ * or iOS, SUPPRESSOR here is also the app asking for the suppressor there.
  */
 ECHOSDK_EXPORT int echosdk_set_aec_mode(echosdk_aec_mode_t mode);
 
@@ -1889,14 +1909,31 @@ ECHOSDK_EXPORT int echosdk_set_aec_mode(echosdk_aec_mode_t mode);
  * Tune the built-in TX echo suppressor aggressiveness.  SUPPRESSOR mode only.
  * 0.0 = no TX suppression (passes through even when far end is loud).
  * 1.0 = maximum suppression (default — −16.5 dB floor on TX when RX active).
+ * The floor is reached with the far end at −21 dBFS; below that the
+ * attenuation eases off in dB, to none at −44 dBFS.
  * Takes effect on the next audio frame via atomic store; safe from any thread.
  */
 ECHOSDK_EXPORT void echosdk_set_aec_suppression_level(float level);
 
-/** Enable/disable noise suppression globally (takes effect next frame). */
+/**
+ * Enable/disable noise suppression globally (takes effect next frame).
+ *
+ * In WEBRTC mode this is WebRTC's noise suppressor.  Otherwise it is the
+ * built-in gate, which turns the pauses down by 20 dB and leaves speech and
+ * the noise under it alone.
+ *
+ * Never on top of the phone's own: while Android captures through the
+ * VOICE_COMMUNICATION preset, or iOS through VoiceProcessingIO, the platform
+ * already suppresses noise and this stays off (logged).  It applies again
+ * while the app owns the device, or on an Android device that refuses the
+ * preset.
+ */
 ECHOSDK_EXPORT void echosdk_set_ns(bool enable);
 
-/** Enable/disable automatic gain control globally (takes effect next frame). */
+/**
+ * Enable/disable automatic gain control globally (takes effect next frame).
+ * Like echosdk_set_ns(), never on top of the phone's own voice path.
+ */
 ECHOSDK_EXPORT void echosdk_set_agc(bool enable);
 
 /**

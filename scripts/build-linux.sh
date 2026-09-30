@@ -53,7 +53,7 @@ echo "=== Linking ${SO} ==="
 # (cmake/patch-re-sources.cmake), so the archive is self-contained.
 gcc -shared \
   -Wl,--whole-archive "${DIST_DIR}/echosdk.a" -Wl,--no-whole-archive \
-  -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl -lstdc++ \
+  -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl \
   "${PULSE_LDLIB}" \
   -Wl,--default-symver \
   -Wl,--version-script="${SCRIPT_DIR}/glibc-compat.ver" \

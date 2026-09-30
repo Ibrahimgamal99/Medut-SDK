@@ -31,7 +31,6 @@ set(ECHOSDK_DESKTOP_MODULES
   "presence"
   "uuid"
 )
-if(ECHOSDK_WITH_WEBRTC_AEC)
-  list(APPEND ECHOSDK_DESKTOP_MODULES "webrtc_aec")
-endif()
+# No "webrtc_aec": it creates the APM without enabling the echo canceller.
+# EchoSDK's own bsdk_webrtc filter (src/webrtc_apm.cpp) replaces it.
 list(JOIN ECHOSDK_DESKTOP_MODULES ";" ECHOSDK_DESKTOP_MODULES)

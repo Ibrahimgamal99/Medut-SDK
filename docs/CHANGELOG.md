@@ -8,6 +8,56 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **WebRTC echo cancellation removed no echo.**  baresip's `webrtc_aec`
+  module creates the WebRTC processor and never switches its canceller on —
+  measured: 0.0 dB of echo removed, and since WEBRTC mode also turns the
+  built-in suppressor off, desktop calls in that mode had no echo control at
+  all.  EchoSDK now drives the library itself (`bsdk_webrtc`): AEC3 plus the
+  high-pass filter, and WebRTC's noise suppressor when `ns` is on.  Measured
+  in the unit test at 48 kHz with a 150 ms echo path: 19.6 dB removed.  A
+  missing library now falls back to the suppressor instead of to nothing.
+
+- **Turning AEC, NS or AGC on or off mid-call did nothing until the next
+  call.**  The setters used baresip's `aufilt_enable()`, which baresip only
+  reads when it builds a call's filter chain — once, unless the codec
+  changes.  Every filter now stays in the chain and checks its setting per
+  frame, so `echosdk_set_aec/_aec_mode/_ns/_agc` reach calls already up on
+  their next frame, as documented.  The same bug left the suppressor stacked
+  on the hardware canceller for the rest of a call after
+  `echosdk_audio_use_external(false)`.
+
+- **Noise suppression clipped the start of every word, and did nothing for
+  the first ~40 s of a call.**  The gate opened slowly and closed fast —
+  word onsets were 13 dB down at 20 ms and 6 dB down at 200 ms, tails cut
+  within 40 ms — and its noise floor started at zero and took ~37 s to
+  climb, again after every mute.  It now opens within a frame, holds 200 ms
+  before closing over 150 ms, and tracks the floor as the minimum over the
+  last 2 s: noise is down 15+ dB within a second of the call starting and
+  within 300 ms of unmute.
+
+- **The echo suppressor kept the mic down ~1 s after the far end stopped —
+  for every call at once.**  It tracked one far-end level shared by all
+  calls, decaying 5% a frame, and never decayed while no audio arrived
+  (DTX, hold).  Each call now has its own, held 150 ms for the echo still in
+  flight and then released: the mic is back within 1 dB 350 ms after the
+  far end stops, with or without frames arriving.  TX and RX stay paired
+  when the far end holds and resumes us.
+
+- **Android phones that refuse the voice-communication preset had no echo
+  control at all.**  The SDK assumed the hardware canceller was there as
+  soon as its driver started, so it kept the suppressor off on phones
+  recording with the default preset.  Each recorder now reads the preset
+  back and reports it; without it, the suppressor and NS/AGC apply.  iOS
+  only claims the hardware canceller when the audiounit driver loaded.
+
+- **Filter timings depended on ptime.**  NS, AGC and the suppressor counted
+  in frames of 20 ms; they now count in seconds, identical at 10, 20 and
+  60 ms.
+
+- **A retried `echosdk_init()` put the audio filters ahead of resampling.**
+  The failure path left them registered, so the retry could not re-append
+  them after `auconv`/`auresamp`.
+
 - **Calls were stereo, at ~99 kbps, whatever `opus.stereo` said.**  The
   opus module asks for and sends stereo unless told otherwise, and the SDK
   only ever told it "yes".  With a mono microphone that is the same voice
@@ -213,6 +263,25 @@ All notable changes to EchoSDK are documented here.
   holds at that moment, as the previous implementation did.
 
 ### Changed
+
+- **NS and AGC never run on top of the phone's own.**  While Android
+  captures through `VOICE_COMMUNICATION` or iOS through `VoiceProcessingIO`,
+  `ns`/`agc` stay off whatever the config says (the TX-chain log line says
+  why): the platform already does both, and stacked the gate and AGC only
+  cost speech.  They apply while the app owns the device and on Android
+  devices without the preset.
+
+- **The suppressor ducks moderately loud far-end audio more.**  Between
+  −44 and −21 dBFS at the far end, the attenuation is now interpolated in dB
+  instead of in linear power, which left most of that range nearly
+  unducked: at −27 dBFS, ~12 dB of attenuation where it was ~2 dB.  The
+  floor and `aec_suppression_level` are unchanged (0 = none, 1 = −16.5 dB).
+
+- **WebRTC AEC is desktop Linux only, webrtc-audio-processing 1.x only.**
+  The build loads exactly the library version it was compiled against
+  (`libwebrtc-audio-processing-1.so.N`), not the first `.so` it finds, and
+  refuses to configure against 2.x, whose API differs.  `echosdk.so` no
+  longer links `libstdc++`.
 
 - **Opus calls start at 32 kbps.**  `opus.bitrate` defaults to 32000, where
   speech quality levels off (PESQ-WB 4.53, against 4.56 at the 50-99 kbps

@@ -201,22 +201,24 @@ static void use_external_fn(void *arg)
 	};
 	bsdk_call_foreach(update_call_device, &play);
 
-	/* Going back to the platform device puts its hardware canceller back in
-	 * the path.  Leaving the software suppressor on would stack the two and
-	 * half-duplex a call the hardware had already made full-duplex.
+	info("EchoSDK: audio device -> '%s'\n", mod);
+
+	/* The audio filters read this per frame, and from it decide what runs
+	 * on this very call (audio_processing.c):
 	 *
-	 * Deliberately one-directional: taking the device does NOT switch the
-	 * suppressor on.  An app that displaces our drivers is expected to
-	 * capture through VOICE_COMMUNICATION / VoiceProcessingIO itself, and
+	 * Going back to the platform device puts its hardware canceller, NS and
+	 * AGC back in the path, so the SDK's own versions stop: stacked, the
+	 * suppressor only half-duplexes a call the hardware had already made
+	 * full-duplex, and the gate and AGC only cost speech.
+	 *
+	 * Deliberately one-directional for the suppressor: taking the device
+	 * does NOT switch it on.  An app that displaces our drivers is expected
+	 * to capture through VOICE_COMMUNICATION / VoiceProcessingIO itself, and
 	 * silently ducking its TX by 16.5 dB would be the SDK fighting the
 	 * platform — the exact failure this feature exists to avoid.  Apps that
 	 * want the fallback ask for it with echosdk_set_aec_mode(). */
-	if (!*enable && bsdk_platform_has_aec()) {
-		/* PROTECTED BY RE_MAIN — already on the re thread here. */
-		aufilt_enable(baresip_aufiltl(), "bsdk_aec", false);
-	}
-
-	info("EchoSDK: audio device -> '%s'\n", mod);
+	bsdk_audio_external_sync();
+	bsdk_ap_external_changed(*enable);
 }
 
 int echosdk_audio_use_external(bool enable)
@@ -225,9 +227,17 @@ int echosdk_audio_use_external(bool enable)
 	return bsdk_dispatch_sync(use_external_fn, &flag);
 }
 
+static RE_ATOMIC bool s_external_selected;
+
 bool bsdk_audio_external_selected(void)
 {
-	return 0 == str_cmp(conf_config()->audio.src_mod, "external");
+	return re_atomic_rlx(&s_external_selected);
+}
+
+void bsdk_audio_external_sync(void)
+{
+	re_atomic_rlx_set(&s_external_selected,
+	                  0 == str_cmp(conf_config()->audio.src_mod, "external"));
 }
 
 /* ── Audio device enumeration ────────────────────────────────────────────── */
@@ -342,36 +352,25 @@ int echosdk_audio_list_output_devices(echosdk_audio_device_t *devices, int max_c
 
 /* ── Runtime audio processing toggles ───────────────────────────────────── */
 
-/* aufilt_enable() modifies the aufiltl list which the audio thread iterates.
- * PROTECTED BY RE_MAIN — must run via bsdk_dispatch_sync.
- * Do NOT make this atomic like the gain setters even though the pattern looks
- * similar — the asymmetry is intentional. */
-static void set_filter_fn(void *arg)
-{
-	struct { const char *name; bool enable; } *ctx = arg;
-	/* PROTECTED BY RE_MAIN */
-	aufilt_enable(baresip_aufiltl(), ctx->name, ctx->enable);
-}
-
-static void set_aec_mode_fn(void *arg)
-{
-	echosdk_aec_mode_t mode = *(echosdk_aec_mode_t *)arg;
-	struct list *fl = baresip_aufiltl();
-
-	/* PROTECTED BY RE_MAIN */
-	aufilt_enable(fl, "bsdk_aec", bsdk_aec_suppressor_wanted(mode));
-
-#if defined(ECHOSDK_PROFILE_DESKTOP) && defined(ECHOSDK_HAS_WEBRTC_AEC)
-	aufilt_enable(fl, "webrtc_aec", mode == ECHOSDK_AEC_WEBRTC);
-#endif
-}
+/* Each setter records an input for audio_processing.c on the re thread,
+ * which keeps concurrent setters in order; every filter reads the inputs per
+ * frame, so the change reaches calls already up on their next frame.
+ *
+ * Not aufilt_enable(): baresip reads that flag only when it builds a call's
+ * filter chain, and rebuilds only on a codec change — so it would reach the
+ * next call, never this one. */
+static void set_ns_fn(void *arg)  { bsdk_ap_set_ns(*(bool *)arg); }
+static void set_agc_fn(void *arg) { bsdk_ap_set_agc(*(bool *)arg); }
+static void set_aec_fn(void *arg) { bsdk_ap_set_aec(*(bool *)arg); }
 
 void echosdk_set_aec(bool enable)
 {
-	/* Re-enables the aec_mode configured at init; disables all AEC backends
-	 * when enable=false.  Back-compat shim for the former bool aec API. */
-	echosdk_aec_mode_t target = enable ? g_bsdk.cfg.aec_mode : ECHOSDK_AEC_OFF;
-	echosdk_set_aec_mode(target);
+	/* Re-enables the echo control init settled on (the aec_mode, or the
+	 * suppressor if WEBRTC fell back); disables it when enable=false.
+	 * Back-compat shim for the former bool aec API — so it does not go
+	 * through set_aec_mode's ENOTSUP for a WEBRTC that fell back. */
+	bool on = enable && g_bsdk.cfg.aec_mode != ECHOSDK_AEC_OFF;
+	bsdk_dispatch_sync(set_aec_fn, &on);
 }
 
 int echosdk_set_aec_mode(echosdk_aec_mode_t mode)
@@ -393,10 +392,8 @@ int echosdk_set_aec_mode(echosdk_aec_mode_t mode)
 	}
 #endif
 
-	/* One dispatch, not two: bsdk_aec_suppressor_wanted() now reads
-	 * conf_config() to see which device is selected, so it has to be
-	 * evaluated on the re thread rather than on the caller's. */
-	return bsdk_dispatch_sync(set_aec_mode_fn, &mode);
+	bool on = mode != ECHOSDK_AEC_OFF;
+	return bsdk_dispatch_sync(set_aec_fn, &on);
 }
 
 void echosdk_set_aec_suppression_level(float level)
@@ -412,17 +409,13 @@ void echosdk_set_aec_suppression_level(float level)
 
 void echosdk_set_ns(bool enable)
 {
-	struct { const char *name; bool enable; } ctx = { "bsdk_ns", enable };
-	/* PROTECTED BY RE_MAIN */
-	bsdk_dispatch_sync(set_filter_fn, &ctx);
+	bsdk_dispatch_sync(set_ns_fn, &enable);
 	g_bsdk.cfg.ns = enable;
 }
 
 void echosdk_set_agc(bool enable)
 {
-	struct { const char *name; bool enable; } ctx = { "bsdk_agc", enable };
-	/* PROTECTED BY RE_MAIN */
-	bsdk_dispatch_sync(set_filter_fn, &ctx);
+	bsdk_dispatch_sync(set_agc_fn, &enable);
 	g_bsdk.cfg.agc = enable;
 }
 

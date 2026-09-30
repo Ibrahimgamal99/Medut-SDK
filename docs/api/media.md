@@ -89,7 +89,7 @@ Enable at init time via `echosdk_config_t`:
 ```c
 cfg.aec_mode              = ECHOSDK_AEC_SUPPRESSOR;  // built-in half-duplex gate
 cfg.aec_suppression_level = 1.0f;                    // 0.0–1.0; 1.0 = maximum
-cfg.ns                    = true;   // noise suppression (Wiener gate)
+cfg.ns                    = true;   // noise suppression (WebRTC NS, or the built-in gate)
 cfg.agc                   = true;   // automatic gain control (normalise to −20 dBFS)
 ```
 
@@ -99,9 +99,10 @@ AEC mode options:
 |---|---|---|
 | `ECHOSDK_AEC_OFF` | `0` | No echo cancellation |
 | `ECHOSDK_AEC_SUPPRESSOR` | `1` | Built-in half-duplex gate (default) |
-| `ECHOSDK_AEC_WEBRTC` | `2` | WebRTC AEC (desktop only; requires `libwebrtc-audio-processing-1`) |
+| `ECHOSDK_AEC_WEBRTC` | `2` | WebRTC AEC3 (desktop Linux only; requires `webrtc-audio-processing` 1.x) |
 
-Toggle at runtime without re-dialling:
+Toggle at runtime without re-dialling. Every toggle reaches calls that are
+already up, on their next audio frame:
 
 ```c
 echosdk_set_aec_mode(ECHOSDK_AEC_OFF);        // disable AEC
@@ -150,12 +151,15 @@ sdk.set_speaker_gain(-3.0)             # RX gain dB [-20, +20]; 0 = unity (bypas
 | Duplex | Half — ducks mic when far-end is loud | Full — both sides speak simultaneously |
 | Double-talk | One side goes quiet | Both parties heard |
 | CPU | Negligible | Moderate |
-| Platform | Desktop | Desktop only |
-| Build | None | `cmake -DECHOSDK_WITH_WEBRTC_AEC=ON` + `libwebrtc-audio-processing-1-dev` |
+| Platform | Desktop | Desktop Linux only |
+| Build | None | `cmake -DECHOSDK_WITH_WEBRTC_AEC=ON` + `webrtc-audio-processing` 1.x headers (on by default when found) |
+| Noise suppression (`ns`) | Built-in gate: pauses −20 dB | WebRTC NS: also under speech |
 
-> **WebRTC AEC** must be selected at init time via `sdk.configure(aec_mode=2)`. Only `off ↔ init_mode` transitions are valid at runtime — switching between SUPPRESSOR and WEBRTC returns an error.
+> **WebRTC AEC** must be selected at init time via `sdk.configure(aec_mode=2)`. Only `off ↔ init_mode` transitions are valid at runtime — switching between SUPPRESSOR and WEBRTC returns an error. The library is loaded at runtime (`libwebrtc-audio-processing-1.so.N`, the version the SDK was built against); when it is missing, init falls back to the suppressor and the log says `aec=suppressor (webrtc unavailable)`. webrtc-audio-processing 2.x has a different API and is not supported.
 >
-> **Mobile (Android / iOS):** full-duplex AEC is handled by the OS audio driver — Android captures through the `VOICE_COMMUNICATION` recording preset, iOS through `VoiceProcessingIO`. The echo is gone before the SDK sees a sample, so the software suppressor is **not** run there even when `aec_mode` is left at `SUPPRESSOR`: ducking the mic another 16.5 dB would only half-duplex a call the hardware had already made full-duplex. No SDK flag needed, and setting one changes nothing.
+> **Which filters touch the mic** is logged as one line at init and after every change, e.g. `EchoSDK: TX chain [set_ns]: mic_gain=unity/bypass ns=off (platform voice path) agc=off aec=off (platform canceller)`. Start there when the far end cannot hear a caller.
+>
+> **Mobile (Android / iOS):** full-duplex AEC is handled by the OS audio driver — Android captures through the `VOICE_COMMUNICATION` recording preset, iOS through `VoiceProcessingIO`. The echo is gone before the SDK sees a sample, so the software suppressor is **not** run there even when `aec_mode` is left at `SUPPRESSOR`: ducking the mic another 16.5 dB would only half-duplex a call the hardware had already made full-duplex. No SDK flag needed, and setting one changes nothing. The same holds for `ns` and `agc`: the voice path already does both, and the SDK's own stay off there. They all come back when the app owns the device (`echosdk_audio_use_external`; the suppressor only when asked for with `set_aec_mode(SUPPRESSOR)`), and on an Android device that refuses the `VOICE_COMMUNICATION` preset — the SDK reads the preset back from each new recorder.
 
 ---
 

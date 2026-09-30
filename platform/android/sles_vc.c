@@ -205,7 +205,8 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 	}
 
 	/* Voice-communication preset — must precede Realize(). */
-	SLAndroidConfigurationItf cfg;
+	SLAndroidConfigurationItf cfg = NULL;
+	bool voice_path = false;
 	r = (*st->rec_obj)->GetInterface(st->rec_obj,
 	                                 SL_IID_ANDROIDCONFIGURATION, &cfg);
 	if (SL_RESULT_SUCCESS == r) {
@@ -216,8 +217,11 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 		if (SL_RESULT_SUCCESS != r)
 			warning("sles_vc: voice-comm preset rejected (%d); "
 			        "recording with default preset\n", (int)r);
+		else
+			voice_path = true;
 	}
 	else {
+		cfg = NULL;
 		warning("sles_vc: no ANDROIDCONFIGURATION itf (%d); "
 		        "recording with default preset\n", (int)r);
 	}
@@ -225,6 +229,26 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 	r = (*st->rec_obj)->Realize(st->rec_obj, SL_BOOLEAN_FALSE);
 	if (SL_RESULT_SUCCESS != r)
 		return ENODEV;
+
+	/* A SetConfiguration that returned success is not proof the preset
+	 * took: read it back.  A vendor that cannot answer gets the benefit of
+	 * the doubt — SetConfiguration did not refuse. */
+	if (voice_path && cfg) {
+		SLuint32 got = 0;
+		SLuint32 size = sizeof(got);
+		r = (*cfg)->GetConfiguration(cfg, SL_ANDROID_KEY_RECORDING_PRESET,
+		                             &size, &got);
+		if (SL_RESULT_SUCCESS == r &&
+		    got != SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION) {
+			warning("sles_vc: recorder runs preset %u, not "
+			        "voice-communication\n", (unsigned)got);
+			voice_path = false;
+		}
+	}
+
+	/* Without the preset there is no platform AEC/NS/AGC under us, and the
+	 * SDK's own filters are all there is (audio_processing.c). */
+	bsdk_platform_voice_path_report(voice_path);
 
 	r = (*st->rec_obj)->GetInterface(st->rec_obj, SL_IID_RECORD,
 	                                 &st->rec);
