@@ -298,6 +298,8 @@ typedef struct {
  uint32_t ice_generation;
  char ice_local_addr[64];
  char ice_remote_addr[64];
+ bool fec_active;
+ uint32_t fec_level_pct;
 } echosdk_ev_media_stats_t;
 
 typedef struct {

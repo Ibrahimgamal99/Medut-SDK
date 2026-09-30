@@ -939,7 +939,7 @@ static void srv_advance(struct echosdk_account *acct)
 static void retry_timer_handler(void *arg)
 {
 	struct echosdk_account *acct = arg;
-	if (acct->destroyed || !acct->ua)
+	if (acct->destroyed || !acct->ua || !acct->reg_wanted)
 		return;
 
 	/* Move to the next proxy before re-sending, so consecutive attempts walk
@@ -1214,6 +1214,12 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 	uint32_t initial_ms   = acct->retry_policy_set ? acct->retry_initial_ms   : cfg->reg_retry_initial_ms;
 	uint32_t max_ms       = acct->retry_policy_set ? acct->retry_max_ms       : cfg->reg_retry_max_ms;
 	float    backoff      = acct->retry_policy_set ? acct->retry_backoff      : cfg->reg_retry_backoff;
+
+	/* The app has let go of this registration.  The failure that got here
+	 * is its own un-REGISTER — libre reports one that cannot be sent as a
+	 * REGISTER_FAIL — and retrying it would REGISTER the account again. */
+	if (acct->destroyed || !acct->reg_wanted)
+		return;
 
 	/* A failure can reach us twice for the same REGISTER — the watchdog and
 	 * baresip's own transaction timeout both report it — and once from a
@@ -1589,6 +1595,7 @@ static void unregister_fn(void *arg)
 		acct->ka_failed    = false;
 		acct->reg_state = ECHOSDK_REG_UNREGISTERING;
 		tmr_cancel(&acct->reg_watch_tmr);
+		tmr_cancel(&acct->retry_tmr);
 		bsdk_account_keepalive_cancel(acct);
 		ua_unregister(acct->ua);
 	}

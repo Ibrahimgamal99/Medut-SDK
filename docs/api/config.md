@@ -143,7 +143,7 @@ as convenience only — it is applied straight after `init()`, not marshalled in
 | `opus.complexity` | `int` | −1 | 0–10 CPU/quality trade-off (−1 = opus default: 9) |
 | `opus.cbr` | `bool` | false | Constant bitrate (false = VBR) |
 | `opus.dtx` | `bool` | false | Discontinuous transmission (silence suppression) |
-| `opus.fec` | `bool` | false | In-band forward error correction |
+| `opus.fec` | `bool` | true | In-band forward error correction: ask the peer for it, and send our own sized by `opus_expected_loss_pct`. `false` turns it off both ways |
 | `opus.stereo` | `bool` | false | Stereo output (false = mono) |
 
 ### Jitter buffer
@@ -229,13 +229,13 @@ the address stays put and the link itself goes bad. Full guide:
 |---|---|---|---|
 | `media_stall_ms` | `uint32_t` | 4000 | Fire `QUALITY_ALERT` with issue `MEDIA_STALL` after this long with no inbound RTP; fires again with `recovering` when it resumes. Non-fatal; 0 disables. Requires `stats_interval_ms` > 0 |
 | `rtp_timeout_s` | `uint32_t` | 0 | **End** the call after this long with no inbound RTP (baresip `avt.rtp_timeout`). 0 = never; 30–60 when wanted. Only sendrecv streams are checked, so a held call is never torn down |
-| `adaptive_bitrate` | `bool` | false | Step the audio encoder bitrate down under peer-reported loss and back up on recovery, via the codec's encoder-update path — no re-INVITE, no audio gap. Opus only; a fixed-rate codec has nothing to vary |
-| `adapt_min_bitrate` | `uint32_t` | 12000 | Adaptation floor, bps |
+| `adaptive_bitrate` | `bool` | true | Step the audio encoder bitrate down under peer-reported loss and back up on recovery, via the codec's encoder-update path — no re-INVITE, no audio gap. Opus only; a fixed-rate codec has nothing to vary |
+| `adapt_min_bitrate` | `uint32_t` | 12000 | Adaptation floor, bps. Raised to 20000 while Opus FEC is in use: below it libopus cannot code FEC |
 | `adapt_max_bitrate` | `uint32_t` | 32000 | Adaptation ceiling, bps |
 | `adapt_loss_down_pct` | `float` | 5.0 | Halve the bitrate above this loss % |
 | `adapt_loss_up_pct` | `float` | 1.0 | Raise it (+25%) below this loss % |
 | `adapt_recover_ticks` | `uint32_t` | 5 | Consecutive clean stats ticks required before a step up |
-| `opus_expected_loss_pct` | `uint32_t` | 0 | Opus in-band FEC (LBRR) redundancy, percent. `opus.fec` permits FEC; this is what makes the encoder spend bitrate on it and the decoder look for it — set both. 10–20 suits mobile; 0 = off |
+| `opus_expected_loss_pct` | `uint32_t` | 0 | Opus in-band FEC (LBRR) redundancy, percent. 0 = switched with the link: on at an RTCP report of 4%+ loss or two in a row at 2%+, off after 10 s under 1%, and 5–25% while on. Non-zero pins it. Received FEC is used either way |
 
 ### Logging and event delivery
 

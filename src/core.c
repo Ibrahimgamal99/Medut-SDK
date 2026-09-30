@@ -176,6 +176,9 @@ void echosdk_config_init(echosdk_config_t *cfg)
 	 * must set this to false — see the field docs. */
 	cfg->platform_audio_activate = true;
 	cfg->opus.complexity       = -1;
+	/* Ask the peer for in-band FEC.  Our own redundancy then follows the
+	 * loss it reports (adapt.c) while opus_expected_loss_pct stays 0. */
+	cfg->opus.fec              = true;
 	/* mic_gain_db and speaker_gain_db default to 0.0f (unity) from memset */
 
 	/* Degraded-link handling.  Stats polling is on by default because
@@ -193,14 +196,13 @@ void echosdk_config_init(echosdk_config_t *cfg)
 	cfg->media_stall_ms        = 4000;
 	cfg->keepalive_reregister  = true;
 	cfg->dns_srv_failover      = true;
-	/* adaptive_bitrate defaults to false; the adapt_* bounds below are the
-	 * values used once it is switched on. */
+	cfg->adaptive_bitrate      = true;
 	cfg->adapt_min_bitrate     = 12000;
 	cfg->adapt_max_bitrate     = 32000;
 	cfg->adapt_loss_down_pct   = 5.0f;
 	cfg->adapt_loss_up_pct     = 1.0f;
 	cfg->adapt_recover_ticks   = 5;
-	/* rtp_timeout_s, opus_expected_loss_pct, adaptive_bitrate and
+	/* rtp_timeout_s, opus_expected_loss_pct (= switched with the link) and
 	 * net_ice_handover (= BEST_EFFORT) all default to 0/false from memset */
 
 	/* Network handover — poll as a safety net on platforms with no OS
@@ -430,6 +432,41 @@ int echosdk_init(const echosdk_config_t *cfg)
 			goto fail;
 	}
 
+	/* Before modules_init: the opus module reads every opus_* key once, in its
+	 * module_init(), into globals and its SDP fmtp.  Written any later, none
+	 * of opus.* or opus_expected_loss_pct reaches the encoder or decoder. */
+	{
+		const echosdk_opus_config_t *op = &g_bsdk.cfg.opus;
+		char obuf[256];
+		int  olen = 0;
+		if (op->bitrate > 0)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
+			                   "opus_bitrate %d\n", op->bitrate);
+		if (op->complexity >= 0)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
+			                   "opus_complexity %d\n", op->complexity);
+		if (op->cbr)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_cbr yes\n");
+		if (op->dtx)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_dtx yes\n");
+		if (op->fec)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_inbandfec yes\n");
+		/* opus_inbandfec asks the peer for FEC; opus_packet_loss is what
+		 * sizes our own redundant LBRR frame.  Pinned here when the app set
+		 * it; left at 0 otherwise, for adapt.c to switch with the link. */
+		if (g_bsdk.cfg.opus_expected_loss_pct) {
+			uint32_t pl = g_bsdk.cfg.opus_expected_loss_pct;
+			if (pl > 100)
+				pl = 100;
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
+			                    "opus_packet_loss %u\n", pl);
+		}
+		if (op->stereo)
+			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_stereo yes\n");
+		if (olen > 0)
+			conf_configure_buf((const uint8_t *)obuf, (size_t)olen);
+	}
+
 	BSDK_TRACE("[bsdk] step 9: modules_init\n");
 	err = modules_init();
 	if (err)
@@ -447,39 +484,6 @@ int echosdk_init(const echosdk_config_t *cfg)
 	if (bsdk_platform_audio_init(g_bsdk.cfg.platform_audio_activate))
 		warning("EchoSDK: platform audio init failed\n");
 
-	{
-		const echosdk_opus_config_t *op = &g_bsdk.cfg.opus;
-		char obuf[256];
-		int  olen = 0;
-		if (op->bitrate > 0)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
-			                   "opus_bitrate %d\n", op->bitrate);
-		if (op->complexity >= 0)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
-			                   "opus_complexity %d\n", op->complexity);
-		if (op->cbr)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_cbr yes\n");
-		if (op->dtx)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_dtx yes\n");
-		if (op->fec)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_inbandfec yes\n");
-		/* opus_inbandfec only permits FEC; opus_packet_loss is what makes
-		 * it do anything.  The encoder sizes its redundant LBRR frame from
-		 * this percentage, and baresip's opus decoder gates FEC
-		 * reconstruction on `opus_packet_loss > 0` — so with it unset,
-		 * `opus.fec` alone conceals nothing. */
-		if (g_bsdk.cfg.opus_expected_loss_pct) {
-			uint32_t pl = g_bsdk.cfg.opus_expected_loss_pct;
-			if (pl > 100)
-				pl = 100;
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen,
-			                    "opus_packet_loss %u\n", pl);
-		}
-		if (op->stereo)
-			olen += re_snprintf(obuf + olen, sizeof(obuf) - olen, "opus_stereo yes\n");
-		if (olen > 0)
-			conf_configure_buf((const uint8_t *)obuf, (size_t)olen);
-	}
 	if (g_bsdk.cfg.jbuf_type == ECHOSDK_JBUF_FIXED) {
 		struct config *c = conf_config();
 		c->avt.audio.jbtype = JBUF_FIXED;

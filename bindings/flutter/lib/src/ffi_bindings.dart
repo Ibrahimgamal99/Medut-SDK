@@ -2486,6 +2486,14 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
   /// selected remote candidate "ip:port"
   @ffi.Array.multi([64])
   external ffi.Array<ffi.Char> ice_remote_addr;
+
+  /// Our encoder is coding Opus in-band FEC
+  @ffi.Bool()
+  external bool fec_active;
+
+  /// Expected loss % the FEC is sized for; 0 when off
+  @ffi.Uint32()
+  external int fec_level_pct;
 }
 
 final class echosdk_ev_log_t extends ffi.Struct {

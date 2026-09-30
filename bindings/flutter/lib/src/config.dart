@@ -22,7 +22,9 @@ class OpusConfig {
   /// Discontinuous transmission (silence suppression).
   final bool dtx;
 
-  /// In-band forward error correction.
+  /// In-band forward error correction; default true.  Asks the peer for
+  /// FEC, and lets the SDK size our own from the loss it reports (see
+  /// [EchoSDKConfig.opusExpectedLossPct]).  False turns FEC off both ways.
   final bool fec;
 
   /// Stereo output; false = mono (default).
@@ -33,7 +35,7 @@ class OpusConfig {
     this.complexity = -1,
     this.cbr = false,
     this.dtx = false,
-    this.fec = false,
+    this.fec = true,
     this.stereo = false,
   });
 }
@@ -251,9 +253,11 @@ class EchoSDKConfig {
   /// recovery, driven by the loss the peer reports over RTCP.  Applied
   /// through the codec's encoder-update path, so there is no re-INVITE and no
   /// audio gap — and no effect for a fixed-rate codec such as G.711.
+  /// Default true.
   final bool adaptiveBitrate;
 
-  /// Adaptation floor in bps; 0 = SDK default (12000).
+  /// Adaptation floor in bps; 0 = SDK default (12000).  Raised to 20000
+  /// while Opus FEC is in use: below it libopus cannot code FEC.
   final int adaptMinBitrate;
 
   /// Adaptation ceiling in bps; 0 = SDK default (32000).
@@ -268,11 +272,14 @@ class EchoSDKConfig {
   /// Consecutive clean stats ticks required before a step up; 0 = default (5).
   final int adaptRecoverTicks;
 
-  /// Expected packet loss handed to the Opus encoder, percent; 0 = off.
-  /// Turns on in-band FEC (LBRR) at both ends: the encoder spends part of its
-  /// budget on a redundant copy of the previous frame and the decoder uses it
-  /// to reconstruct a lost one.  Costs bitrate even on a clean link, hence
-  /// off by default; 10-20 suits mobile.  Set `opus.fec` as well.
+  /// Expected packet loss handed to the Opus encoder, percent; 0 (default)
+  /// = switched with the link.  Sizes in-band FEC (LBRR): the encoder spends
+  /// part of its budget on a redundant copy of the previous frame, and the
+  /// peer rebuilds a lost frame from the packet after it.  Left at 0 with
+  /// `opus.fec` on, the SDK turns our FEC on at an RTCP report of 4%+ loss
+  /// (or two in a row at 2%+) and off after 10 s under 1%; while on it
+  /// follows the loss (5–25%).
+  /// See [MediaStats.fecActive].  A non-zero value pins it.
   final int opusExpectedLossPct;
 
   /// Re-REGISTER immediately when a keepalive probe fails; default true.
@@ -386,7 +393,7 @@ class EchoSDKConfig {
     this.sipTimerFMs = 0,
     this.rtpTimeoutSeconds = 0,
     this.mediaStallMs = 4000,
-    this.adaptiveBitrate = false,
+    this.adaptiveBitrate = true,
     this.adaptMinBitrate = 0,
     this.adaptMaxBitrate = 0,
     this.adaptLossDownPct = 0,

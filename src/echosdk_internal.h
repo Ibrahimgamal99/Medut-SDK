@@ -218,6 +218,22 @@ struct echosdk_account {
  * big enough that a dual-stack host does not run out mid-rotation. */
 #define BSDK_NET_MAX_CAND 4
 
+/* Opus FEC for what we send, switched on and off from the peer's receiver
+ * reports (adapt.c: bsdk_adapt_fec_update()). */
+struct bsdk_fec {
+	bool     active;        /* our encoder is coding in-band FEC */
+	uint32_t level;         /* expected loss % it is sized for; 0 when off */
+	float    smooth;        /* per-report peer loss %, smoothed */
+	uint64_t last_lossy_ms; /* when a report last showed >= 1% loss */
+	float    pending;       /* last report's loss if 2–4% while off, else 0 */
+	/* The last receiver report seen, to tell a new one from a tick that
+	 * merely repeats it — the ticks between two reports carry no news. */
+	bool     rep_seen;
+	uint32_t rep_sent;      /* packets we had sent by then */
+	uint32_t rep_lost;      /* cumulative loss the peer reported */
+	float    rep_rtt;       /* its RTT; changes with every report */
+};
+
 struct echosdk_call {
 	struct le                  le;
 	struct call               *bc;          /* baresip call (weak ref) */
@@ -327,6 +343,10 @@ struct echosdk_call {
 	/* ── Degraded-link adaptation (adapt.c; re_main thread only) ────── */
 	uint32_t                   adapt_bitrate;     /* applied bps; 0 = negotiated */
 	uint32_t                   adapt_clean_ticks; /* consecutive low-loss ticks */
+	struct bsdk_fec            fec;               /* Opus FEC we send */
+	bool                       fec_applied;       /* encoder matches `fec` */
+	bool                       fec_applied_active;/* what it was last given */
+	uint32_t                   fec_applied_level;
 	uint32_t                   stall_rx_packets;  /* rx count at last advance */
 	uint64_t                   stall_since;       /* tmr_jiffies() of last advance */
 	bool                       stall_active;      /* MEDIA_STALL alert outstanding */
@@ -619,6 +639,8 @@ bool bsdk_media_setup_pending(const struct echosdk_call *lc);
 /* Evaluate stall detection and bitrate adaptation for one stats sample. */
 void bsdk_adapt_tick(struct echosdk_call *lc,
                      const echosdk_ev_media_stats_t *s);
+/* The remote SDP changed and baresip rebuilt the encoder: re-apply. */
+void bsdk_adapt_media_renegotiated(struct echosdk_call *lc);
 /* Re-run the encoder update with `bitrate` (bps; 0 = negotiated rate).
  * Returns 0, or ENOTSUP for a codec with no encoder-update handler. */
 int  bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate);
@@ -627,6 +649,22 @@ int  bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate);
  * Returns 0, or EINVAL when the result would not fit in `sz`. */
 int  bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
                                  uint32_t bitrate);
+/* The same for any fmtp parameter `key`: replace it with key=value, or with
+ * value 0 just drop it.  Exposed for the same test. */
+int  bsdk_adapt_fmtp_set(char *buf, size_t sz, const char *src,
+                         const char *key, uint32_t value);
+/* Redundancy level (%) while FEC is on, for a smoothed peer loss and the
+ * level applied now.  Exposed for the same test. */
+uint32_t bsdk_adapt_fec_level(float loss_pct, uint32_t cur);
+/* Feed the FEC state one stats tick: our sent count, the peer's cumulative
+ * loss and RTT from its last receiver report, and the time.  Returns true
+ * when FEC turned on or off, or its level changed.  Exposed for the test. */
+bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
+                           float rtt_ms, uint64_t now_ms);
+/* Whether this call's Opus encoder is sending FEC, and at what level — for
+ * the stats tick.  False for a codec without FEC, or a peer that did not ask
+ * for it (useinbandfec). */
+bool bsdk_adapt_fec_status(const struct echosdk_call *lc, uint32_t *level);
 
 /* ── netmon.c ──────────────────────────────────────────────────────────── */
 

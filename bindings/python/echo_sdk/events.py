@@ -142,6 +142,11 @@ class MediaStatsEvent:
     ice_generation: int = 0
     ice_local_addr: str = ""
     ice_remote_addr: str = ""
+    # Opus FEC we send: on at 4% peer-reported loss (2% twice running), off
+    # after 10 s under 1%.
+    # False / 0 for G.711 or a peer that did not ask for FEC.
+    fec_active: bool = False
+    fec_level_pct: int = 0
 
 
 @dataclass
@@ -376,6 +381,8 @@ class CallStats:
         # ICE
         "ice_state", "ice_local_type", "ice_remote_type", "ice_rtt_ms",
         "ice_generation", "ice_local_addr", "ice_remote_addr",
+        # Opus FEC
+        "fec_active", "fec_level_pct",
     )
 
     def __init__(self):
@@ -406,6 +413,7 @@ class CallStats:
         self.ice_remote_type = "none"; self.ice_rtt_ms = 0.0
         self.ice_generation = 0
         self.ice_local_addr = "";     self.ice_remote_addr = ""
+        self.fec_active = False;      self.fec_level_pct = 0
 
     def _update(self, ev: "MediaStatsEvent") -> None:
         with self._lock:
@@ -462,6 +470,8 @@ class CallStats:
             self.ice_generation         = ev.ice_generation
             self.ice_local_addr         = ev.ice_local_addr
             self.ice_remote_addr        = ev.ice_remote_addr
+            self.fec_active             = ev.fec_active
+            self.fec_level_pct          = ev.fec_level_pct
 
     def print(self) -> None:
         """Print a formatted stats block to stdout."""

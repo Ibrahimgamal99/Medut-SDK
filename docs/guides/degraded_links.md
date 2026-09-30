@@ -183,11 +183,11 @@ or a WS/WSS URL.
 ## 5. Use less bandwidth when there is less bandwidth
 
 ```c
-cfg.adaptive_bitrate       = true;
+cfg.adaptive_bitrate       = true;    /* default */
 cfg.adapt_min_bitrate      = 12000;   /* default */
 cfg.adapt_max_bitrate      = 32000;   /* default */
-cfg.opus_expected_loss_pct = 15;      /* Opus FEC — see below */
-cfg.opus.fec               = true;
+cfg.opus.fec               = true;    /* default — see below */
+cfg.opus_expected_loss_pct = 0;       /* default: FEC on/off with the link */
 ```
 
 Adaptation reads the loss the **peer** reports in its RTCP receiver report —
@@ -209,13 +209,45 @@ echosdk_set_adaptive_bitrate(true, 8000, 24000);
 echosdk_call_set_bitrate(call, 16000);   /* manual; 0 = negotiated rate */
 ```
 
-### Opus FEC needs both settings
+### Opus FEC switches itself on and off
 
-`opus.fec` only *permits* in-band FEC. `opus_expected_loss_pct` is what makes
-the encoder spend part of its budget on the redundant LBRR copy of the previous
-frame, and what makes the decoder look for it. With `opus.fec` alone, nothing is
-concealed. FEC costs bitrate and quality even on a clean link, which is why it
-is off by default; 10–20 is reasonable for mobile.
+Nothing to set. With Opus negotiated, a lost frame is always concealed, and
+in-band FEC works on its own:
+
+- **Received FEC is always used.** When the packet after a lost one carries a
+  redundant LBRR copy, the decoder rebuilds the lost frame from it instead of
+  guessing.
+- **Our own FEC follows the link.** `opus.fec` (on by default) asks the peer
+  for FEC. With `opus_expected_loss_pct` left at 0, the FEC we send is switched
+  from the loss in the peer's RTCP receiver reports:
+
+  | Peer-reported loss | FEC |
+  |---|---|
+  | a report of 4% or more | **on** at once |
+  | 2–4% in two reports running | **on** (one alone is not enough) |
+  | while on: under 4% / 4–10% / 10–15% / 15–20% / above | redundancy 5 / 10 / 15 / 20 / 25% |
+  | no report of 1% or more for 10 s | **off** — none sent, the encoder's FEC flag cleared |
+
+  Below ~2% random loss Opus's own concealment is close enough that
+  redundancy is not worth the bits it takes from the primary encoding. A
+  report covers only a few hundred packets, so on a 1–2% link one report in
+  four crosses 2% by chance; waiting for a second tells that from a link that
+  really degraded, and 4%+ is lossy enough to act on at once. The gap between
+  2% and 1% keeps a link sitting near either from switching FEC every report,
+  and 10 s is two clean reports at the usual 5 s interval.
+  Only a new report counts: the stats ticks between two reports carry no
+  loss information, so they neither switch FEC on nor count towards off.
+
+The state is on every `ECHOSDK_EV_MEDIA_STATS` tick as `fec_active` and
+`fec_level_pct`.
+
+A non-zero `opus_expected_loss_pct` pins the redundancy instead.
+`opus.fec = false` turns FEC off in both directions.
+
+While FEC is in use, adaptive bitrate stops at 20 kbps rather than
+`adapt_min_bitrate`. libopus only codes FEC above a loss-dependent rate — never
+at 12 kbps, and at 16 kbps only if it was already on — so backing off further
+for loss would switch off the one thing repairing it.
 
 ### A note on G.711
 
@@ -230,7 +262,7 @@ played as silence. Offering Opus is what makes such a link survivable.
 
 | Deployment | Settings |
 |---|---|
-| Mobile app, cellular-first | `media_stall_ms=4000`, `keepalive_interval=30000`, `sip_timer_b_ms=10000`, `adaptive_bitrate=true`, `opus_expected_loss_pct=15` + `opus.fec=true`, `net_ice_handover=FAIL_FAST` |
+| Mobile app, cellular-first | `media_stall_ms=4000`, `keepalive_interval=30000`, `sip_timer_b_ms=10000`, `net_ice_handover=FAIL_FAST` (adaptive bitrate and FEC are on by default) |
 | Desktop softphone on LAN | Defaults. `keepalive_interval` can go to 0 behind a NAT you control |
 | Call centre, wired, G.711 PBX | `rtp_timeout_s=60` (an agent on a dead call should be freed), `media_stall_ms=3000`. Adaptation does nothing here — negotiate Opus if the PBX will |
 | Kiosk / unattended | `rtp_timeout_s=45` so nothing gets stuck on a silent call with no one to notice |

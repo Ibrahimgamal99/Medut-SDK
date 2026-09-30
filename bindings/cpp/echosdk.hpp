@@ -221,7 +221,7 @@ typedef struct {
 	int  complexity; /* 0-10 CPU trade-off; -1 = opus default (9) */
 	bool cbr;        /* constant bitrate; false = VBR (default) */
 	bool dtx;        /* discontinuous transmission (silence suppression) */
-	bool fec;        /* in-band forward error correction */
+	bool fec;        /* in-band FEC; default true (echosdk_config_init) */
 	bool stereo;     /* stereo output; false = mono (default) */
 } echosdk_opus_config_t;
 
@@ -645,6 +645,15 @@ typedef struct {
 	uint32_t ice_generation;    /* ICE restarts so far; 1 = initial session */
 	char     ice_local_addr[64];  /* selected local candidate "ip:port" */
 	char     ice_remote_addr[64]; /* selected remote candidate "ip:port" */
+
+	/* ── Opus FEC we send ──────────────────────────────────────────────── */
+	/* Whether our encoder is coding in-band FEC, and the expected loss it
+	 * is sized for.  Switched on and off from the peer's receiver reports:
+	 * on at 4% loss (2% in two reports running), off after 10 s under 1%
+	 * (see opus_expected_loss_pct).
+	 * False / 0 for G.711, or a peer that did not ask for FEC. */
+	bool     fec_active;
+	uint32_t fec_level_pct;
 } echosdk_ev_media_stats_t;
 
 typedef struct {
@@ -902,7 +911,7 @@ typedef struct {
 	float speaker_gain_db;        /* RX manual gain dB, clamped [-20,+20]; 0=unity */
 
 	/* ── Opus tuning ──────────────────────────────────────────────── */
-	echosdk_opus_config_t opus; /* all fields zero/false = use opus defaults */
+	echosdk_opus_config_t opus; /* see echosdk_config_init() for defaults */
 
 	/* ── Jitter buffer ────────────────────────────────────────────── */
 	echosdk_jbuf_type_t jbuf_type;          /* adaptive (default) or fixed */
@@ -1169,7 +1178,7 @@ typedef struct {
 
 	/**
 	 * Reduce the audio encoder's bitrate when the link degrades, and raise
-	 * it again when the link recovers.  Default false.
+	 * it again when the link recovers.  Default true.
 	 *
 	 * Evaluated on the stats tick against the remote's RTCP receiver report
 	 * (`loss_pct`, i.e. what the peer is actually losing).  A step down is
@@ -1186,24 +1195,32 @@ typedef struct {
 	 * survivable.
 	 */
 	bool      adaptive_bitrate;
-	uint32_t  adapt_min_bitrate;    /* bps; 0 = 12000  */
+	uint32_t  adapt_min_bitrate;    /* bps; 0 = 12000; 20000 while FEC is on */
 	uint32_t  adapt_max_bitrate;    /* bps; 0 = 32000  */
 	float     adapt_loss_down_pct;  /* step down above this; 0 = 5.0  */
 	float     adapt_loss_up_pct;    /* step up below this;   0 = 1.0  */
 	uint32_t  adapt_recover_ticks;  /* clean ticks before a step up; 0 = 5 */
 
 	/**
-	 * Expected packet loss handed to the Opus encoder, percent.  0 = off.
+	 * Expected packet loss handed to the Opus encoder, percent.
+	 * 0 (default) = switched on and off with the link.
 	 *
-	 * Turns on Opus in-band FEC (LBRR) at both ends — the encoder spends
-	 * part of its budget on a redundant low-bitrate copy of the previous
-	 * frame, and the decoder uses it to reconstruct a lost one.  Costs
-	 * bitrate and quality even on a clean link, which is why it is off by
-	 * default; 10–20 is a reasonable setting for mobile.
+	 * Sizes Opus in-band FEC (LBRR): the encoder spends part of its budget
+	 * on a redundant low-bitrate copy of the previous frame, and the peer
+	 * rebuilds a lost frame from the packet after it.  Received FEC is
+	 * always used, and a lost frame is concealed either way.
 	 *
-	 * `opus.fec` only enables the mechanism.  This value is what tells the
-	 * encoder how much redundancy to actually spend, and the decoder to
-	 * look for it, so set both.
+	 * With `opus.fec` on (the default) and this left at 0, the SDK switches
+	 * our FEC on and off from the loss in the peer's RTCP receiver reports:
+	 * on at once for a report of 4% or more, or when two reports in a row
+	 * show 2% (one alone can be chance on a 1–2% link); off once no report
+	 * has shown 1% for 10 s — so a clean link carries none and pays
+	 * nothing.  While
+	 * on, the redundancy follows the loss: under 4% → 5, 4–10% → 10,
+	 * 10–15% → 15, 15–20% → 20, above → 25.  The state is on every stats
+	 * tick as `fec_active` / `fec_level_pct`.  A non-zero value pins it
+	 * instead.  `opus.fec = false` turns FEC off: we neither ask the peer
+	 * for it nor send it.
 	 */
 	uint32_t  opus_expected_loss_pct;
 

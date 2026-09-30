@@ -383,6 +383,8 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 	s->payload_type = stream_pt_enc(strm);
 
+	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct);
+
 	/* ── ICE ───────────────────────────────────────────────────────
 	 *
 	 * Ask the agent, not the stream.  Everything above ICE talks to one
@@ -561,6 +563,8 @@ static void collect_call_stats(struct echosdk_call *lc)
 	 * them before the event is posted so the app cannot observe a stats
 	 * tick whose consequences have not been applied yet. */
 	bsdk_adapt_tick(lc, s);
+	/* ...and report the FEC state that tick left, not the one before it. */
+	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct);
 
 	bsdk_event_post_qev(qev);
 }

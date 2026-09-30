@@ -202,6 +202,8 @@ def _raw_stats_to_event(s) -> MediaStatsEvent:
         ice_generation          = s.ice_generation,
         ice_local_addr          = _s(s.ice_local_addr) or "",
         ice_remote_addr         = _s(s.ice_remote_addr) or "",
+        fec_active              = bool(s.fec_active),
+        fec_level_pct           = s.fec_level_pct,
     )
 
 
@@ -491,14 +493,17 @@ def configure(**kwargs):
       keepalive_reregister   — re-REGISTER when a probe fails (default True)
       dns_srv_failover       — walk the SRV target list on retry (default True)
       adaptive_bitrate       — lower the Opus bitrate under loss and raise it
-                               on recovery, with no re-INVITE (default False)
+                               on recovery, with no re-INVITE (default True)
       adapt_min_bitrate      — bps floor (default 12000)
       adapt_max_bitrate      — bps ceiling (default 32000)
       adapt_loss_down_pct    — step down above this loss %% (default 5.0)
       adapt_loss_up_pct      — step up below this loss %% (default 1.0)
       adapt_recover_ticks    — clean stats ticks before a step up (default 5)
-      opus_expected_loss_pct — Opus in-band FEC redundancy %% (default 0 = off;
-                               10-20 suits mobile).  Set opus.fec too.
+      opus_expected_loss_pct — Opus in-band FEC redundancy %% (default 0 =
+                               switched with the link: on at 4%% reported
+                               loss or 2%% twice running, off after 10 s
+                               under 1%%, 5-25%% while on; see fec_active in
+                               stats).  Non-zero pins it.
       reg_retry_jitter       — randomise retry delays by this fraction
                                (default 0.2), so a fleet coming back from an
                                outage does not hit the registrar in one burst

@@ -259,6 +259,15 @@ class MediaStats {
   final String iceLocalAddr;
   final String iceRemoteAddr;
 
+  /// Whether our encoder is sending Opus in-band FEC.  Switched from the
+  /// peer's receiver reports: on at 4% loss (2% in two reports running), off
+  /// after 10 s under 1%.  False
+  /// for G.711, or a peer that did not ask for FEC.
+  final bool fecActive;
+
+  /// Expected loss % the FEC is sized for (5–25); 0 when off.
+  final int fecLevelPct;
+
   MediaStats({
     required this.call,
     required this.packetsSent,
@@ -313,6 +322,8 @@ class MediaStats {
     required this.iceGeneration,
     required this.iceLocalAddr,
     required this.iceRemoteAddr,
+    required this.fecActive,
+    required this.fecLevelPct,
   });
 }
 
@@ -1810,5 +1821,7 @@ MediaStats _decodeStats(echosdk_ev_media_stats_t s, Call call) {
     iceGeneration: s.ice_generation,
     iceLocalAddr: _charArr(s.ice_local_addr, 64),
     iceRemoteAddr: _charArr(s.ice_remote_addr, 64),
+    fecActive: s.fec_active,
+    fecLevelPct: s.fec_level_pct,
   );
 }

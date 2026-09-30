@@ -9,9 +9,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $ScriptDir
 
 $Deps = @(
-    @{ Name = "re";      Url = "https://github.com/baresip/re.git";      Rev = "2049ea9c5dea689f93485c26bbc244d16d5e7809" }
-    @{ Name = "baresip"; Url = "https://github.com/baresip/baresip.git"; Rev = "a9b3749608d129f0017ce940b24b777fa1f2d38b" }
-    @{ Name = "opus";    Url = "https://github.com/xiph/opus.git";       Rev = "f8f99516092f4311a9b0784f190ff982df8eb2e6" }
+    @{ Name = "re";      Url = "https://github.com/baresip/re.git";      Rev = "fd6c71be2a981f2e961c59c7f1b39b5cbd30494e" }
+    @{ Name = "baresip"; Url = "https://github.com/baresip/baresip.git"; Rev = "d5ed26ccff4c884f27061cdf022f18332cda4c9c" }
+    @{ Name = "opus";    Url = "https://github.com/xiph/opus.git";       Rev = "503d81b138d76621aae4b12786e90de48aa8db3a" }
 )
 if ($env:ECHOSDK_TLS -eq "mbedtls") {
     $Deps += @{ Name = "mbedtls"; Url = "https://github.com/Mbed-TLS/mbedtls.git"; Rev = "2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9" }

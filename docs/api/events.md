@@ -259,6 +259,8 @@ Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchro
 |---|---|---|
 | `plc_frames` | `uint32_t` | Frames lost at the jitter buffer (PLC trigger count) |
 | `plc_ratio` | `float` | `plc_frames` / total RX frames (0.0–1.0) |
+| `fec_active` | `bool` | Our encoder is sending Opus in-band FEC: on at 4% peer-reported loss (or 2% in two reports running), off after 10 s under 1%. False for G.711 or a peer without `useinbandfec=1` |
+| `fec_level_pct` | `uint32_t` | Expected loss the FEC is sized for (5–25); 0 when off |
 
 **Bandwidth**
 

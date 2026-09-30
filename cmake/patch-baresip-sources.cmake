@@ -1,9 +1,11 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Four jobs:
+# Apply EchoSDK's baresip patches at build time.  Five jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
 #   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
 #   4. Start RTCP on a DTLS call that multiplexes it (rtcp-mux).
+#   5. Let Opus FEC follow the link: expected loss can fall back to 0, and
+#      received FEC is used whatever our own encoder expects.
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -270,3 +272,75 @@ else()
   file(WRITE "${DTLS_SRTP_C}" "${MCONTENT}")
   message(STATUS "patch-baresip-sources: patched ${DTLS_SRTP_C} (rtcp-mux secure event)")
 endif()
+
+# ---------------------------------------------------------------------------
+# Job 5: opus — FEC redundancy that follows the link (src/adapt.c)
+#
+# src/adapt.c sizes the encoder's expected packet loss from the loss the peer
+# reports, and re-runs the encoder update to apply it.  Two things in the
+# opus module stand in the way:
+#
+#   - encode.c only calls OPUS_SET_PACKET_LOSS_PERC when the value is
+#     non-zero, so a level can go up but never come back to 0: a link that
+#     recovers keeps paying for redundancy for the rest of the call.  0 is
+#     libopus's own default, so setting it unconditionally changes nothing
+#     for an encoder that never had a level.
+#   - decode.c gates FEC decoding on that same global — what *we* expect to
+#     lose on our uplink, which says nothing about whether the packet the
+#     *peer* sent carries a redundant copy.  With the level at 0 on a clean
+#     uplink, every FEC frame the peer spent bits on was thrown away.  libopus
+#     decodes a packet without FEC data as ordinary concealment, so asking
+#     for FEC whenever the next packet is at hand costs nothing.
+# ---------------------------------------------------------------------------
+
+set(OPUS_ENC_C "${SOURCE_DIR}/modules/opus/encode.c")
+set(OPUS_DEC_C "${SOURCE_DIR}/modules/opus/decode.c")
+foreach(_f "${OPUS_ENC_C}" "${OPUS_DEC_C}")
+  if(NOT EXISTS "${_f}")
+    message(FATAL_ERROR "patch-baresip-sources: ${_f} does not exist")
+  endif()
+endforeach()
+
+set(_ENC_OLD [=[
+	if (opus_packet_loss) {
+		opus_encoder_ctl(aes->enc,
+				 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
+	}
+]=])
+set(_ENC_NEW [=[
+	/* EchoSDK-patched: unconditional, so the level can return to 0. */
+	opus_encoder_ctl(aes->enc,
+			 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
+]=])
+set(_DEC_OLD [=[
+	fec = buf && len && opus_packet_loss > 0;
+]=])
+set(_DEC_NEW [=[
+	/* EchoSDK-patched: whether the peer sent FEC is not a question our
+	 * own expected loss (opus_packet_loss) can answer. */
+	fec = buf && len;
+]=])
+
+foreach(_j "ENC;${OPUS_ENC_C};expected loss can return to 0"
+           "DEC;${OPUS_DEC_C};FEC decode not gated on our expected loss")
+  list(GET _j 0 _k)
+  list(GET _j 1 _file)
+  list(GET _j 2 _what)
+  file(READ "${_file}" _content)
+  string(FIND "${_content}" "${_${_k}_NEW}" _done)
+  if(NOT _done EQUAL -1)
+    message(STATUS "patch-baresip-sources: ${_file} already patched (${_what})")
+    continue()
+  endif()
+  string(FIND "${_content}" "${_${_k}_OLD}" _pos)
+  if(_pos EQUAL -1)
+    message(FATAL_ERROR
+      "patch-baresip-sources: anchor not found in ${_file} (${_what}).\n"
+      "The pinned baresip revision has moved the opus module. Re-derive this "
+      "patch — building without it leaves FEC redundancy stuck once raised "
+      "and throws away the FEC the peer sends.")
+  endif()
+  string(REPLACE "${_${_k}_OLD}" "${_${_k}_NEW}" _content "${_content}")
+  file(WRITE "${_file}" "${_content}")
+  message(STATUS "patch-baresip-sources: patched ${_file} (${_what})")
+endforeach()

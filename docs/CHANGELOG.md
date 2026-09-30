@@ -8,6 +8,28 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **A lost Opus packet played as a gap.**  The vendored baresip never called
+  the codec's concealment — the call was commented out in aureceiver.c — so a
+  lost packet was 20 ms of missing audio on Opus as much as on G.711.  Fixed
+  upstream (baresip fd532492, #3794) and picked up by the third-party update
+  below: every lost frame is concealed, and the last one of a burst is rebuilt
+  from in-band FEC when the next packet carries it.  Measured on a live echo
+  call at 10% injected loss: no added dropouts (G.711: 135 gaps, 3.1 s of
+  silence), and with FEC 3.1% of speech frames below 0 dB SNR against 13.1%
+  with concealment alone — the loss-free call scored 4.2%.
+
+- **Every `opus.*` setting and `opus_expected_loss_pct` was ignored.**  They
+  were written to baresip's config after the opus module had loaded and read
+  its own, so FEC, DTX, CBR, stereo, bitrate and complexity never reached the
+  codec.  They are written first now.  Apps that set any of them will hear
+  the difference.
+
+- **Unregistering could register the account again.**  A failure of the
+  un-REGISTER itself — which libre now reports when it cannot be sent at all,
+  e.g. offline — was handled like any registration failure and armed a retry,
+  as was a retry already pending when the app unregistered.  Neither retries
+  now, and the account reports UNREGISTERED rather than FAILED.
+
 - **Calls were missed after the registration's connection closed, while the
   app still showed "registered".**  A registrar reaches a TCP/TLS/WebSocket
   client down the connection its REGISTER arrived on. When that connection
@@ -157,6 +179,31 @@ All notable changes to EchoSDK are documented here.
   holds at that moment, as the previous implementation did.
 
 ### Changed
+
+- **Opus FEC switches itself on and off, and adaptive bitrate is on by
+  default.**  `opus.fec` and `adaptive_bitrate` now default to true, and
+  `opus_expected_loss_pct` = 0 means "switched with the link" rather than
+  "off".  Our FEC turns on at an RTCP receiver report showing 4% loss or
+  more, or two in a row showing 2% (one alone is often chance on a 1–2%
+  link), and off — encoder FEC flag cleared, no redundancy sent — once no
+  report has shown 1% for 10 s; while on, its redundancy follows the loss in
+  bands (5/10/15/20/25%).  Only a new report counts: the stats ticks between
+  two reports carry no loss information.  Received FEC is always used.  The
+  state is on every stats tick as `fec_active` / `fec_level_pct` (C, C++,
+  Python, Flutter).  A non-zero `opus_expected_loss_pct` still pins it;
+  `opus.fec = false` turns FEC off both ways.  While FEC is in use adaptive
+  bitrate stops at 20 kbps, since libopus cannot code FEC below it.  The
+  Flutter binding's defaults follow.  On a live echo call at 3% loss: off,
+  on within one report of the loss starting (FEC in the returned stream at
+  once), off 11 s after the last lossy report and FEC gone from the stream
+  the next second; on a clean call it never came on.
+
+- **Third-party sources updated to upstream HEAD** — re `fd6c71b`, baresip
+  `d5ed26c`, opus `503d81b` (from re/baresip v4.7.0+, opus v1.6.1+).  Brings
+  the concealment fix above; re also now verifies a WSS server's identity
+  against the host it connects to (#1612, #1618).  One libre patch
+  re-derived for #1616.  Build clean after pulling: stamped ExternalProjects
+  otherwise reuse objects built from the old sources.
 
 - **A call rejected with 403 Forbidden is no longer reported as a login
   failure.**  `ECHOSDK_ERR_AUTH` is what an app acts on by asking for

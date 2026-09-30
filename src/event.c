@@ -413,10 +413,17 @@ static void bevent_handler(enum bevent_ev bev,
 		/* RECONNECTING while the SDK still has a retry to spend on this —
 		 * a timeout, a 5xx, a transport that died with the network.  FAILED
 		 * only for the ones no retry can fix (auth) or when the budget is
-		 * gone.  Decided before the event is posted so both agree. */
-		ev.u.reg.state = acct
-		        ? bsdk_account_reg_fail_state(acct, ev.u.reg.error)
-		        : ECHOSDK_REG_FAILED;
+		 * gone.  Decided before the event is posted so both agree.
+		 *
+		 * An account the app unregistered only fails its un-REGISTER (not
+		 * sent, or not answered): it is unregistered either way, and the
+		 * binding lapses at the registrar on its own. */
+		if (acct && !acct->reg_wanted)
+			ev.u.reg.state = ECHOSDK_REG_UNREGISTERED;
+		else
+			ev.u.reg.state = acct
+			        ? bsdk_account_reg_fail_state(acct, ev.u.reg.error)
+			        : ECHOSDK_REG_FAILED;
 
 		if (acct) {
 			acct->reg_state  = ev.u.reg.state;
@@ -677,6 +684,8 @@ static void bevent_handler(enum bevent_ev bev,
 	case BEVENT_CALL_REMOTE_SDP: {
 		const char *param = bevent_get_text(event);
 		bsdk_sdp_handle_event(bev, event);
+		if (lc && bev == BEVENT_CALL_REMOTE_SDP)
+			bsdk_adapt_media_renegotiated(lc);
 		/* The answer to a migration re-INVITE — report that the peer
 		 * accepted the new address, before audio is confirmed. */
 		if (lc && bev == BEVENT_CALL_REMOTE_SDP &&

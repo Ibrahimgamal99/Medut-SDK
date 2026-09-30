@@ -28,6 +28,13 @@
  *      before any increase, because recovering too eagerly is what turns a
  *      marginal link into an oscillating one.
  *
+ *   3. Opus FEC switched on and off with the link.  The loss in the peer's
+ *      receiver reports turns our in-band FEC on (4%, or 2% twice running)
+ *      and off (10 s under 1%), and sizes it while on, so a clean link carries no redundancy
+ *      and a lossy one lets the peer rebuild a dropped frame from the one
+ *      after it.  Only while cfg.opus.fec is on and the app has not pinned
+ *      cfg.opus_expected_loss_pct.
+ *
  * How the bitrate is applied matters.  baresip exposes audio_set_bitrate(),
  * which looks like the obvious call and is a trap: it invokes the codec's
  * encoder-update handler with a NULL fmtp, so Opus re-derives every other
@@ -41,8 +48,8 @@
  * renegotiation, no gap in the audio.
  *
  * Fixed-rate codecs (G.711) have no encoder-update handler and are left
- * alone; there is no bitrate to vary.  For those the concealment path is the
- * `plc` module, loaded in modules_init.c.
+ * alone; there is no bitrate to vary, and no concealment either — the `plc`
+ * module is not built (see modules_init.c).
  *
  * All functions here run on the re_main thread.
  */
@@ -53,6 +60,42 @@
  * so a target outside it would be silently ignored rather than clamped. */
 #define BSDK_ADAPT_BR_MIN   6000u
 #define BSDK_ADAPT_BR_MAX 510000u
+
+/* Past this the redundant copy costs the primary encoding more than it
+ * saves; a link that bad is adaptive bitrate's job. */
+#define BSDK_FEC_MAX_PCT 25u
+
+/* The lowest bitrate libopus will still code in-band FEC at, for any loss
+ * from 5% to 25%: its decide_fec() wants the loss-discounted equivalent rate
+ * (compute_equiv_rate()) above ~15 kbps even at narrowband.  At the 12 kbps
+ * adaptation floor it never can, and at 16 kbps only if FEC was already on —
+ * so bitrate adaptation stops here while FEC is in use, or backing off for
+ * loss would switch off the one thing that repairs it. */
+#define BSDK_FEC_MIN_BR 20000u
+
+/* FEC on/off, from the loss in the peer's receiver reports.  On at once for
+ * a report of BSDK_FEC_ON_NOW_PCT or more; for BSDK_FEC_ON_PCT up to that,
+ * only once two reports in a row say so.  Off once no report has shown
+ * BSDK_FEC_OFF_PCT for BSDK_FEC_OFF_MS.
+ *
+ * Below ~2% random loss Opus's own concealment is close enough that
+ * redundancy is not worth the bits it takes from the primary encoding.  A
+ * report covers only a few hundred packets, though, so on a link at 1–2% one
+ * report in four crosses 2% by chance (measured: a 1.4% link turned FEC on
+ * within 10 s, and the 1–2% band then kept it on); the second report is what
+ * tells that from a link that really degraded.  The gap between the on and
+ * off thresholds keeps a link sitting near one of them from switching every
+ * report, and 10 s is two clean reports at the usual 5 s RTCP interval. */
+#define BSDK_FEC_ON_NOW_PCT 4.0f
+#define BSDK_FEC_ON_PCT     2.0f
+#define BSDK_FEC_OFF_PCT    1.0f
+#define BSDK_FEC_OFF_MS     10000u
+
+/* baresip's opus module keeps its expected packet loss in this global and
+ * reads it on every encoder update (modules/opus/encode.c); it is what the
+ * FEC redundancy is sized from.  So it is set to a call's level right before
+ * that call's encoder is updated.  Always linked: opus is in COMMON_MODULES. */
+extern int32_t opus_packet_loss;
 
 /* ── Config accessors (0 in the config means "use the documented default") ── */
 
@@ -94,11 +137,24 @@ static uint32_t adapt_recover_ticks(void)
 	                                      : 5u;
 }
 
+/* FEC redundancy follows the link unless the app pinned it, or turned FEC
+ * off.  A pinned value is written once at init (core.c) and left alone. */
+static bool fec_auto(void)
+{
+	return g_bsdk.cfg.opus.fec && !g_bsdk.cfg.opus_expected_loss_pct;
+}
+
+/* The expected loss this call's encoder is sized for, followed or pinned. */
+static uint32_t fec_level_now(const struct echosdk_call *lc)
+{
+	return fec_auto() ? lc->fec.level : g_bsdk.cfg.opus_expected_loss_pct;
+}
+
 /* ── fmtp rewriting ──────────────────────────────────────────────────────── */
 
 /**
- * Copy `src` (an SDP fmtp parameter string) into `buf`, dropping any
- * maxaveragebitrate parameter, then append `bitrate` as a new one.
+ * Copy `src` (an SDP fmtp parameter string) into `buf`, dropping any `key`
+ * parameter, then append key=`value` as a new one.
  *
  * Exposed (not static) only so test/unit/test_fmtp_bitrate.c can exercise it
  * directly — every caller is in this file.
@@ -108,17 +164,17 @@ static uint32_t adapt_recover_ticks(void)
  * copied — fmt_param_get() tolerates them, but emitting them back would make
  * the string grow every time we adapt.
  *
- * @param bitrate  bps to advertise, or 0 to only strip.
+ * @param value  the new value, or 0 to only strip.
  * @return 0 on success, EINVAL on overflow (caller then leaves the rate be).
  */
-int bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
-                                uint32_t bitrate)
+int bsdk_adapt_fmtp_set(char *buf, size_t sz, const char *src,
+                        const char *key, uint32_t value)
 {
-	static const char key[] = "maxaveragebitrate";
+	size_t klen = key ? strlen(key) : 0;
 	size_t pos = 0;
 	const char *p = src;
 
-	if (!buf || sz == 0)
+	if (!buf || sz == 0 || !klen)
 		return EINVAL;
 	buf[0] = '\0';
 
@@ -130,9 +186,8 @@ int bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
 		 * comparison is on the key only, so "maxaveragebitrate=24000"
 		 * and a bare "maxaveragebitrate" are both dropped. */
 		if (len > 0 &&
-		    !(len >= sizeof(key) - 1 &&
-		      !strncasecmp(p, key, sizeof(key) - 1) &&
-		      (len == sizeof(key) - 1 || p[sizeof(key) - 1] == '='))) {
+		    !(len >= klen && !strncasecmp(p, key, klen) &&
+		      (len == klen || p[klen] == '='))) {
 
 			if (pos + len + 2 > sz)
 				return EINVAL;
@@ -146,14 +201,20 @@ int bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
 		p = end ? end + 1 : NULL;
 	}
 
-	if (bitrate) {
+	if (value) {
 		int n = re_snprintf(buf + pos, sz - pos, "%s%s=%u",
-		                    pos ? ";" : "", key, bitrate);
+		                    pos ? ";" : "", key, value);
 		if (n < 0)
 			return EINVAL;
 	}
 
 	return 0;
+}
+
+int bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
+                                uint32_t bitrate)
+{
+	return bsdk_adapt_fmtp_set(buf, sz, src, "maxaveragebitrate", bitrate);
 }
 
 /* ── Bitrate application ─────────────────────────────────────────────────── */
@@ -173,7 +234,8 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
 	struct stream           *strm;
 	const struct sdp_format *sc;
 	const struct aucodec    *ac;
-	char                     fmtp[512];
+	char                     fmtp[512], nofec[512];
+	const char              *params;
 	int                      err;
 
 	if (!lc || !lc->bc)
@@ -195,12 +257,35 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
 	if (!ac->encupdh)
 		return ENOTSUP;   /* fixed-rate codec — nothing to vary */
 
-	err = bsdk_adapt_fmtp_set_bitrate(fmtp, sizeof(fmtp), sc->params,
-	                                  bitrate);
-	if (err)
-		return err;
+	params = sc->params;
 
-	err = audio_encoder_set(au, ac, sc->pt, fmtp);
+	/* 0 is the negotiated rate, i.e. the remote fmtp as it came.  Stripping
+	 * maxaveragebitrate from it instead would drop a cap the peer asked for. */
+	if (bitrate) {
+		err = bsdk_adapt_fmtp_set_bitrate(fmtp, sizeof(fmtp), params,
+		                                  bitrate);
+		if (err)
+			return err;
+		params = fmtp;
+	}
+
+	/* The encoder takes its FEC switch from the peer's useinbandfec and its
+	 * redundancy from the expected-loss global, and every update re-reads
+	 * both — so hand it this call's state each time, or a bitrate step
+	 * would reset it.  Off means the flag itself is off, not just a 0%
+	 * budget. */
+	if (fec_auto()) {
+		if (!lc->fec.active) {
+			err = bsdk_adapt_fmtp_set(nofec, sizeof(nofec), params,
+			                          "useinbandfec", 0);
+			if (err)
+				return err;
+			params = nofec;
+		}
+		opus_packet_loss = (int32_t)lc->fec.level;
+	}
+
+	err = audio_encoder_set(au, ac, sc->pt, params);
 	if (err)
 		return err;
 
@@ -402,12 +487,18 @@ static void bitrate_tick(struct echosdk_call *lc,
 
 	min_br = adapt_min_br();
 	max_br = adapt_max_br();
+	if (fec_level_now(lc) && min_br < BSDK_FEC_MIN_BR)
+		min_br = BSDK_FEC_MIN_BR < max_br ? BSDK_FEC_MIN_BR : max_br;
 
 	/* An unadapted call is at its negotiated rate, which we treat as the
 	 * ceiling: the first step down must actually lower it. */
 	cur = lc->adapt_bitrate ? lc->adapt_bitrate : max_br;
 
-	if (s->loss_pct > adapt_down_pct()) {
+	if (cur < min_br) {
+		/* FEC came on while the rate was below where it can be coded. */
+		next = min_br;
+	}
+	else if (s->loss_pct > adapt_down_pct()) {
 		lc->adapt_clean_ticks = 0;
 		next = cur / 2;
 		if (next < min_br)
@@ -440,6 +531,196 @@ static void bitrate_tick(struct echosdk_call *lc,
 	     cur, next, s->loss_pct);
 }
 
+/* ── FEC adaptation ──────────────────────────────────────────────────────── */
+
+/**
+ * Redundancy level (%) while FEC is on, for a smoothed peer loss `loss_pct`.
+ *
+ * Bands: under 4% → 5, 4–10% → 10, 10–15% → 15, 15–20% → 20, above → 25
+ * (BSDK_FEC_MAX_PCT).  Up at once; down only once the loss is a point below
+ * the band `cur` belongs to, so a link on a band edge does not re-run the
+ * encoder update every report.
+ */
+uint32_t bsdk_adapt_fec_level(float loss_pct, uint32_t cur)
+{
+	static const struct { float lo; uint32_t level; } band[] = {
+		{ 20.f, 25u }, { 15.f, 20u }, { 10.f, 15u }, { 4.f, 10u },
+		{  0.f,  5u },
+	};
+	uint32_t want = 5u;
+	float    cur_lo = 0.f;
+
+	for (size_t i = 0; i < RE_ARRAY_SIZE(band); i++) {
+		if (loss_pct >= band[i].lo) {
+			want = band[i].level;
+			break;
+		}
+	}
+	for (size_t i = 0; i < RE_ARRAY_SIZE(band); i++) {
+		if (cur >= band[i].level) {
+			cur_lo = band[i].lo;
+			break;
+		}
+	}
+
+	if (want < cur && loss_pct >= cur_lo - 1.f)
+		return cur;
+
+	return want;
+}
+
+/**
+ * Advance the FEC state by one stats tick.
+ *
+ * Only a new receiver report carries news.  The per-tick loss the stats
+ * window computes reads 0% on every tick between two reports, whatever the
+ * link is doing — so this keeps its own mark of the last report (a changed
+ * RTT or cumulative loss means a new one) and takes the loss over the span
+ * between two reports: what the peer lost of what we sent in that time.
+ */
+bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
+                           float rtt_ms, uint64_t now_ms)
+{
+	const bool     was_active = f->active;
+	const uint32_t was_level  = f->level;
+	uint32_t d_sent;
+	int64_t  d_lost;
+	float    loss;
+
+	/* No receiver report yet: nothing to go on. */
+	if (rtt_ms <= 0.f)
+		return false;
+
+	if (!f->rep_seen) {
+		f->rep_seen      = true;
+		f->rep_sent      = sent;
+		f->rep_lost      = lost;
+		f->rep_rtt       = rtt_ms;
+		f->last_lossy_ms = now_ms;
+		return false;
+	}
+
+	if (rtt_ms == f->rep_rtt && lost == f->rep_lost)
+		return false;             /* the same report as last tick */
+
+	d_sent = sent - f->rep_sent;
+	d_lost = (int64_t)lost - (int64_t)f->rep_lost;
+	f->rep_sent = sent;
+	f->rep_lost = lost;
+	f->rep_rtt  = rtt_ms;
+
+	if (!d_sent)
+		return false;
+	if (d_lost < 0)               /* duplicates can walk it back */
+		d_lost = 0;
+	loss = (float)d_lost * 100.f / (float)d_sent;
+	if (loss > 100.f)
+		loss = 100.f;
+
+	if (loss >= BSDK_FEC_OFF_PCT)
+		f->last_lossy_ms = now_ms;
+
+	if (!f->active) {
+		if (loss >= BSDK_FEC_ON_NOW_PCT ||
+		    (loss >= BSDK_FEC_ON_PCT && f->pending >= BSDK_FEC_ON_PCT)) {
+			f->active  = true;
+			f->smooth  = loss > f->pending ? loss : f->pending;
+			f->level   = bsdk_adapt_fec_level(f->smooth, 0);
+			f->pending = 0.f;
+		}
+		else {
+			/* 2–4%: wait for the next report to confirm it. */
+			f->pending = loss >= BSDK_FEC_ON_PCT ? loss : 0.f;
+		}
+	}
+	else if (loss < BSDK_FEC_OFF_PCT &&
+	         now_ms - f->last_lossy_ms >= BSDK_FEC_OFF_MS) {
+		f->active  = false;
+		f->smooth  = 0.f;
+		f->level   = 0;
+		f->pending = 0.f;
+	}
+	else {
+		/* Up with the first worse report; ease down over several. */
+		if (loss >= f->smooth)
+			f->smooth = loss;
+		else
+			f->smooth += (loss - f->smooth) * 0.5f;
+		f->level = bsdk_adapt_fec_level(f->smooth, f->level);
+	}
+
+	return f->active != was_active || f->level != was_level;
+}
+
+bool bsdk_adapt_fec_status(const struct echosdk_call *lc, uint32_t *level)
+{
+	struct audio            *au;
+	struct stream           *strm;
+	const struct sdp_format *sc;
+	const struct aucodec    *ac;
+	uint32_t                 lvl;
+	struct pl                params, v;
+
+	if (level)
+		*level = 0;
+	if (!lc || !lc->bc)
+		return false;
+
+	au   = call_audio(lc->bc);
+	strm = au ? audio_strm(au) : NULL;
+	sc   = strm ? sdp_media_rformat(stream_sdpmedia(strm), NULL) : NULL;
+	ac   = sc ? sc->data : NULL;
+	if (!ac || !ac->name || str_casecmp(ac->name, "opus"))
+		return false;
+
+	/* Our encoder codes FEC only for a peer that said it can use it. */
+	if (!sc->params)
+		return false;
+	pl_set_str(&params, sc->params);
+	if (!fmt_param_get(&params, "useinbandfec", &v) || pl_u32(&v) != 1)
+		return false;
+
+	lvl = fec_level_now(lc);
+	if (fec_auto() && !lc->fec.active)
+		lvl = 0;
+	if (level)
+		*level = lvl;
+	return lvl > 0;
+}
+
+static void fec_tick(struct echosdk_call *lc,
+                     const echosdk_ev_media_stats_t *s)
+{
+	if (!fec_auto())
+		return;
+
+	if (bsdk_adapt_fec_update(&lc->fec, s->packets_sent, s->packets_lost,
+	                          s->rtt_ms, tmr_jiffies()))
+		lc->fec_applied = false;
+
+	/* Applied once per call even with nothing measured yet: the global is
+	 * shared, and an encoder opened after the last call left it raised
+	 * would otherwise keep that call's redundancy. */
+	if (lc->fec_applied)
+		return;
+
+	/* Not Opus, or media not up yet: the state stands, and the next tick
+	 * tries again. */
+	if (bsdk_adapt_apply_bitrate(lc, lc->adapt_bitrate))
+		return;
+	lc->fec_applied = true;
+
+	if (lc->fec.active != lc->fec_applied_active)
+		info("EchoSDK: Opus FEC %s (%u%%, peer loss %.1f%%)\n",
+		     lc->fec.active ? "on" : "off", lc->fec.level,
+		     lc->fec.smooth);
+	else if (lc->fec.level != lc->fec_applied_level)
+		info("EchoSDK: Opus FEC %u%% -> %u%% (peer loss %.1f%%)\n",
+		     lc->fec_applied_level, lc->fec.level, lc->fec.smooth);
+	lc->fec_applied_active = lc->fec.active;
+	lc->fec_applied_level  = lc->fec.level;
+}
+
 /* ── Entry points ────────────────────────────────────────────────────────── */
 
 void bsdk_adapt_call_start(struct echosdk_call *lc)
@@ -449,6 +730,13 @@ void bsdk_adapt_call_start(struct echosdk_call *lc)
 
 	lc->adapt_bitrate     = 0;
 	lc->adapt_clean_ticks = 0;
+	memset(&lc->fec, 0, sizeof(lc->fec));
+	lc->fec_applied        = false;
+	lc->fec_applied_active = false;
+	lc->fec_applied_level  = 0;
+	/* A new call starts from a clean link, not the last call's. */
+	if (fec_auto())
+		opus_packet_loss = 0;
 	lc->stall_active      = false;
 	lc->stall_rx_packets  = 0;
 	lc->stall_since       = tmr_jiffies();
@@ -464,7 +752,17 @@ void bsdk_adapt_tick(struct echosdk_call *lc,
 		return;
 
 	stall_tick(lc, s);
+	fec_tick(lc, s);
 	bitrate_tick(lc, s);
+}
+
+void bsdk_adapt_media_renegotiated(struct echosdk_call *lc)
+{
+	/* baresip's audio_update() has just rebuilt the encoder from the remote
+	 * fmtp and the shared expected-loss global; re-apply this call's level
+	 * (and bitrate) on the next tick. */
+	if (lc)
+		lc->fec_applied = false;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */

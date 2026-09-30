@@ -26,9 +26,11 @@
  *               its CMakeLists returns early when SPANDSP is not found, so
  *               listing it here without vendoring spandsp for all five
  *               target platforms would only produce a load warning at every
- *               startup.  Opus conceals internally and, with
- *               cfg.opus_expected_loss_pct, with FEC — that is the resilient
- *               codec path until spandsp is part of the build.
+ *               startup.  Opus needs neither: aureceiver hands every lost
+ *               frame to the codec's own PLC (baresip fd532492), and with
+ *               cfg.opus_expected_loss_pct rebuilds the last one from FEC —
+ *               that is the resilient codec path until spandsp is part of
+ *               the build.
  */
 static const char *COMMON_MODULES[] = {
 	"opus",

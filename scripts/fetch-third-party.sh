@@ -9,9 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # It is CMakeLists.txt for the CMake projects; OpenSSL has no CMake build, so
 # its marker is the Configure script the ExternalProject actually invokes.
 DEPS=(
-  "re|https://github.com/baresip/re.git|2049ea9c5dea689f93485c26bbc244d16d5e7809|CMakeLists.txt"
-  "baresip|https://github.com/baresip/baresip.git|a9b3749608d129f0017ce940b24b777fa1f2d38b|CMakeLists.txt"
-  "opus|https://github.com/xiph/opus.git|f8f99516092f4311a9b0784f190ff982df8eb2e6|CMakeLists.txt"
+  "re|https://github.com/baresip/re.git|fd6c71be2a981f2e961c59c7f1b39b5cbd30494e|CMakeLists.txt"
+  "baresip|https://github.com/baresip/baresip.git|d5ed26ccff4c884f27061cdf022f18332cda4c9c|CMakeLists.txt"
+  "opus|https://github.com/xiph/opus.git|503d81b138d76621aae4b12786e90de48aa8db3a|CMakeLists.txt"
 )
 if [[ "${ECHOSDK_TLS:-openssl}" == "mbedtls" ]]; then
   DEPS+=("mbedtls|https://github.com/Mbed-TLS/mbedtls.git|2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9|CMakeLists.txt")
