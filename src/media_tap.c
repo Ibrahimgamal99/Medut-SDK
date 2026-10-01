@@ -98,7 +98,7 @@ static int tap_encupd(struct aufilt_enc_st **stp, void **ctx,
                        const struct audio *au)
 {
 	(void)ctx; (void)af; (void)prm;
-	struct tap_enc_st *st = mem_alloc(sizeof(*st), NULL);
+	struct tap_enc_st *st = mem_zalloc(sizeof(*st), NULL);
 	if (!st) return ENOMEM;
 	st->au = au;
 	st->lc = tap_find_call(au);
@@ -111,7 +111,7 @@ static int tap_decupd(struct aufilt_dec_st **stp, void **ctx,
                        const struct audio *au)
 {
 	(void)ctx; (void)af; (void)prm;
-	struct tap_dec_st *st = mem_alloc(sizeof(*st), NULL);
+	struct tap_dec_st *st = mem_zalloc(sizeof(*st), NULL);
 	if (!st) return ENOMEM;
 	st->au = au;
 	st->lc = tap_find_call(au);

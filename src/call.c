@@ -699,8 +699,8 @@ static void add_call_hdr_fn(void *arg)
 	call_hdr_ctx_t *ctx = arg;
 	if (!ctx->lc->bc) { ctx->result = ENOENT; return; }
 
-	struct bsdk_custom_hdr *ch = mem_alloc(sizeof(*ch),
-	                                       custom_hdr_destructor);
+	struct bsdk_custom_hdr *ch = mem_zalloc(sizeof(*ch),
+	                                        custom_hdr_destructor);
 	if (!ch) { ctx->result = ENOMEM; return; }
 	ch->name  = bsdk_strdup(ctx->name);
 	ch->value = bsdk_strdup(ctx->value);

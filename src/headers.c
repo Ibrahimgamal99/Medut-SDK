@@ -39,8 +39,8 @@ static void add_hdr_fn(void *arg)
 	if (ctx->result)
 		return;
 
-	struct bsdk_custom_hdr *ch = mem_alloc(sizeof(*ch),
-	                                       custom_hdr_destructor);
+	struct bsdk_custom_hdr *ch = mem_zalloc(sizeof(*ch),
+	                                        custom_hdr_destructor);
 	if (!ch) return;
 	ch->name  = bsdk_strdup(ctx->name);
 	ch->value = bsdk_strdup(ctx->value);
