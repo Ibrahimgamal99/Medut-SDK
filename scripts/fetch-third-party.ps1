@@ -20,9 +20,27 @@ if ($env:ECHOSDK_TLS -eq "mbedtls") {
 foreach ($dep in $Deps) {
     $dir = Join-Path $Root "third_party\$($dep.Name)"
 
-    # CMake gates on CMakeLists.txt, so that marks an already-usable tree.
+    # CMake gates on CMakeLists.txt, so that marks an already-usable tree —
+    # which must also be at the pinned revision.  Moving it uses checkout -f,
+    # which drops the EchoSDK patches the build applied (it re-applies them:
+    # the patch steps depend on .git/HEAD) and any hand edits under
+    # third_party\.
     if (Test-Path (Join-Path $dir "CMakeLists.txt")) {
-        Write-Host "==> $($dep.Name): present"
+        # Windows PowerShell 5.1 turns a native command's stderr into a
+        # terminating error under Stop, 2>$null or not — hence the try.
+        $have = ""
+        try { $have = "$(git -C $dir rev-parse HEAD 2>$null)".Trim() } catch { $have = "" }
+        if ($LASTEXITCODE -ne 0) { $have = "" }
+        if ($have -eq $dep.Rev) {
+            Write-Host "==> $($dep.Name): present"
+            continue
+        }
+        $from = if ($have) { $have.Substring(0, [Math]::Min(12, $have.Length)) } else { "(none)" }
+        Write-Host "==> $($dep.Name): $from -> $($dep.Rev.Substring(0,12))"
+        git -C $dir fetch -q --depth 1 origin $dep.Rev
+        if ($LASTEXITCODE -ne 0) { Write-Error "git fetch failed for $($dep.Name) ($($dep.Rev))"; exit 1 }
+        git -C $dir checkout -q -f FETCH_HEAD
+        if ($LASTEXITCODE -ne 0) { Write-Error "git checkout failed for $($dep.Name)"; exit 1 }
         continue
     }
 

@@ -1235,7 +1235,19 @@ class EchoSDK {
     }
   }
 
+  /// Echo control on or off: back to the mode [EchoSDK.init] settled on, or
+  /// off. Not a request for the suppressor on an app-owned device — that is
+  /// [setAecMode].
   void setAec(bool enable) => internal.nativeBindings.echosdk_set_aec(enable);
+
+  /// Switch echo control between [AecMode.off] and the mode init chose; any
+  /// other switch needs a re-init and returns EINVAL ([AecMode.webrtc] returns
+  /// ENOTSUP on a build without it). While the app owns the audio device
+  /// ([useAppOwnedAudio]), `setAecMode(AecMode.suppressor)` is the one way to
+  /// ask for the SDK's half-duplex suppressor there; it lapses when the SDK's
+  /// own device comes back. Returns 0 or an errno.
+  int setAecMode(AecMode mode) =>
+      internal.nativeBindings.echosdk_set_aec_mode(mode.raw);
   void setNs(bool enable) => internal.nativeBindings.echosdk_set_ns(enable);
   void setAgc(bool enable) => internal.nativeBindings.echosdk_set_agc(enable);
   void setAecSuppressionLevel(double level) =>

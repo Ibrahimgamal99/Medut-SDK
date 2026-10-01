@@ -729,10 +729,25 @@ ExternalProject_Add(re_project
 # scripts/fetch-third-party.sh at a pinned revision and gitignored — not a
 # submodule — so the patch cannot leak into upstream history.  The script is
 # idempotent and fails loudly when a re bump moves the code it splices at.
+#
+# The patch steps depend on their scripts and on the checkout's .git/HEAD, so
+# a changed patch or a new pinned revision re-patches and rebuilds (configure,
+# build and install follow the step).  Without them an existing build dir kept
+# the sysroot of whatever patch it was first built with.
+function(bsdk_patch_depends _out _script _srcdir)
+  set(_deps "${CMAKE_CURRENT_SOURCE_DIR}/cmake/${_script}")
+  if(EXISTS "${_srcdir}/.git/HEAD")
+    list(APPEND _deps "${_srcdir}/.git/HEAD")
+  endif()
+  set(${_out} ${_deps} ${ARGN} PARENT_SCOPE)
+endfunction()
+
+bsdk_patch_depends(_RE_PATCH_DEPS patch-re-sources.cmake "${ECHOSDK_RE_SOURCE_DIR}")
 ExternalProject_Add_Step(re_project patch_sources
   COMMAND ${CMAKE_COMMAND}
     -DSOURCE_DIR=${ECHOSDK_RE_SOURCE_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-re-sources.cmake
+  DEPENDS ${_RE_PATCH_DEPS}
   DEPENDEES update
   DEPENDERS configure
   COMMENT "Patching libre sources (EchoSDK SIP fixes)"
@@ -797,20 +812,28 @@ ExternalProject_Add(baresip_project
 # ws_path.c, which owns the public websock_connect/sip_dialog_route names on
 # every platform now — disable them everywhere (the SDK only consumes the
 # static library).
+# The dtls_srtp hunks the script splices live in cmake/patches/.
+file(GLOB _BARESIP_HUNKS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/*")
+bsdk_patch_depends(_BARESIP_PATCH_DEPS patch-baresip-sources.cmake
+                   "${ECHOSDK_BARESIP_SOURCE_DIR}" ${_BARESIP_HUNKS})
 ExternalProject_Add_Step(baresip_project disable_executables
   COMMAND ${CMAKE_COMMAND}
     -DSOURCE_DIR=${ECHOSDK_BARESIP_SOURCE_DIR}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-baresip-sources.cmake
+  DEPENDS ${_BARESIP_PATCH_DEPS}
   DEPENDEES update
   DEPENDERS configure
   COMMENT "Patching baresip sources (executables disabled)"
 )
 
 if(WIN32)
+  bsdk_patch_depends(_BARESIP_MSVC_DEPS fix-msvc-baresip.cmake
+                     "${ECHOSDK_BARESIP_SOURCE_DIR}")
   ExternalProject_Add_Step(baresip_project patch_sources
     COMMAND ${CMAKE_COMMAND}
       -DSOURCE_DIR=${ECHOSDK_BARESIP_SOURCE_DIR}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix-msvc-baresip.cmake
+    DEPENDS ${_BARESIP_MSVC_DEPS}
     DEPENDEES update
     DEPENDERS configure
     COMMENT "Patching baresip sources for MSVC compatibility"

@@ -3,7 +3,7 @@ description: >-
   Flutter/Dart SIP softphone SDK (baresip-based): UDP/TCP/TLS/WS/WSS
   registration, calls, codec control, reconnection & network handover,
   media statistics and quality alerts.
-version: 1.0.1
+version: 1.1.0
 homepage: https://github.com/NawyRE/echo-sdk
 repository: https://github.com/NawyRE/echo-sdk
 issue_tracker: https://github.com/NawyRE/echo-sdk/issues

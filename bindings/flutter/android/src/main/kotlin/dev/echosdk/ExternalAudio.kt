@@ -52,4 +52,22 @@ internal object ExternalAudio {
     external fun nativePull(buf: java.nio.ByteBuffer, nsamp: Int): Int
     external fun nativeFormat(out: IntArray): Int
     external fun nativeIsActive(): Boolean
+    private external fun nativeSetVoicePath(active: Boolean)
+
+    /**
+     * Tell the SDK whether capture runs through the platform's voice path
+     * (VOICE_COMMUNICATION: its AEC, NS and AGC), so its own NS and AGC stay
+     * off on top of it. Call from stream start and stop, not the capture loop.
+     *
+     * A libechosdk.so older than this entry point has no such symbol; the SDK
+     * then keeps its NS/AGC on, as it always did, rather than the call
+     * throwing.
+     */
+    fun setVoicePath(active: Boolean) {
+        try {
+            nativeSetVoicePath(active)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "libechosdk.so predates setVoicePath; SDK NS/AGC stay on")
+        }
+    }
 }

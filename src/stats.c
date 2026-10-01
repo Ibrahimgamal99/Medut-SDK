@@ -207,6 +207,17 @@ static uint32_t counter_delta_i(int32_t now, int32_t prev)
  *                 the same window without consuming it.
  *
  * Returns the aucodec so the caller can set codec_name appropriately. */
+/* Whether our encoder is coding FEC right now.  bsdk_adapt_fec_status()
+ * answers what it is sized for, which the bitrate controller needs as is;
+ * a pinned level survives congestion there, but below the FEC floor the
+ * encoder codes none, so it is not "active". */
+static void fill_fec_stats(echosdk_ev_media_stats_t *s,
+                           const struct echosdk_call *lc)
+{
+	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct) &&
+	                !lc->adapt_congested;
+}
+
 static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
                                                struct echosdk_call *lc,
                                                struct audio *au,
@@ -387,7 +398,7 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 	s->payload_type = stream_pt_enc(strm);
 
-	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct);
+	fill_fec_stats(s, lc);
 
 	/* ── ICE ───────────────────────────────────────────────────────
 	 *
@@ -568,7 +579,7 @@ static void collect_call_stats(struct echosdk_call *lc)
 	 * tick whose consequences have not been applied yet. */
 	bsdk_adapt_tick(lc, s);
 	/* ...and report the FEC state that tick left, not the one before it. */
-	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct);
+	fill_fec_stats(s, lc);
 
 	bsdk_event_post_qev(qev);
 }

@@ -1,5 +1,5 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Six jobs:
+# Apply EchoSDK's baresip patches at build time.  Seven jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
 #   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
@@ -8,6 +8,8 @@
 #      received FEC is used whatever our own encoder expects.
 #   6. Conceal a burst of loss when the audio device needs it, not when the
 #      next packet happens to arrive — no silence, no added delay.
+#   7. Start the opus module from its defaults on every init, so one init's
+#      settings do not carry into the next.
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -15,6 +17,16 @@
 # history.  Each job is idempotent behind its own marker and fails loudly when
 # a baresip bump moves the text it splices at, rather than silently building
 # without the fix.
+#
+# Jobs 5-7 are the ones nothing in the SDK calls into, so nothing would notice
+# them missing.  Each defines a `bsdk_patch_*` string that src/core.c
+# references: a tree without the patch fails to link, and
+# `strings libechosdk.so | grep echosdk-patch` names the versions a binary
+# carries.  The version is also the job's idempotence marker; a file patched by
+# an older version is restored from the pinned revision and patched afresh
+# (bsdk_restore_if_stale), since a changed hunk can be neither found in nor
+# applied on top of its predecessor.  CMakeLists.txt re-runs this script when
+# it changes.
 #
 # The SDK owns the public websock_connect() and sip_dialog_route() names:
 # libre's definitions are renamed to __real_* (cmake/patch-re-sources.cmake)
@@ -31,6 +43,62 @@
 if(NOT DEFINED SOURCE_DIR)
   message(FATAL_ERROR "SOURCE_DIR must be defined")
 endif()
+
+# A file that an earlier version of a marked job patched goes back to the
+# pinned revision, so the current version applies to the text it was written
+# against.  Only for files whose every patch belongs to that one job.
+function(bsdk_restore_if_stale _file _marker)
+  file(READ "${_file}" _c)
+  string(FIND "${_c}" "${_marker}" _cur)
+  string(FIND "${_c}" "EchoSDK-patched" _any)
+  if(NOT _cur EQUAL -1 OR _any EQUAL -1)
+    return()
+  endif()
+  file(RELATIVE_PATH _rel "${SOURCE_DIR}" "${_file}")
+  find_program(_BSDK_GIT git)
+  if(NOT _BSDK_GIT)
+    message(FATAL_ERROR
+      "patch-baresip-sources: ${_rel} carries an older EchoSDK patch and git "
+      "is not available to restore it. Re-fetch third_party/baresip "
+      "(scripts/fetch-third-party.sh) and build again.")
+  endif()
+  execute_process(COMMAND "${_BSDK_GIT}" -C "${SOURCE_DIR}" checkout -- "${_rel}"
+                  RESULT_VARIABLE _rc ERROR_VARIABLE _err)
+  if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR
+      "patch-baresip-sources: could not restore ${_rel} to repatch it: ${_err}")
+  endif()
+  message(STATUS "patch-baresip-sources: ${_rel} carried an older patch; "
+                 "restored to the pinned revision")
+endfunction()
+
+# Apply hunks _OLD_<k>/_NEW_<k> (the caller's variables) for each <k> in
+# _keys to _file, unless it already carries _marker.  Every anchor is checked
+# before any is spliced, so a baresip bump never leaves a file half-patched.
+macro(bsdk_patch_file _file _marker _what _why)
+  bsdk_restore_if_stale("${_file}" "${_marker}")
+  file(READ "${_file}" _pf_content)
+  string(FIND "${_pf_content}" "${_marker}" _pf_done)
+  if(NOT _pf_done EQUAL -1)
+    message(STATUS "patch-baresip-sources: ${_file} already patched (${_what})")
+  else()
+    foreach(_pf_k ${_keys})
+      string(FIND "${_pf_content}" "${_OLD_${_pf_k}}" _pf_pos)
+      if(_pf_pos EQUAL -1)
+        message(FATAL_ERROR
+          "patch-baresip-sources: anchor ${_pf_k} not found in ${_file} "
+          "(${_what}).\nThe pinned baresip revision has moved this code. "
+          "Re-derive the patch — building without it ${_why}.")
+      endif()
+    endforeach()
+    foreach(_pf_k ${_keys})
+      string(REPLACE "${_OLD_${_pf_k}}" "${_NEW_${_pf_k}}"
+             _pf_content "${_pf_content}")
+    endforeach()
+    file(WRITE "${_file}" "${_pf_content}")
+    message(STATUS "patch-baresip-sources: patched ${_file} (${_what})")
+  endif()
+endmacro()
 
 set(BARESIP_CMAKE "${SOURCE_DIR}/CMakeLists.txt")
 if(NOT EXISTS "${BARESIP_CMAKE}")
@@ -314,38 +382,50 @@ set(_ENC_NEW [=[
 	opus_encoder_ctl(aes->enc,
 			 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
 ]=])
-set(_DEC_OLD [=[
+
+file(READ "${OPUS_ENC_C}" _content)
+string(FIND "${_content}" "${_ENC_NEW}" _done)
+if(NOT _done EQUAL -1)
+  message(STATUS "patch-baresip-sources: ${OPUS_ENC_C} already patched (expected loss can return to 0)")
+else()
+  string(FIND "${_content}" "${_ENC_OLD}" _pos)
+  if(_pos EQUAL -1)
+    message(FATAL_ERROR
+      "patch-baresip-sources: anchor not found in ${OPUS_ENC_C} (expected "
+      "loss can return to 0).\nThe pinned baresip revision has moved the opus "
+      "module. Re-derive this patch — building without it leaves FEC "
+      "redundancy stuck once raised.")
+  endif()
+  string(REPLACE "${_ENC_OLD}" "${_ENC_NEW}" _content "${_content}")
+  file(WRITE "${OPUS_ENC_C}" "${_content}")
+  message(STATUS "patch-baresip-sources: patched ${OPUS_ENC_C} (expected loss can return to 0)")
+endif()
+
+# decode.c: the FEC gate, and the marker src/core.c links against.
+set(_OLD_DEC [=[
 	fec = buf && len && opus_packet_loss > 0;
 ]=])
-set(_DEC_NEW [=[
+set(_NEW_DEC [=[
 	/* EchoSDK-patched: whether the peer sent FEC is not a question our
 	 * own expected loss (opus_packet_loss) can answer. */
 	fec = buf && len;
 ]=])
+set(_OLD_DECMARK [=[
+int opus_decode_pkloss(struct audec_state *ads,
+]=])
+set(_NEW_DECMARK [=[
+/* EchoSDK-patched: src/core.c references this, so a build without the FEC
+ * patch below fails to link instead of shipping without it. */
+extern const char bsdk_patch_opus_fec[];
+const char bsdk_patch_opus_fec[] = "echosdk-patch opus-fec v1";
 
-foreach(_j "ENC;${OPUS_ENC_C};expected loss can return to 0"
-           "DEC;${OPUS_DEC_C};FEC decode not gated on our expected loss")
-  list(GET _j 0 _k)
-  list(GET _j 1 _file)
-  list(GET _j 2 _what)
-  file(READ "${_file}" _content)
-  string(FIND "${_content}" "${_${_k}_NEW}" _done)
-  if(NOT _done EQUAL -1)
-    message(STATUS "patch-baresip-sources: ${_file} already patched (${_what})")
-    continue()
-  endif()
-  string(FIND "${_content}" "${_${_k}_OLD}" _pos)
-  if(_pos EQUAL -1)
-    message(FATAL_ERROR
-      "patch-baresip-sources: anchor not found in ${_file} (${_what}).\n"
-      "The pinned baresip revision has moved the opus module. Re-derive this "
-      "patch — building without it leaves FEC redundancy stuck once raised "
-      "and throws away the FEC the peer sends.")
-  endif()
-  string(REPLACE "${_${_k}_OLD}" "${_${_k}_NEW}" _content "${_content}")
-  file(WRITE "${_file}" "${_content}")
-  message(STATUS "patch-baresip-sources: patched ${_file} (${_what})")
-endforeach()
+
+int opus_decode_pkloss(struct audec_state *ads,
+]=])
+set(_keys DEC DECMARK)
+bsdk_patch_file("${OPUS_DEC_C}" "echosdk-patch opus-fec v1"
+  "FEC decode not gated on our expected loss"
+  "throws away the FEC the peer sends")
 
 # ---------------------------------------------------------------------------
 # Job 6: aureceiver — conceal a burst when the audio device needs it
@@ -363,21 +443,35 @@ endforeach()
 #   400 ms / 4 s    ~270 ms silence, +120 ms      no delay, still silence
 #   3 s outage      +80 ms for good               no delay
 #
-# Two parts, as WebRTC's NetEQ does it:
+# Three parts, as WebRTC's NetEQ does it:
 #
 #   - At playout: when the device asks for more than the buffer holds and
 #     the codec can conceal, decode concealment frames right then instead of
 #     letting the buffer run dry into silence.  The device thread only
 #     trylocks the receiver (a busy lock is the old silence, never a stall),
-#     and stops after 1 s — past that the stream has stopped, it is not a
-#     burst.
-#   - On arrival: conceal only as many of the lost frames as put the buffer
-#     back at its level after the last real frame, less the one the new
-#     packet brings — none when playout concealment already covered the gap,
-#     all of them for a short burst.  The *last* ones, so the FEC-rebuilt
-#     frame and the decoder's run-in to the next packet are the ones kept.
-#     Rounded down: an underfull buffer refills by itself, an overfull one
-#     does not.
+#     and stops after 1 s of it — measured in time, so it is 1 s at every
+#     ptime — since past that the stream has stopped, it is not a burst.
+#   - On arrival, of the lost frames: none that playout concealment has
+#     already played; of the rest always the last (the arriving packet's FEC
+#     rebuilds it, for at most a frame of buffer), and otherwise as many as
+#     put the buffer back at its level after the last real frame, less the
+#     one the new packet brings.  The *last* ones, so the FEC-rebuilt frame
+#     and the decoder's run-in to the next packet are the ones kept.  Rounded
+#     to the nearest frame: an early packet or a device that reads in bursts
+#     leaves part of one, and rounding down dropped the frame FEC could have
+#     rebuilt.
+#   - On arrival, of the packet itself: dropped when playout concealment has
+#     already played its slot.  Decoded, it went into the buffer in timestamp
+#     order — spliced into the concealment — and its length stayed on the
+#     delay.  Not when the buffer was shallower than one device read: there
+#     the device outran the buffer rather than the packet being late, and
+#     keeping the packet is how the buffer grows to fit a device that reads
+#     40 ms at a time.  Dropped, every other slot was concealed for the rest
+#     of the call.
+#
+# The concealment state starts over on a codec change: the old codec's frame
+# size had playout concealment run the new decoder before its first packet
+# (an opus_decode error on every device callback until one arrived).
 # ---------------------------------------------------------------------------
 
 set(AURECV_C "${SOURCE_DIR}/src/aureceiver.c")
@@ -385,56 +479,69 @@ if(NOT EXISTS "${AURECV_C}")
   message(FATAL_ERROR "patch-baresip-sources: ${AURECV_C} does not exist")
 endif()
 
-set(_AR1_OLD [=[
+set(_OLD_AR1 [=[
 	bool done_first;              /**< First auplay write done flag      */
 };
 ]=])
-set(_AR1_NEW [=[
+set(_NEW_AR1 [=[
 	bool done_first;              /**< First auplay write done flag      */
 	/* EchoSDK-patched: burst concealment, see aurecv_plc_playout() */
 	size_t plc_level;             /**< aubuf bytes after last real frame */
 	size_t plc_frame_sz;          /**< Bytes of that frame               */
 	uint64_t plc_next_ts;         /**< Timestamp just after it           */
+	uint64_t plc_start_ts;        /**< plc_next_ts when it was pushed    */
 	unsigned plc_run;             /**< Frames concealed at playout since */
+	size_t plc_read_sz;           /**< Bytes the device read then        */
 };
 ]=])
-set(_AR2_OLD [=[
+set(_OLD_AR2 [=[
 static int aurecv_stream_decode(struct audio_recv *ar,
 ]=])
-set(_AR2_NEW [=[
-/* EchoSDK-patched: frames of playout concealment before a silent stream is
- * taken for a stopped one (hold, a dead path) rather than a burst: 1 s. */
-#define AURECV_PLC_PLAYOUT_MAX 50u
+set(_NEW_AR2 [=[
+/* EchoSDK-patched: src/core.c references this, so a build without burst
+ * concealment fails to link instead of shipping without it. */
+extern const char bsdk_patch_aurecv_plc[];
+const char bsdk_patch_aurecv_plc[] = "echosdk-patch aurecv-plc v1";
 
 
-/* EchoSDK-patched: how many of `lostc` lost frames to conceal — enough to
- * put the playout buffer back at its level after the last real frame, less
- * the one the next packet brings.  Concealment frames for time the device
- * has already played would only add delay. */
+/* EchoSDK-patched: how many of `lostc` lost frames to conceal.  None that
+ * playout concealment has already played: again, they would only add delay.
+ * Of the rest, always the last — the arriving packet's FEC rebuilds it, for
+ * at most a frame of extra buffer — and otherwise as many as put the playout
+ * buffer back at its level after the last real frame, less the one the
+ * arriving packet brings.  Rounded to the nearest frame, not down: a packet
+ * that arrives a little early, or a device that reads in bursts, leaves part
+ * of a frame, and rounding that away lost the frame FEC could rebuild. */
 static unsigned aurecv_plc_needed(struct audio_recv *ar, unsigned lostc)
 {
-	size_t cur, deficit;
+	size_t cur, deficit, n;
+	unsigned left;
 
 	if (!ar->aubuf || !ar->plc_frame_sz)
 		return lostc;             /* nothing to measure against yet */
 
+	if (ar->plc_run >= lostc)
+		return 0;
+	left = lostc - ar->plc_run;
+
 	cur = aubuf_cur_size(ar->aubuf);
-	if (cur >= ar->plc_level)
-		return 0;
+	deficit = cur < ar->plc_level
+		? (ar->plc_level - cur + ar->plc_frame_sz / 2) /
+		  ar->plc_frame_sz
+		: 0;
+	n = deficit > 1 ? deficit - 1 : 1;
 
-	deficit = (ar->plc_level - cur) / ar->plc_frame_sz;
-	if (deficit <= 1)
-		return 0;
-
-	return deficit - 1 < lostc ? (unsigned)(deficit - 1) : lostc;
+	return n < left ? (unsigned)n : left;
 }
 
 
 /* EchoSDK-patched: the device wants `need` bytes and the buffer holds less.
  * Decode concealment into it now, rather than let it run dry into silence
- * and conceal the gap only when — and after — the next packet arrives.
- * Called from the device thread with aubuf_mtx held; never blocks on the
- * receiver, which the network thread holds while it decodes. */
+ * and conceal the gap only when — and after — the next packet arrives.  Up
+ * to 1 s of it after the last real frame: past that the stream has stopped
+ * (hold, a dead path), it is not a burst.  Called from the device thread
+ * with aubuf_mtx held; never blocks on the receiver, which the network
+ * thread holds while it decodes. */
 static void aurecv_plc_playout(struct audio_recv *ar, size_t need)
 {
 	const struct aucodec *ac;
@@ -446,11 +553,13 @@ static void aurecv_plc_playout(struct audio_recv *ar, size_t need)
 	if (!ac || !ac->plch || !ar->dec || !ar->plc_frame_sz)
 		goto out;                 /* no real frame yet, or cannot conceal */
 
+	ar->plc_read_sz = need;
+
 	for (int i = 0; i < 4 && aubuf_cur_size(ar->aubuf) < need; i++) {
 		struct auframe af;
 		size_t sampc = ar->sampvsz / aufmt_sample_size(ar->fmt);
 
-		if (ar->plc_run >= AURECV_PLC_PLAYOUT_MAX)
+		if (ar->plc_next_ts - ar->plc_start_ts >= AUDIO_TIMEBASE)
 			break;
 		if (ac->plch(ar->dec, ar->fmt, ar->sampv, &sampc, NULL, 0) ||
 		    !sampc)
@@ -474,23 +583,52 @@ static void aurecv_plc_playout(struct audio_recv *ar, size_t need)
 
 static int aurecv_stream_decode(struct audio_recv *ar,
 ]=])
-set(_AR3_OLD [=[
+set(_OLD_AR3 [=[
+	/* No decoder set */
+	if (!ac)
+		return 0;
+]=])
+set(_NEW_AR3 [=[
+	/* No decoder set */
+	if (!ac)
+		return 0;
+
+	/* EchoSDK-patched: playout concealment has already played this slot.
+	 * Decoded, the packet would be spliced into the concealment in
+	 * timestamp order and its length would stay on the delay.  Bounded:
+	 * the RTP timestamp is not unwrapped here, and without the bound a
+	 * wrap mid-call would discard every packet after it.
+	 *
+	 * Only while the buffer held a whole device read after the last real
+	 * frame: then running dry means this packet was late.  A shallower
+	 * buffer ran dry because the device reads more at once than it
+	 * holds, and the packet is what lets it grow to fit — dropped, the
+	 * next read conceals again, and the one after, for the whole call. */
+	uint64_t ts = ((uint64_t) hdr->ts) * AUDIO_TIMEBASE / ac->crate;
+	if (ar->plc_run && ts < ar->plc_next_ts &&
+	    ar->plc_next_ts - ts < AUDIO_TIMEBASE &&
+	    ar->plc_level >= ar->plc_read_sz) {
+		++ar->n_discard;
+		goto out;
+	}
+]=])
+set(_OLD_AR4 [=[
 	if (lostc && ac->plch) {
 		for (unsigned i = 0; i < lostc; i++) {
 ]=])
-set(_AR3_NEW [=[
+set(_NEW_AR4 [=[
 	if (lostc && ac->plch) {
 		/* EchoSDK-patched: only the last aurecv_plc_needed() of them. */
 		for (unsigned i = lostc - aurecv_plc_needed(ar, lostc);
 		     i < lostc; i++) {
 ]=])
-set(_AR4_OLD [=[
+set(_OLD_AR5 [=[
 	err = aurecv_push_aubuf(ar, &af);
  out:
 	return err;
 }
 ]=])
-set(_AR4_NEW [=[
+set(_NEW_AR5 [=[
 	err = aurecv_push_aubuf(ar, &af);
 	/* EchoSDK-patched: where burst concealment measures and continues. */
 	if (!err && ar->aubuf && af.sampc && af.srate && af.ch) {
@@ -498,19 +636,20 @@ set(_AR4_NEW [=[
 		ar->plc_frame_sz = auframe_size(&af);
 		ar->plc_next_ts  = af.timestamp +
 			(uint64_t)(af.sampc / af.ch) * AUDIO_TIMEBASE / af.srate;
+		ar->plc_start_ts = ar->plc_next_ts;
 		ar->plc_run      = 0;
 	}
  out:
 	return err;
 }
 ]=])
-set(_AR5_OLD [=[
+set(_OLD_AR6 [=[
 	if (ar->aubuf)
 		aubuf_read_auframe(ar->aubuf, af);
 	else
 		memset(af->sampv, 0, auframe_size(af));
 ]=])
-set(_AR5_NEW [=[
+set(_NEW_AR6 [=[
 	if (ar->aubuf) {
 		/* EchoSDK-patched: conceal now rather than run dry */
 		if (aubuf_cur_size(ar->aubuf) < auframe_size(af))
@@ -520,28 +659,90 @@ set(_AR5_NEW [=[
 	else
 		memset(af->sampv, 0, auframe_size(af));
 ]=])
+set(_OLD_AR7 [=[
+	if (ac != ar->ac) {
+		ar->ac = ac;
+		ar->dec = mem_deref(ar->dec);
+	}
+]=])
+set(_NEW_AR7 [=[
+	if (ac != ar->ac) {
+		ar->ac = ac;
+		ar->dec = mem_deref(ar->dec);
+		/* EchoSDK-patched: nothing to conceal from until the new
+		 * codec's first frame. */
+		ar->plc_level    = 0;
+		ar->plc_frame_sz = 0;
+		ar->plc_next_ts  = 0;
+		ar->plc_start_ts = 0;
+		ar->plc_run      = 0;
+		ar->plc_read_sz  = 0;
+	}
+]=])
+set(_keys AR1 AR2 AR3 AR4 AR5 AR6 AR7)
+bsdk_patch_file("${AURECV_C}" "echosdk-patch aurecv-plc v1"
+  "burst concealment at playout"
+  "plays a burst of loss as silence, or leaves the call permanently delayed after one")
 
-file(READ "${AURECV_C}" _content)
-set(_changed FALSE)
-foreach(_k AR1 AR2 AR3 AR4 AR5)
-  string(FIND "${_content}" "${_${_k}_NEW}" _done)
-  if(NOT _done EQUAL -1)
-    continue()
-  endif()
-  string(FIND "${_content}" "${_${_k}_OLD}" _pos)
-  if(_pos EQUAL -1)
-    message(FATAL_ERROR
-      "patch-baresip-sources: anchor ${_k} not found in ${AURECV_C}.\n"
-      "The pinned baresip revision has moved aureceiver.c. Re-derive this "
-      "patch — building without it plays a burst of loss as silence, or "
-      "leaves the call permanently delayed after one.")
-  endif()
-  string(REPLACE "${_${_k}_OLD}" "${_${_k}_NEW}" _content "${_content}")
-  set(_changed TRUE)
-endforeach()
-if(_changed)
-  file(WRITE "${AURECV_C}" "${_content}")
-  message(STATUS "patch-baresip-sources: patched ${AURECV_C} (burst concealment at playout)")
-else()
-  message(STATUS "patch-baresip-sources: ${AURECV_C} already patched (burst concealment)")
+# ---------------------------------------------------------------------------
+# Job 7: opus — every module_init starts from the defaults
+#
+# module_init() reads the opus_* config keys into file-scope globals and only
+# ever writes the ones a key is present for, so a value set by one
+# echosdk_init() survives into the next that leaves the key out: complexity
+# 0 stays 0, a pinned expected loss stays pinned.  The channel count is the
+# same one-way street — `if (!stereo || !sprop_stereo) opus.ch = 1;` can turn
+# stereo off and nothing ever turns it back on, so after one mono init every
+# later one is mono whatever it asks for.  Reset everything module_init() can
+# change to its static initialiser first.
+# ---------------------------------------------------------------------------
+
+set(OPUS_C "${SOURCE_DIR}/modules/opus/opus.c")
+if(NOT EXISTS "${OPUS_C}")
+  message(FATAL_ERROR "patch-baresip-sources: ${OPUS_C} does not exist")
 endif()
+
+set(_OLD_OI1 [=[
+static int module_init(void)
+{
+]=])
+set(_NEW_OI1 [=[
+/* EchoSDK-patched: src/core.c references this, so a build without the
+ * defaults reset below fails to link instead of shipping without it. */
+extern const char bsdk_patch_opus_init[];
+const char bsdk_patch_opus_init[] = "echosdk-patch opus-init v1";
+
+
+static int module_init(void)
+{
+]=])
+set(_OLD_OI2 [=[
+	fmtp[0] = '\0';
+	fmtp_mirror[0] = '\0';
+]=])
+set(_NEW_OI2 [=[
+	fmtp[0] = '\0';
+	fmtp_mirror[0] = '\0';
+
+	/* EchoSDK-patched: from the defaults every time; see job 7 in
+	 * EchoSDK's cmake/patch-baresip-sources.cmake. */
+	opus.ch          = 2;
+	opus.srate       = 48000;
+	opus.fmtp        = fmtp;
+	opus.fmtp_ench   = NULL;
+	opus_mirror      = false;
+	opus_complexity  = 10;
+	opus_application = OPUS_APPLICATION_AUDIO;
+	opus_packet_loss = 0;
+]=])
+set(_OLD_OI3 [=[
+	if (!stereo || !sprop_stereo)
+		opus.ch = 1;
+]=])
+set(_NEW_OI3 [=[
+	opus.ch = (stereo && sprop_stereo) ? 2 : 1;   /* EchoSDK-patched */
+]=])
+set(_keys OI1 OI2 OI3)
+bsdk_patch_file("${OPUS_C}" "echosdk-patch opus-init v1"
+  "defaults reset on every init"
+  "carries one init's opus settings, and mono, into every later one")

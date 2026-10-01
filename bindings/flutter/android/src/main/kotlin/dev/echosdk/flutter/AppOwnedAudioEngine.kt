@@ -90,6 +90,8 @@ internal class AppOwnedAudioEngine(
     private var track: AudioTrack? = null
     private var aec: AcousticEchoCanceler? = null
     private var ns: NoiseSuppressor? = null
+    /** The SDK has been told capture runs through the voice path. */
+    private var voicePath = false
 
     /** Current format epoch: {srate, ch, ptime}. Null when no device is open. */
     private var openFmt: Triple<Int, Int, Int>? = null
@@ -357,13 +359,22 @@ internal class AppOwnedAudioEngine(
         r.startRecording()
         t.play()
 
+        // The SDK's own NS and AGC would only cost speech on top of the
+        // platform's: tell it they are under the microphone now. Read back,
+        // not assumed — though the preset taking says nothing about whether
+        // this phone's HAL actually cancels echo.
+        voicePath = r.audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION &&
+                    r.recordingState == AudioRecord.RECORDSTATE_RECORDING
+        if (voicePath) ExternalAudio.setVoicePath(true)
+
         captureThread = Thread({ captureLoop(frameSamples / ch, ch) },
                                "EchoSDK-audio-capture").apply { start() }
         playbackThread = Thread({ playbackLoop(frameSamples, frameBytes) },
                                 "EchoSDK-audio-playback").apply { start() }
 
         Log.i(TAG, "app-owned audio open: ${srate}Hz ${ch}ch ptime=${ptime}ms " +
-                   "frame=${FRAME_MS}ms aec=${aec != null} ns=${ns != null}")
+                   "frame=${FRAME_MS}ms aec=${aec != null} ns=${ns != null} " +
+                   "voicePath=$voicePath")
     }
 
     private fun closeStreams() {
@@ -378,6 +389,10 @@ internal class AppOwnedAudioEngine(
         // loops can notice `running` went false.
         runCatching { record?.stop() }
         runCatching { track?.pause() }
+        if (voicePath) {
+            ExternalAudio.setVoicePath(false)
+            voicePath = false
+        }
 
         ct?.join(200)
         pt?.join(200)

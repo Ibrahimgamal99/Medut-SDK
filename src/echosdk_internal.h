@@ -635,12 +635,19 @@ void bsdk_audio_processing_close(void);
  * filter stays in the chain and decides per frame from these inputs. */
 void bsdk_ap_set_ns(bool on);
 void bsdk_ap_set_agc(bool on);
-/* on while the app owns the device (echosdk_audio_use_external) on a
- * platform whose driver cancels echo is also the app asking for the
- * suppressor there — the one way it runs on such a platform. */
+/* echosdk_set_aec: echo control on or off, nothing else. */
 void bsdk_ap_set_aec(bool on);
+/* echosdk_set_aec_mode: the same, and on while the app owns the device
+ * (echosdk_audio_use_external) is also the app asking for the suppressor
+ * there — the one way it runs on an app-owned device. */
+void bsdk_ap_set_aec_mode(bool on);
+/* echosdk_audio_external_set_voice_path: whether the app-owned device
+ * captures through the platform's voice path.  Any thread but a realtime
+ * one (it logs on a change). */
+void bsdk_ap_external_voice_path(bool active);
 /* After echosdk_audio_use_external() actually switched: back on the
- * platform device, an app's suppressor request lapses. */
+ * platform device, an app's suppressor request and its voice-path report
+ * lapse. */
 void bsdk_ap_external_changed(bool external);
 
 /* Logs what the microphone goes through now, and why each filter is off. */

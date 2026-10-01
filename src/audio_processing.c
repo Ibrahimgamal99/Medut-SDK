@@ -10,8 +10,12 @@
  *
  * bsdk_webrtc    — WebRTC APM (AEC3 + NS + high-pass), desktop Linux builds
  *                  with ECHOSDK_WITH_WEBRTC_AEC.  First on TX so it sees the
- *                  raw microphone, last on RX so its far-end reference is what
- *                  the speaker plays.  Registered only for ECHOSDK_AEC_WEBRTC.
+ *                  raw microphone, last on RX so its far-end reference has
+ *                  every RX gain applied.  That reference is the decoded audio
+ *                  as it enters the playout buffer, not what the speaker
+ *                  plays: the buffer and the device add their delay after it,
+ *                  and AEC3's delay estimator absorbs that.  Registered only
+ *                  for ECHOSDK_AEC_WEBRTC.
  * bsdk_mic_gain  — fixed dB scalar on the TX path (pre-boost before NS/AGC).
  * bsdk_ns        — broadband noise gate on TX: attenuates the pauses, leaves
  *                  speech alone.  Not a spectral suppressor; with WebRTC in
@@ -28,7 +32,11 @@
  * is what makes the runtime setters take effect mid-call: baresip reads
  * aufilt.enabled only when it builds a call's chain, and rebuilds it only on
  * a codec change, so aufilt_enable() would reach the next call, not this one.
- * A filter that is switched back on starts from fresh state.
+ * The gate, AGC and suppressor start from fresh state when switched back on.
+ * bsdk_webrtc does not: the call keeps its APM, and AEC3 keeps the echo path
+ * it has learned (unless NS kept the APM running with AEC off, in which case
+ * re-enabling AEC rebuilds the canceller).  Keeping it is the better choice:
+ * a reset would mean about a second of echo while it re-learns.
  *
  * The inputs are atomics written on the re thread (the setters in audio.c
  * dispatch there, which keeps them in order) and read on the audio threads.
@@ -43,6 +51,10 @@
  * us, only the TX chain is rebuilt, and the new encoder gets ctx == NULL.
  * The registry is touched only from setup handlers and filter destructors,
  * all of which run on the re thread.
+ *
+ * The suppressor's far-end envelopes are the one thing a TX thread reads
+ * across calls: each call keeps its own in a fixed slot array, and TX ducks
+ * for the loudest, because the speaker plays every call that is not held.
  *
  * Time
  * ────
@@ -104,18 +116,25 @@ static RE_ATOMIC bool     s_webrtc_fallback;/* WEBRTC asked for, library absent 
 static RE_ATOMIC bool     s_user_ns;
 static RE_ATOMIC bool     s_user_agc;
 static RE_ATOMIC bool     s_aec_on;
-/* The app asked for the suppressor while it owns the device on a platform
- * whose own driver cancels echo.  The one way the suppressor runs there:
- * taking the device over never switches it on by itself. */
+/* The app asked for the suppressor (echosdk_set_aec_mode) while it owns the
+ * device.  The one way the suppressor runs on an app-owned device, on every
+ * platform: taking the device over never switches it on by itself, and
+ * neither does echosdk_set_aec(true). */
 static RE_ATOMIC bool     s_supp_external_req;
+/* The app-owned device captures through the platform's voice path
+ * (VoiceProcessingIO, VOICE_COMMUNICATION), as its engine reports from its
+ * start and stop.  Read only while that device is selected. */
+static RE_ATOMIC bool     s_external_vp;
 /* Bumped whenever a WebRTC config input changes; bsdk_webrtc reapplies its
  * APM config when the generation it applied is behind. */
 static RE_ATOMIC uint32_t s_webrtc_gen;
 
-/* The phone's own voice path (AEC/NS/AGC) is under us right now. */
+/* A voice path (AEC/NS/AGC) is under us right now: the platform driver's,
+ * or the app-owned device's when that is the one selected. */
 static bool voice_path_active(void)
 {
-	return bsdk_platform_has_aec() && !bsdk_audio_external_selected();
+	return bsdk_audio_external_selected() ? re_atomic_rlx(&s_external_vp)
+	                                      : bsdk_platform_has_aec();
 }
 
 void bsdk_ap_effective(struct bsdk_ap_effective *e)
@@ -137,10 +156,12 @@ void bsdk_ap_effective(struct bsdk_ap_effective *e)
 	e->ns  = ns && !vp && backend != BACKEND_WEBRTC;
 	e->agc = agc && !vp;
 
+	/* On an app-owned device only when asked for: what the platform last
+	 * said about its own recorder is not about this device. */
 	e->suppressor = backend == BACKEND_SUPPRESSOR && aec_on &&
-	                (!bsdk_platform_has_aec() ||
-	                 (bsdk_audio_external_selected() &&
-	                  re_atomic_rlx(&s_supp_external_req)));
+	                (bsdk_audio_external_selected()
+	                 ? re_atomic_rlx(&s_supp_external_req)
+	                 : !bsdk_platform_has_aec());
 }
 
 void bsdk_ap_log_chain(const char *why)
@@ -148,28 +169,32 @@ void bsdk_ap_log_chain(const char *why)
 	struct bsdk_ap_effective e;
 	bsdk_ap_effective(&e);
 
+	bool ext      = bsdk_audio_external_selected();
 	bool vp       = voice_path_active();
 	bool user_ns  = re_atomic_rlx(&s_user_ns);
 	bool user_agc = re_atomic_rlx(&s_user_agc);
 	bool aec_on   = re_atomic_rlx(&s_aec_on);
 	unsigned backend = re_atomic_rlx(&s_backend);
+	const char *vp_off = ext ? "off (app-owned voice path)"
+	                         : "off (platform voice path)";
 
 	const char *ns = e.webrtc_ns ? "webrtc"
 	               : e.ns ? "gate"
-	               : (user_ns && vp) ? "off (platform voice path)"
+	               : (user_ns && vp) ? vp_off
 	               : "off";
 	const char *agc = e.agc ? "on"
-	                : (user_agc && vp) ? "off (platform voice path)"
+	                : (user_agc && vp) ? vp_off
 	                : "off";
+	/* Suppressor mode, on, and still not running: the app-owned device
+	 * without a request, or the platform's own canceller. */
 	const char *aec = e.webrtc_aec ? "webrtc"
 	                : e.suppressor
 	                  ? (re_atomic_rlx(&s_webrtc_fallback)
 	                     ? "suppressor (webrtc unavailable)" : "suppressor")
-	                : (aec_on && backend == BACKEND_SUPPRESSOR &&
-	                   bsdk_platform_has_aec())
-	                  ? (bsdk_audio_external_selected()
-	                     ? "off (app-owned device; set_aec_mode to enable)"
-	                     : "off (platform canceller)")
+	                : (aec_on && backend == BACKEND_SUPPRESSOR)
+	                  ? (!ext ? "off (platform canceller)"
+	                     : vp ? "off (app-owned voice path)"
+	                     : "off (app-owned device; set_aec_mode to enable)")
 	                : "off";
 
 	/* Say what the microphone actually goes through.  Every one of these is
@@ -199,18 +224,36 @@ void bsdk_ap_set_agc(bool on)
 void bsdk_ap_set_aec(bool on)
 {
 	re_atomic_rlx_set(&s_aec_on, on);
-	re_atomic_rlx_set(&s_supp_external_req,
-	                  on && bsdk_audio_external_selected());
 	re_atomic_rlx_add(&s_webrtc_gen, 1u);
 	bsdk_ap_log_chain("set_aec");
+}
+
+void bsdk_ap_set_aec_mode(bool on)
+{
+	re_atomic_rlx_set(&s_supp_external_req,
+	                  on && bsdk_audio_external_selected());
+	bsdk_ap_set_aec(on);
+}
+
+void bsdk_ap_external_voice_path(bool active)
+{
+	bool was = re_atomic_rlx(&s_external_vp);
+
+	re_atomic_rlx_set(&s_external_vp, active);
+	if (was != active)
+		bsdk_ap_log_chain(active ? "app voice path up"
+		                         : "app voice path down");
 }
 
 void bsdk_ap_external_changed(bool external)
 {
 	/* The platform device is back, and its canceller with it: a
-	 * suppressor the app asked for while it owned the device goes. */
-	if (!external)
+	 * suppressor the app asked for while it owned the device goes, and
+	 * so does what the app's engine said about its voice path. */
+	if (!external) {
 		re_atomic_rlx_set(&s_supp_external_req, false);
+		re_atomic_rlx_set(&s_external_vp, false);
+	}
 	bsdk_ap_log_chain(external ? "app-owned device" : "platform device");
 }
 
@@ -283,14 +326,30 @@ static void apply_ramp(int16_t *p, size_t n, float g0, float g1)
 
 #define RBUF_MAX 960   /* one 10 ms block at 48 kHz stereo */
 
+/* Suppressor: one call's far-end level envelope.  Written by that call's RX,
+ * read by every call's TX; the pair is not updated as one, which at worst
+ * mis-ages one frame. */
+struct supp_env {
+	uint32_t rx_db_bits;    /* float dBFS, atomic */
+	uint32_t rx_ms;         /* tmr_jiffies() when rx_db was set, atomic */
+	RE_ATOMIC bool live;    /* a call holds this slot (set on the re thread) */
+};
+
+/* Every call's envelope, where any call's TX can read it without the
+ * registry (re thread only): the speaker plays every call that is not held,
+ * so the echo in one call's microphone can be another call's far end.  A
+ * held call gets no RX frames and its envelope decays to nothing. */
+#define SUPP_SLOTS 8
+static struct supp_env s_supp_env[SUPP_SLOTS];
+
 struct ap_call {
 	struct le le;
 	const struct audio *au;
 
-	/* Suppressor: far-end level envelope.  Written by RX, read by TX; the
-	 * pair is not updated as one, which at worst mis-ages one frame. */
-	uint32_t rx_db_bits;    /* float dBFS, atomic */
-	uint32_t rx_ms;         /* tmr_jiffies() when rx_db was set, atomic */
+	/* A slot in s_supp_env, or `own` when all of them are taken: that
+	 * call then ducks for its own far end only. */
+	struct supp_env *env;
+	struct supp_env  own;
 
 #ifdef BSDK_WEBRTC
 	struct bsdk_apm *apm;   /* NULL when the library would not create one */
@@ -312,10 +371,30 @@ struct ap_call {
 
 static struct list s_calls;   /* re thread only */
 
+static struct supp_env *supp_env_claim(struct supp_env *own)
+{
+	struct supp_env *e = own;
+
+	for (size_t i = 0; i < SUPP_SLOTS; i++) {
+		if (!re_atomic_rlx(&s_supp_env[i].live)) {
+			e = &s_supp_env[i];
+			break;
+		}
+	}
+	store_f(&e->rx_db_bits, DB_MIN);
+	re_atomic_rlx_set(&e->rx_ms, 0u);
+	re_atomic_rlx_set(&e->live, true);
+	return e;
+}
+
 static void ap_call_destructor(void *arg)
 {
 	struct ap_call *c = arg;
 	list_unlink(&c->le);
+	if (c->env) {
+		store_f(&c->env->rx_db_bits, DB_MIN);
+		re_atomic_rlx_set(&c->env->live, false);
+	}
 #ifdef BSDK_WEBRTC
 	if (c->apm)
 		bsdk_apm_destroy(c->apm);
@@ -339,8 +418,8 @@ static struct ap_call *ap_call_get(const struct audio *au)
 	struct ap_call *c = mem_zalloc(sizeof(*c), ap_call_destructor);
 	if (!c)
 		return NULL;
-	c->au = au;
-	store_f(&c->rx_db_bits, DB_MIN);
+	c->au  = au;
+	c->env = supp_env_claim(&c->own);
 	if (au)
 		list_append(&s_calls, &c->le, c);
 	return c;
@@ -647,17 +726,39 @@ static void aec_dec_dtor(void *arg)
 
 /* The far-end envelope at time now_ms: the stored peak, held, then decayed.
  * With nothing arriving (DTX, hold) it keeps decaying, so a silent far end
- * can never leave TX ducked. */
-static float supp_envelope(struct ap_call *c, uint32_t now_ms)
+ * can never leave TX ducked.
+ *
+ * Signed age: read from a TX thread, rx_ms can be newer than now_ms (the RX
+ * thread stored it after TX read the clock).  Unsigned, that wrapped to a
+ * huge age and decayed the envelope to nothing for one frame — one frame of
+ * echo let through. */
+static float supp_envelope(struct supp_env *env, uint32_t now_ms)
 {
-	float    db = load_f(&c->rx_db_bits);
-	uint32_t t  = re_atomic_rlx(&c->rx_ms);
-	uint32_t age = now_ms - t;
+	float   db  = load_f(&env->rx_db_bits);
+	int32_t age = (int32_t)(now_ms - re_atomic_rlx(&env->rx_ms));
 
-	if (db <= DB_MIN || age <= SUPP_HOLD_MS)
+	if (db <= DB_MIN || age <= (int32_t)SUPP_HOLD_MS)
 		return db;
-	float v = db - SUPP_RELEASE_DB_PER_S * (float)(age - SUPP_HOLD_MS) / 1000.0f;
+	float v = db - SUPP_RELEASE_DB_PER_S *
+	               (float)(age - (int32_t)SUPP_HOLD_MS) / 1000.0f;
 	return v < DB_MIN ? DB_MIN : v;
+}
+
+/* What call c's TX ducks for: the loudest envelope across every live call,
+ * its own included. */
+static float supp_far_level(struct ap_call *c, uint32_t now_ms)
+{
+	float db = supp_envelope(c->env, now_ms);
+
+	for (size_t i = 0; i < SUPP_SLOTS; i++) {
+		struct supp_env *e = &s_supp_env[i];
+		if (e == c->env || !re_atomic_rlx(&e->live))
+			continue;
+		float v = supp_envelope(e, now_ms);
+		if (v > db)
+			db = v;
+	}
+	return db;
 }
 
 static int aec_encupd(struct aufilt_enc_st **stp, void **ctx,
@@ -720,7 +821,7 @@ static int aec_encode(struct aufilt_enc_st *st, struct auframe *af)
 	 * not a suppression amount.  See bsdk_aec_floor_store() in audio.c. */
 	float floor_gain = load_f(&g_aec_floor_bits);
 	float floor_db   = floor_gain >= 1.0f ? 0.0f : 20.0f * log10f(floor_gain);
-	float rx         = supp_envelope(s->call, (uint32_t)tmr_jiffies());
+	float rx         = supp_far_level(s->call, (uint32_t)tmr_jiffies());
 
 	float atten_db;
 	if (rx <= SUPP_RX_LOW_DB)
@@ -749,17 +850,18 @@ static int aec_decode(struct aufilt_dec_st *st, struct auframe *af)
 
 	/* Tracked whether or not the suppressor is on, so switching it on
 	 * mid-call starts from the far end's real level. */
+	struct supp_env *env = s->call->env;
 	float    db  = frame_level_db((const int16_t *)af->sampv, af->sampc);
 	uint32_t now = (uint32_t)tmr_jiffies();
-	float    cur = supp_envelope(s->call, now);
-	bool     held = now - re_atomic_rlx(&s->call->rx_ms) <= SUPP_HOLD_MS;
+	float    cur = supp_envelope(env, now);
+	bool     held = now - re_atomic_rlx(&env->rx_ms) <= SUPP_HOLD_MS;
 
 	if (db >= cur) {
-		re_atomic_rlx_set(&s->call->rx_ms, now);
-		store_f(&s->call->rx_db_bits, db);
+		re_atomic_rlx_set(&env->rx_ms, now);
+		store_f(&env->rx_db_bits, db);
 	}
 	else if (held && db >= cur - SUPP_REFRESH_DB) {
-		re_atomic_rlx_set(&s->call->rx_ms, now);
+		re_atomic_rlx_set(&env->rx_ms, now);
 	}
 	return 0;
 }
@@ -1085,8 +1187,13 @@ void bsdk_audio_processing_init(bool ns, bool agc,
 	 * it, so nothing carries over from a previous init. */
 	store_f(&g_mic_gain_bits, powf(10.0f, mic_db / 20.0f));
 	store_f(&g_spk_gain_bits, powf(10.0f, spk_db / 20.0f));
-	/* floor = 1.0 - level * 0.85; level=1.0 → 0.15 (default) */
-	store_f(&g_aec_floor_bits, 1.0f - aec_suppression_level * 0.85f);
+	/* floor = 1.0 - level * 0.85; level=1.0 → 0.15 (default).  Clamped
+	 * as the setter does; the negated test also turns NaN into 0, where
+	 * a NaN floor would leave every ducked frame NaN. */
+	float lvl = aec_suppression_level;
+	if (!(lvl >= 0.0f)) lvl = 0.0f;
+	if (lvl > 1.0f) lvl = 1.0f;
+	store_f(&g_aec_floor_bits, 1.0f - lvl * 0.85f);
 
 	re_atomic_rlx_set(&s_webrtc_fallback, false);
 	re_atomic_rlx_set(&s_backend, (unsigned)pick_backend(aec_mode));
@@ -1094,6 +1201,7 @@ void bsdk_audio_processing_init(bool ns, bool agc,
 	re_atomic_rlx_set(&s_user_agc, agc);
 	re_atomic_rlx_set(&s_aec_on,   aec_mode != ECHOSDK_AEC_OFF);
 	re_atomic_rlx_set(&s_supp_external_req, false);
+	re_atomic_rlx_set(&s_external_vp, false);
 	re_atomic_rlx_add(&s_webrtc_gen, 1u);
 
 	/* PROTECTED BY RE_MAIN — aufilt_register modifies the aufiltl list.

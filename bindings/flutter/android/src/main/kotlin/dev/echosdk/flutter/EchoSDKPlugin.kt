@@ -4,11 +4,14 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -88,7 +91,12 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "getCacheDir" -> result.success(context.cacheDir.absolutePath)
             "configureAudioSession" -> {
                 val active = call.argument<Boolean>("active") ?: false
-                if (active) requestAudioFocus() else abandonAudioFocus()
+                if (active) {
+                    requestAudioFocus()
+                    logPlatformEffects()
+                } else {
+                    abandonAudioFocus()
+                }
                 result.success(null)
             }
             "setSpeakerphone" -> {
@@ -138,6 +146,21 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             "notifyCallKitAudioActive" -> result.success(null)
             else -> result.notImplemented()
         }
+    }
+
+    // Field data, nothing acts on it yet. The SDK reads back whether the
+    // VOICE_COMMUNICATION preset took (sles_vc.c), which cannot tell a phone
+    // with no hardware AEC from one with it; whether the phone exposes the
+    // separate effects is a hint, collected here before any behaviour leans on
+    // it. Not proof either way: many vendors cancel inside the HAL under the
+    // preset and report no effect. Logged as each call's audio comes up, just
+    // ahead of the SDK's "TX chain" line for that call.
+    private fun logPlatformEffects() {
+        val aec = runCatching { AcousticEchoCanceler.isAvailable() }.getOrDefault(false)
+        val ns = runCatching { NoiseSuppressor.isAvailable() }.getOrDefault(false)
+        Log.i(TAG, "platform effects: AcousticEchoCanceler.isAvailable=$aec " +
+                   "NoiseSuppressor.isAvailable=$ns " +
+                   "(${Build.MANUFACTURER} ${Build.MODEL}, API ${Build.VERSION.SDK_INT})")
     }
 
     // ── Audio focus ─────────────────────────────────────────────────────
@@ -311,5 +334,7 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
          * own handover ladder (1/2/4/8s, netmon.c) would notice.
          */
         const val NETWORK_COALESCE_MS = 400L
+
+        const val TAG = "EchoSDK"
     }
 }

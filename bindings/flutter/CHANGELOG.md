@@ -1,8 +1,54 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+Defaults changed (see **Changed** below) and `MediaStats` grew, hence the minor
+bump.
+
+### Upgrading
+
+- Native code compiled against the 1.0.x `echosdk.h` must be rebuilt:
+  `echosdk_call_get_stats()` fills the stats struct at its new, larger size,
+  so a caller built against the old header has memory written past the end of
+  its struct. Dart code is unaffected — the FFI bindings in this package match
+  the libraries it ships.
 
 ### Fixed
+
+- **iOS app-owned audio ran the SDK's noise gate, AGC and echo suppressor on
+  top of VoiceProcessingIO.** `setAec(true)` counted as asking for the
+  suppressor, and the SDK took an app-owned device for a raw microphone. Only
+  `setAecMode(suppressor)` asks for it now, and the shipped engines (iOS and
+  Android) tell the SDK their capture runs through the platform voice path, so
+  its NS and AGC stay off. On an iPhone with NS, AGC and AEC all on, the TX
+  chain log line shows all three off. Requires the refreshed `jniLibs` and
+  xcframework in this release.
+
+- **Accounts created with the default codec list offered no Opus**, so calls
+  went out G.711, since the SDK began registering Opus mono. Requires the
+  refreshed native libraries.
+
+- **Audio after packet loss.** An isolated lost packet is rebuilt from the next
+  packet's FEC instead of sometimes being skipped; a packet that arrives after
+  its slot was already concealed is dropped instead of being spliced into the
+  concealment and adding its length to the delay for good; concealment of a
+  stopped stream lasts 1 s at every ptime (it was 3 s at 60 ms); and a mid-call
+  codec change no longer logs a decode error on every audio callback until the
+  new codec's first packet. Requires the refreshed native libraries.
+
+- **Opus settings carried across a re-init:** one `EchoSDK.init` with mono, a
+  low complexity or a pinned `opusExpectedLossPct` left them in place for
+  every later init.
+
+- **With two calls up, the echo of one far end was not ducked on the other
+  call.**
+
+- **`MediaStats.fecActive` read true on a congested link with
+  `opusExpectedLossPct` pinned**, where the encoder codes no FEC below the
+  bitrate floor.
+
+- **An out-of-range or NaN `aecSuppressionLevel` at init** made the
+  suppressor output NaN audio.
 
 - A call whose media came up slowly was diagnosed as stalled, "repaired" with
   an ICE restart, and left permanently silent. The stall clock counted the ICE
@@ -26,6 +72,11 @@
   release.
 
 ### Added
+
+- Android logs `AcousticEchoCanceler.isAvailable()` and
+  `NoiseSuppressor.isAvailable()` (tag `EchoSDK`) as each call's audio comes
+  up, to collect field data on which phones expose them. Nothing acts on it
+  yet.
 
 - `NetworkStage.callIceFailed` — ICE finished its connectivity checks with no
   usable candidate pair, so the media path was never validated. Distinct from
@@ -120,6 +171,10 @@
   and pjsua's `PJSUA_ICE_TRANSPORT_INIT_TIMEOUT` do.
 
 ### Changed
+
+- On an app-owned device the SDK's echo suppressor runs only when asked for
+  with `setAecMode(AecMode.suppressor)`, on desktop too; it used to come on
+  there by itself whenever AEC was on.
 
 - The example app now shows **In call · M:SS** under the peer name, ticking
   once a second, and `On hold · M:SS` while held. It previously showed only the

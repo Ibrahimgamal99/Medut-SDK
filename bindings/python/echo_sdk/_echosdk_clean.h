@@ -627,6 +627,7 @@ typedef void (*echosdk_call_iter_fn)(echosdk_call_handle_t call, void *arg);
  int echosdk_audio_external_format(uint32_t *srate, uint8_t *ch,
                                                   uint32_t *ptime);
  bool echosdk_audio_external_is_active(void);
+ void echosdk_audio_external_set_voice_path(bool active);
 
 typedef struct {
  char name[128];
@@ -640,9 +641,9 @@ typedef struct {
                                                       int max_count);
  void echosdk_set_aec(bool enable);
  int echosdk_set_aec_mode(echosdk_aec_mode_t mode);
-
  void echosdk_set_aec_suppression_level(float level);
  void echosdk_set_ns(bool enable);
+
  void echosdk_set_agc(bool enable);
 
  void echosdk_set_mic_gain_db(float db);

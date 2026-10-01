@@ -6,7 +6,98 @@ All notable changes to EchoSDK are documented here.
 
 ## [Unreleased]
 
+### Upgrading
+
+- **C code built against an older `echosdk.h` must be rebuilt.**
+  `echosdk_ev_media_stats_t` grew in this release (the ICE and FEC fields),
+  and `echosdk_call_get_stats()` fills it at the new size: a caller compiled
+  against the old header gets memory written past the end of its struct.  The
+  Dart, Python and C++ bindings in this tree match the header they ship with.
+
 ### Fixed
+
+- **iOS: the SDK's noise gate, AGC and echo suppressor ran on top of
+  VoiceProcessingIO on an app-owned device.**  Two causes.
+  `echosdk_set_aec(true)` was taken as asking for the suppressor, through the
+  setter it shares with `echosdk_set_aec_mode()`; now only
+  `set_aec_mode(SUPPRESSOR)` is that request.  And the SDK assumed an app-owned
+  device was a raw microphone, when both reference engines capture through the
+  platform voice path (VPIO on iOS, `VOICE_COMMUNICATION` on Android).  The new
+  `echosdk_audio_external_set_voice_path()` lets the device say so, and both
+  engines call it from their start and stop.  On an iPhone with NS, AGC and AEC
+  all on, the TX chain line reads `ns=off (app-owned voice path) agc=off
+  (app-owned voice path) aec=off (app-owned voice path)`.  The same rule closes
+  an Android hole: once the app owns the device, a stale "recorder has no AEC"
+  report from the SDK's own driver can no longer switch the suppressor on.
+
+- **Accounts created with the default codec list had no Opus.**  Since the SDK
+  started registering Opus mono (`opus_stereo no` unless `cfg.opus.stereo`),
+  the account asked baresip for `opus/48000/2`, which matches on the channel
+  count, found nothing, and offered G.711 only (logged as `account: audio codec
+  not found: opus/48000/2`).  The account now names Opus with the channel count
+  it was registered with; the SDP still says `opus/48000/2`, as RFC 7587 wants.
+
+- **An isolated lost packet was skipped instead of rebuilt from the next
+  packet's FEC.**  The arrival-side concealment floored the buffer's shortfall
+  to whole frames, so a packet arriving a few ms early, or a device reading in
+  40 ms bursts, made it come out one short, and the frame FEC could rebuild was
+  dropped.  It now rounds, always keeps the last lost frame, and skips only the
+  frames playout concealment has already played (concealing those again
+  doubled the slot and added a frame of delay for good).  In
+  `test/unit/test_aurecv_plc.c`, every single loss at device periods of 10, 20
+  and 40 ms and arrival 0-10 ms early is concealed, 770 of 770, with the delay
+  back within a frame.
+
+- **A late packet was spliced into concealment, and its length stayed on the
+  delay.**  When playout concealment had already played a packet's slot, the
+  packet was still decoded and inserted in timestamp order.  It is now
+  dropped, as NetEQ does — bounded so that an RTP timestamp wrap is not taken
+  for a late packet, and only while the buffer held a whole device read: a
+  shallower buffer runs dry because the device outran it, and dropping there
+  had every other slot concealed for the rest of the call.
+
+- **Playout concealment ran 3 s at 60 ms ptime** (the 1 s cap counted 50
+  frames); it is now 1 s at every ptime.  **After a mid-call codec change**
+  the audio thread logged a decode error on every device callback until the new
+  codec's first packet: the concealment state carried over.  It now starts
+  over.
+
+- **Opus settings carried across a re-init.**  The opus module only wrote the
+  globals its config keys were present for, so one `echosdk_init()` with
+  complexity 0 or a pinned expected loss left them for every later one, and one
+  mono init made every later init mono.  The module now starts from its
+  defaults each time.
+
+- **With two calls up, the echo of one far end was not ducked on the other.**
+  Each call's suppressor ducked for its own far end only, but the speaker
+  plays both.  Each TX now ducks for the loudest far end of all live calls.
+
+- **A one-frame echo blip from a timestamp race in the suppressor.**  Its age
+  was unsigned, so an RX thread storing a newer timestamp between TX's clock
+  read and its own made the envelope decay to nothing for a frame.
+
+- **`aec_suppression_level` out of range or NaN at init** produced NaN gain
+  on every ducked frame; init now clamps it as the setter does, and both catch
+  NaN.
+
+- **With `opus_expected_loss_pct` pinned, a congested link logged "FEC off"
+  and `fec_active` stayed true.**  A pinned level stays set, but below the FEC
+  floor the encoder codes none: the log now says so, and `fec_active` reads
+  false while congested.
+
+- **Hardened desktop builds failed the WebRTC symbol check** on
+  `__stack_chk_fail` and the `_FORTIFY_SOURCE` `__*_chk` helpers, which are
+  libc's.
+
+- **Build hygiene.**  `scripts/fetch-third-party.{sh,ps1}` now move a tree
+  that is not at the pinned revision (with `checkout -f`, which also discards
+  hand edits under `third_party/`) instead of keeping whatever was there; the
+  patch steps re-run when their scripts or the checkout's `.git/HEAD` change,
+  so an existing build dir no longer keeps a stale sysroot; and the baresip
+  patches nothing in the SDK calls into (Opus FEC, burst concealment, Opus
+  re-init) each define an `echosdk-patch` string that `src/core.c` links
+  against and logs at init.  A tree without one fails to link, and
+  `strings libechosdk.so | grep echosdk-patch` shows what a binary carries.
 
 - **WebRTC echo cancellation removed no echo.**  baresip's `webrtc_aec`
   module creates the WebRTC processor and never switches its canceller on —
@@ -264,6 +355,14 @@ All notable changes to EchoSDK are documented here.
 
 ### Changed
 
+- **On an app-owned device the suppressor runs only when asked for, on every
+  platform.**  A desktop app that uses `echosdk_audio_use_external()` used to
+  get the suppressor whenever AEC was on, since no platform canceller was
+  under it; it now gets it only from
+  `echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR)`, as `echosdk.h` already
+  documented.  Apps that relied on the old behaviour add that call after
+  taking the device.
+
 - **NS and AGC never run on top of the phone's own.**  While Android
   captures through `VOICE_COMMUNICATION` or iOS through `VoiceProcessingIO`,
   `ns`/`agc` stay off whatever the config says (the TX-chain log line says
@@ -366,6 +465,16 @@ All notable changes to EchoSDK are documented here.
   the same bug, on the accounts where it happened to be invisible.
 
 ### Added
+
+- **`echosdk_audio_external_set_voice_path(bool)`** — an app-owned device
+  says it captures through the platform voice path, so the SDK keeps its own
+  NS and AGC off on top of it.  Call it from the device's start and stop.
+
+- **Android: `AcousticEchoCanceler.isAvailable()` and
+  `NoiseSuppressor.isAvailable()` are logged** (tag `EchoSDK`) as each call's
+  audio comes up.  Field data only, nothing acts on it yet: the preset
+  readback cannot tell a phone with no hardware AEC from one with it, and a
+  false here does not prove there is none either.
 
 - **`ECHOSDK_EV_MEDIA_STATS` carries the ICE view of the media path**:
   `ice_state`, `ice_local_type` / `ice_remote_type`, `ice_local_addr` /

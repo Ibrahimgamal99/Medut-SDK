@@ -116,3 +116,15 @@ JNIEXPORT jboolean JNI_FN(nativeIsActive)(JNIEnv *env, jclass cls)
 	(void)env; (void)cls;
 	return echosdk_audio_external_is_active() ? JNI_TRUE : JNI_FALSE;
 }
+
+/**
+ * Whether the app's capture runs through the VOICE_COMMUNICATION source, i.e.
+ * the platform's AEC/NS/AGC.  From the stream start and stop, never from the
+ * capture loop: it logs.
+ */
+JNIEXPORT void JNI_FN(nativeSetVoicePath)(JNIEnv *env, jclass cls,
+                                          jboolean active)
+{
+	(void)env; (void)cls;
+	echosdk_audio_external_set_voice_path(active == JNI_TRUE);
+}

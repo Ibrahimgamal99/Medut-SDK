@@ -171,12 +171,22 @@ void bsdk_acct_cfg_deep_free(struct echosdk_account *acct)
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
+/* Opus as baresip's account codec lookup must spell it.  The lookup matches
+ * the channel count the opus module registered with, which is 1 unless
+ * cfg.opus.stereo (core.c writes opus_stereo either way) — not the /2 the
+ * SDP rtpmap always carries.  Spelled /2 against a mono module, the account
+ * got no Opus at all and every call fell back to G.711. */
+static const char *opus_codec_str(void)
+{
+	return g_bsdk.cfg.opus.stereo ? "opus/48000/2" : "opus/48000/1";
+}
+
 /* Normalize a codec name/alias to the "name/rate/channels" format baresip expects.
  * Returns a static or caller-guaranteed string, or NULL for empty input. */
 static const char *normalize_codec_name(const char *name)
 {
 	if (!name || !name[0]) return NULL;
-	if (strcasecmp(name, "opus")               == 0) return "opus/48000/2";
+	if (strcasecmp(name, "opus")               == 0) return opus_codec_str();
 	if (strcasecmp(name, "ulaw")               == 0 ||
 	    strcasecmp(name, "g711u")              == 0 ||
 	    strcasecmp(name, "pcmu")               == 0) return "PCMU/8000/1";
@@ -202,7 +212,7 @@ static const char *normalize_codec_name(const char *name)
  * (wideband), G.711 as the universally-interoperable fallback.  Both profiles
  * compile exactly these two codec modules — see cmake/modules-{desktop,mobile}
  * .cmake — so this list is always fully satisfiable. */
-#define BSDK_DEFAULT_AUDIO_CODECS "opus/48000/2,PCMU/8000/1,PCMA/8000/1"
+#define BSDK_DEFAULT_AUDIO_CODECS_G711 "PCMU/8000/1,PCMA/8000/1"
 
 /* Build codec list string from enum array: "opus/48000/2,PCMU/8000/1" */
 static void codec_list_str(const echosdk_codec_t *codecs, int count,
@@ -212,7 +222,7 @@ static void codec_list_str(const echosdk_codec_t *codecs, int count,
 	for (int i = 0; i < count && i < 8; i++) {
 		const char *name;
 		switch (codecs[i]) {
-		case ECHOSDK_CODEC_OPUS: name = "opus/48000/2";  break;
+		case ECHOSDK_CODEC_OPUS: name = opus_codec_str(); break;
 		case ECHOSDK_CODEC_PCMU: name = "PCMU/8000/1";   break;
 		case ECHOSDK_CODEC_PCMA: name = "PCMA/8000/1";   break;
 		case ECHOSDK_CODEC_G722:    name = "G722/8000/1";    break;
@@ -480,8 +490,9 @@ static int configure_baresip_account(struct echosdk_account *acct)
 
 		/* Nothing configured anywhere, or every configured name was empty */
 		if (!codecs[0]) {
-			str_ncpy(codecs, BSDK_DEFAULT_AUDIO_CODECS,
-			         sizeof(codecs));
+			(void)re_snprintf(codecs, sizeof(codecs), "%s,%s",
+			                  opus_codec_str(),
+			                  BSDK_DEFAULT_AUDIO_CODECS_G711);
 		}
 
 		if (codecs[0]) {

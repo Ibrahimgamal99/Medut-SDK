@@ -87,3 +87,7 @@ desktop.ini
 /test/unit/test_ice_sdp
 /test/unit/test_dispatch_starve
 /test/unit/test_sip_status
+/test/unit/test_audio_processing
+/test/unit/test_audio_processing_webrtc
+/test/unit/webrtc_apm_test.o
+/test/unit/test_aurecv_plc

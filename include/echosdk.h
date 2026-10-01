@@ -636,7 +636,10 @@ typedef struct {
 	 * is sized for.  Switched on and off from the peer's receiver reports:
 	 * on at 4% loss (2% in two reports running), off after 10 s under 1%
 	 * (see opus_expected_loss_pct).
-	 * False / 0 for G.711, or a peer that did not ask for FEC. */
+	 * False / 0 for G.711, or a peer that did not ask for FEC.  Also false
+	 * while the link is congested and the bitrate is below the FEC floor,
+	 * where the encoder codes none — with a pinned opus_expected_loss_pct
+	 * too, whose level fec_level_pct still reports. */
 	bool     fec_active;
 	uint32_t fec_level_pct;
 } echosdk_ev_media_stats_t;
@@ -1803,11 +1806,14 @@ ECHOSDK_EXPORT int echosdk_account_set_100rel(echosdk_account_handle_t account,
  * VOICE_COMMUNICATION / VoiceProcessingIO on its own side, or expect echo.
  * The SDK's own half-duplex suppressor becomes available as a fallback while
  * the app owns the device, but stays off unless asked for with
- * echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR); it is switched off again when
- * the platform device comes back, so the two cancellers never stack.  NS and
- * AGC follow cfg.ns / cfg.agc while the app owns the device, and stop again
- * when the platform's own come back.  All of it applies to calls already up,
- * from their next frame.
+ * echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR) — on every platform, desktop
+ * included, and echosdk_set_aec(true) is not that request.  It is switched
+ * off again when the platform device comes back, so the two cancellers never
+ * stack.  NS and AGC follow cfg.ns / cfg.agc while the app owns the device,
+ * unless its engine reports the platform's voice path under it
+ * (echosdk_audio_external_set_voice_path), and stop again when the
+ * platform's own come back.  All of it applies to calls already up, from
+ * their next frame.
  *
  * Returns 0, or an errno on failure.
  */
@@ -1854,6 +1860,26 @@ ECHOSDK_EXPORT int echosdk_audio_external_format(uint32_t *srate, uint8_t *ch,
 /** True while a call is capturing or playing through the app-owned device. */
 ECHOSDK_EXPORT bool echosdk_audio_external_is_active(void);
 
+/**
+ * Say whether the app-owned device captures through the platform's voice
+ * path — iOS VoiceProcessingIO, Android's VOICE_COMMUNICATION source — so
+ * the device has already cancelled echo and run its own NS and AGC before
+ * echosdk_audio_external_push() sees a sample.
+ *
+ * While true, the SDK's noise gate and AGC stay off, as they do on its own
+ * mobile drivers: stacked on the platform's they only cost speech.  The
+ * suppressor is not affected; on an app-owned device it runs only when asked
+ * for with echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).  False, the default,
+ * means a raw microphone.
+ *
+ * Call it from the device's start and stop: true once capture is running,
+ * false when it stops.  Never from the audio callback — it logs.  Safe from
+ * any other thread, and does not wait on the SIP thread.  Reset to false by
+ * echosdk_audio_use_external(false) and by echosdk_init(); ignored while the
+ * SDK's own device is in use.
+ */
+ECHOSDK_EXPORT void echosdk_audio_external_set_voice_path(bool active);
+
 /* ── Audio device enumeration ─────────────────────────────────────────────── */
 
 typedef struct {
@@ -1890,6 +1916,8 @@ ECHOSDK_EXPORT int echosdk_audio_list_output_devices(echosdk_audio_device_t *dev
  * aec_mode, or the suppressor if WEBRTC fell back.
  * set_aec(false) → AEC_OFF; set_aec(true) → restores init mode.
  * Back-compat: behavior is identical to the former bool aec API.
+ * Not a request for the suppressor on an app-owned device; that is
+ * echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).
  */
 ECHOSDK_EXPORT void echosdk_set_aec(bool enable);
 
@@ -1900,8 +1928,10 @@ ECHOSDK_EXPORT void echosdk_set_aec(bool enable);
  * ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
  *
  * WEBRTC mode with AEC off keeps WebRTC's noise suppressor running if ns is
- * on.  While the app owns the device (echosdk_audio_use_external) on Android
- * or iOS, SUPPRESSOR here is also the app asking for the suppressor there.
+ * on.  While the app owns the device (echosdk_audio_use_external), on any
+ * platform, SUPPRESSOR here is also the app asking for the suppressor there —
+ * the only way it runs on an app-owned device.  The request lapses when the
+ * platform device comes back.
  */
 ECHOSDK_EXPORT int echosdk_set_aec_mode(echosdk_aec_mode_t mode);
 
@@ -1925,8 +1955,9 @@ ECHOSDK_EXPORT void echosdk_set_aec_suppression_level(float level);
  * Never on top of the phone's own: while Android captures through the
  * VOICE_COMMUNICATION preset, or iOS through VoiceProcessingIO, the platform
  * already suppresses noise and this stays off (logged).  It applies again
- * while the app owns the device, or on an Android device that refuses the
- * preset.
+ * while the app owns the device — unless the app reports its own voice path
+ * (echosdk_audio_external_set_voice_path) — or on an Android device that
+ * refuses the preset.
  */
 ECHOSDK_EXPORT void echosdk_set_ns(bool enable);
 

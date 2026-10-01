@@ -28,8 +28,20 @@ for dep in "${DEPS[@]}"; do
   IFS='|' read -r name url rev marker <<<"${dep}"
   dir="${ROOT}/third_party/${name}"
 
+  # A tree that is already here must also be at the pinned revision: a pin
+  # bump used to leave every existing checkout on the old one, building
+  # sources nobody had reviewed.  Moving it uses checkout -f, which drops the
+  # EchoSDK patches the build applied (it re-applies them: the patch steps
+  # depend on .git/HEAD) — and also any hand edits under third_party/.
   if [[ -f "${dir}/${marker}" ]]; then
-    echo "==> ${name}: present"
+    have=$(git -C "${dir}" rev-parse HEAD 2>/dev/null || true)
+    if [[ "${have}" == "${rev}" ]]; then
+      echo "==> ${name}: present"
+      continue
+    fi
+    echo "==> ${name}: ${have:0:12} -> ${rev:0:12}"
+    git -C "${dir}" fetch -q --depth 1 origin "${rev}"
+    git -C "${dir}" checkout -q -f FETCH_HEAD
     continue
   fi
 

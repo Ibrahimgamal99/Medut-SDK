@@ -2,6 +2,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#include <dlfcn.h>
 
 /* The shipped xcframework carries no headers or modulemap (build-ios.sh's
  * make_framework copies only the dylib), so declare what we call. The symbols
@@ -11,6 +12,28 @@ extern int  echosdk_audio_external_pull(int16_t *pcm, size_t nsamp);
 extern int  echosdk_audio_external_format(uint32_t *srate, uint8_t *ch,
                                           uint32_t *ptime);
 extern bool echosdk_audio_external_is_active(void);
+
+/* Tell the SDK VPIO is under the microphone, so its own NS and AGC stay off
+ * (stacked on Apple's they only cost speech). Looked up at run time rather
+ * than linked: echosdk_audio_external_set_voice_path() is newer than some
+ * vendored frameworks, and against one of those the plugin must still link —
+ * the SDK then keeps running its NS/AGC on top, as it always did. Called from
+ * unit start and teardown on self.queue, never from RenderCB. */
+static void EchoSDKReportVoicePath(bool active)
+{
+	static void (*fn)(bool);
+	static dispatch_once_t once;
+
+	dispatch_once(&once, ^{
+		fn = (void (*)(bool))dlsym(RTLD_DEFAULT,
+		                           "echosdk_audio_external_set_voice_path");
+		if (!fn)
+			NSLog(@"[EchoSDK] SDK predates set_voice_path; its NS/AGC "
+			      @"will run on top of VPIO");
+	});
+	if (fn)
+		fn(active);
+}
 
 /* Poll interval for the format watcher. There is no "media is up" event in the
  * SDK: call state "established" is a SIP state and races the device, and a
@@ -361,6 +384,8 @@ static OSStatus RenderCB(void *inRefCon,
 	}
 
 	self.running = YES;
+	/* Capture now goes through VPIO's AEC, NS and AGC. */
+	EchoSDKReportVoicePath(true);
 	NSLog(@"[EchoSDK] app-owned audio open: %u Hz %u ch ptime=%u ms (VPIO)",
 	      srate, ch, ptime);
 }
@@ -399,6 +424,8 @@ static NSString *EchoSDKPublicErrorCode(NSString *stage)
 
 - (void)teardownUnit
 {
+	BOOL wasRunning = self.running;
+
 	self.running = NO;
 
 	if (_unit) {
@@ -407,6 +434,8 @@ static NSString *EchoSDKPublicErrorCode(NSString *stage)
 		AudioComponentInstanceDispose(_unit);
 		_unit = NULL;
 	}
+	if (wasRunning)
+		EchoSDKReportVoicePath(false);
 	/* Only after the unit is disposed: the render callback must not be able to
 	 * run against freed buffers. */
 	free(_micList);

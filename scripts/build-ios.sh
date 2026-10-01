@@ -250,6 +250,13 @@ for SLICE in device simulator; do
       exit 1
     fi
   done
+  # The plugin looks this one up with dlsym (so it still links against an
+  # older framework), which means a missing export fails silently at run
+  # time: the SDK's NS/AGC back on top of VoiceProcessingIO.
+  if ! grep -q " _echosdk_audio_external_set_voice_path$" <<<"${GLOBALS}"; then
+    echo "ERROR: ${SLICE}: _echosdk_audio_external_set_voice_path not exported — app-owned audio would stack the SDK's NS/AGC on VPIO" >&2
+    exit 1
+  fi
 done
 
 # ---------------------------------------------------------------------------

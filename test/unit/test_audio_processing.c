@@ -10,10 +10,12 @@
  * milliseconds and dB, at more than one ptime.
  *
  * Also pinned: the on/off rules (the phone's voice path, the app-owned
- * device, the suppressor request that goes with it), that a switch reaches
- * a call already up on its next frame, and that each call's TX and RX stay
+ * device and the voice path its engine reports, the suppressor request that
+ * goes with it and that set_aec is not), that a switch reaches
+ * a call already up on its next frame, that each call's TX and RX stay
  * paired — including after the far end holds and resumes us, when baresip
- * rebuilds only the TX side.
+ * rebuilds only the TX side — and that with two calls up each TX ducks for
+ * the louder far end, since the speaker plays both.
  *
  * Links src/audio_processing.c against libre only.  baresip's filter
  * registry, logging and the two platform hooks are stubbed below, and
@@ -50,10 +52,15 @@ static void log_va(const char *fmt, va_list ap)
 		re_vfprintf(stderr, fmt, ap);
 }
 
+static char g_last_info[512];   /* the last info() line, for the log tests */
+
 void _info(bool safe, const char *fmt, ...)
 {
 	va_list ap;
 	(void)safe;
+	va_start(ap, fmt);
+	(void)re_vsnprintf(g_last_info, sizeof(g_last_info), fmt, ap);
+	va_end(ap);
 	va_start(ap, fmt);
 	log_va(fmt, ap);
 	va_end(ap);
@@ -436,10 +443,27 @@ static void test_suppressor_rules(void)
 	bsdk_ap_effective(&e);
 	CHECK(!e.suppressor, "app-owned device switched the suppressor on");
 
-	/* ...asking for it does. */
+	/* ...nor does set_aec(true), which apps call to mean "keep echo
+	 * control on" — on iOS that put it on top of VoiceProcessingIO... */
 	bsdk_ap_set_aec(true);
 	bsdk_ap_effective(&e);
+	CHECK(!e.suppressor, "set_aec(true) while app-owned switched it on");
+
+	/* ...asking for it with set_aec_mode does. */
+	bsdk_ap_set_aec_mode(true);
+	bsdk_ap_effective(&e);
 	CHECK(e.suppressor, "requested while app-owned: still off");
+
+	/* The request outlives a plain off/on, but not set_aec_mode(OFF). */
+	bsdk_ap_set_aec(false);
+	bsdk_ap_set_aec(true);
+	bsdk_ap_effective(&e);
+	CHECK(e.suppressor, "set_aec off/on dropped the request");
+	bsdk_ap_set_aec_mode(false);
+	bsdk_ap_set_aec(true);
+	bsdk_ap_effective(&e);
+	CHECK(!e.suppressor, "set_aec_mode(OFF) left the request in place");
+	bsdk_ap_set_aec_mode(true);
 
 	/* Platform device back: off, and the request does not survive. */
 	g_external = false;
@@ -460,14 +484,124 @@ static void test_suppressor_rules(void)
 	bsdk_ap_effective(&e);
 	CHECK(e.suppressor, "set_aec(true): still off");
 
+	/* A desktop app on its own device gets it only by asking, too: no
+	 * platform canceller says nothing about the app's device. */
+	g_external = true;
+	bsdk_ap_external_changed(true);
+	bsdk_ap_effective(&e);
+	CHECK(!e.suppressor, "desktop, app-owned, not asked: suppressor on");
+	bsdk_ap_set_aec_mode(true);
+	bsdk_ap_effective(&e);
+	CHECK(e.suppressor, "desktop, app-owned, asked: suppressor off");
+	g_external = false;
+	bsdk_ap_external_changed(false);
+
+	bsdk_audio_processing_close();
+}
+
+/* external on/off x voice path on/off x explicit request on/off.  Off the
+ * app-owned device, "voice path" is the platform driver's and a request
+ * cannot be made (set_aec_mode records one only while app-owned). */
+static void test_voice_path_matrix(void)
+{
+	struct bsdk_ap_effective e;
+
+	for (int ext = 0; ext < 2; ext++)
+	for (int vp = 0; vp < 2; vp++)
+	for (int req = 0; req < 2; req++) {
+		init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+		g_external = ext;
+		g_has_aec  = !ext && vp;
+		bsdk_ap_external_changed(ext);
+		bsdk_ap_external_voice_path(ext && vp);
+		bsdk_ap_set_aec_mode(true);
+		if (!req)
+			bsdk_ap_set_aec_mode(false), bsdk_ap_set_aec(true);
+		bsdk_ap_effective(&e);
+
+		bool want_ns   = !vp;
+		bool want_supp = ext ? req : !vp;
+		CHECK(e.ns == want_ns && e.agc == want_ns && e.suppressor == want_supp,
+		      "ext=%d vp=%d req=%d: ns=%d agc=%d supp=%d, want %d/%d/%d",
+		      ext, vp, req, e.ns, e.agc, e.suppressor,
+		      want_ns, want_ns, want_supp);
+		bsdk_audio_processing_close();
+	}
+	g_external = false;
+	g_has_aec  = false;
+}
+
+/* What the log says on an iPhone with NS, AGC and AEC all on and the app's
+ * VPIO engine running — the line a field report is read from. */
+static void test_tx_chain_log_app_voice_path(void)
+{
+	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	g_has_aec  = true;           /* audiounit was the SDK's own driver */
+	g_external = true;
+	bsdk_ap_external_changed(true);
+	CHECK(strstr(g_last_info, "ns=gate agc=on "
+	             "aec=off (app-owned device; set_aec_mode to enable)") != NULL,
+	      "app-owned, raw mic: \"%s\"", g_last_info);
+
+	bsdk_ap_external_voice_path(true);
+	CHECK(strstr(g_last_info, "[app voice path up]") &&
+	      strstr(g_last_info, "ns=off (app-owned voice path) "
+	             "agc=off (app-owned voice path) "
+	             "aec=off (app-owned voice path)") != NULL,
+	      "app-owned, VPIO: \"%s\"", g_last_info);
+
+	/* set_aec(true), what the plugin calls, changes none of it. */
+	bsdk_ap_set_aec(true);
+	CHECK(strstr(g_last_info, "aec=off (app-owned voice path)") != NULL,
+	      "set_aec(true) on VPIO: \"%s\"", g_last_info);
+
+	g_external = false;
+	g_has_aec  = false;
+	bsdk_audio_processing_close();
+}
+
+/* The app's voice-path report lasts only while its device does. */
+static void test_voice_path_reset(void)
+{
+	struct bsdk_ap_effective e;
+
+	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	g_external = true;
+	bsdk_ap_external_changed(true);
+	bsdk_ap_external_voice_path(true);
+	bsdk_ap_effective(&e);
+	CHECK(!e.ns && !e.agc, "app voice path: ns=%d agc=%d", e.ns, e.agc);
+
+	/* Platform device back, then the app's again with its engine not yet
+	 * up: a raw microphone until the engine says otherwise. */
+	g_external = false;
+	bsdk_ap_external_changed(false);
+	g_external = true;
+	bsdk_ap_external_changed(true);
+	bsdk_ap_effective(&e);
+	CHECK(e.ns && e.agc, "voice path survived the platform device: ns=%d agc=%d",
+	      e.ns, e.agc);
+
+	/* ...and a re-init forgets it. */
+	bsdk_ap_external_voice_path(true);
+	bsdk_audio_processing_close();
+	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	g_external = true;
+	bsdk_ap_effective(&e);
+	CHECK(e.ns && e.agc, "voice path survived re-init: ns=%d agc=%d",
+	      e.ns, e.agc);
+
+	g_external = false;
 	bsdk_audio_processing_close();
 }
 
 /* ── Suppressor ──────────────────────────────────────────────────────────── */
 
-/* Each call ducks for its own far end, not for whichever call last had
- * audio (the level used to be one global). */
-static void test_suppressor_per_call(void)
+/* Two calls up at once: the speaker plays both far ends, so each call's
+ * microphone hears both echoes, and each TX ducks for the louder one — not
+ * for whichever call's frame came last (the level used to be one global, so
+ * a silent far end's frame un-ducked a loud one's). */
+static void test_suppressor_across_calls(void)
 {
 	struct tcall a, b;
 	size_t n = SR / 1000 * 20;
@@ -485,10 +619,92 @@ static void test_suppressor_per_call(void)
 		att_b = tx_frame(&b, n, -30.0f);
 	}
 	CHECK(att_a <= -15.0, "far end talking: A only %.1f dB down", att_a);
-	CHECK(att_b > -0.5, "B ducked %.1f dB for A's far end", att_b);
+	CHECK(att_b <= -15.0, "A's far end in B's mic: B only %.1f dB down", att_b);
 
+	/* B is held: no RX frames.  A's far end stops too; both come back,
+	 * B's own envelope having aged out with no frame to refresh it. */
+	for (int t = 0; t < 600; t += 20) {
+		g_now_ms += 20;
+		rx_frame(&a, n, -100.0f);
+		att_a = tx_frame(&a, n, -30.0f);
+		att_b = tx_frame(&b, n, -30.0f);
+	}
+	CHECK(att_a > -1.0 && att_b > -1.0,
+	      "both far ends quiet: A %.1f, B %.1f dB down", att_a, att_b);
+
+	/* A gone: its slot no longer counts.  B's far end alone ducks B. */
+	for (int t = 0; t < 300; t += 20) {
+		g_now_ms += 20;
+		rx_frame(&a, n, -20.0f);
+		tx_frame(&a, n, -30.0f);
+	}
 	tcall_close(&a);
+	att_b = tx_frame(&b, n, -30.0f);
+	CHECK(att_b > -1.0, "B ducked %.1f dB for a call that has ended", att_b);
+
 	tcall_close(&b);
+	bsdk_audio_processing_close();
+}
+
+/* More calls than envelope slots: the extra one still ducks for its own far
+ * end, and for every call that has a slot. */
+static void test_suppressor_slots_full(void)
+{
+	enum { NCALLS = 9 };
+	static int ids[NCALLS];
+	struct tcall c[NCALLS];
+	size_t n = SR / 1000 * 20;
+	double att = 0;
+
+	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	for (int i = 0; i < NCALLS; i++)
+		tcall_open(&c[i], (const struct audio *)&ids[i]);
+
+	for (int t = 0; t < 300; t += 20) {
+		g_now_ms += 20;
+		rx_frame(&c[NCALLS - 1], n, -20.0f);
+		att = tx_frame(&c[NCALLS - 1], n, -30.0f);
+	}
+	CHECK(att <= -15.0, "call past the slots: own far end only %.1f dB", att);
+
+	for (int t = 0; t < 600; t += 20) {
+		g_now_ms += 20;
+		rx_frame(&c[NCALLS - 1], n, -100.0f);
+		rx_frame(&c[0], n, -20.0f);
+		att = tx_frame(&c[NCALLS - 1], n, -30.0f);
+	}
+	CHECK(att <= -15.0, "call past the slots: call 0's far end only %.1f dB",
+	      att);
+
+	for (int i = 0; i < NCALLS; i++)
+		tcall_close(&c[i]);
+	bsdk_audio_processing_close();
+}
+
+/* The RX thread stores a newer timestamp than the clock TX read a moment
+ * before.  The age then reads -1 ms; unsigned, that was 49 days, and the
+ * envelope decayed to nothing for that frame: one frame of echo through. */
+static void test_suppressor_age_race(void)
+{
+	struct tcall c;
+	size_t n = SR / 1000 * 20;
+	double att = 0;
+
+	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	tcall_open(&c, AU(0));
+	for (int t = 0; t < 300; t += 20) {
+		g_now_ms += 20;
+		rx_frame(&c, n, -20.0f);
+		tx_frame(&c, n, -30.0f);
+	}
+	g_now_ms += 20;
+	rx_frame(&c, n, -20.0f);
+	g_now_ms -= 1;               /* TX read the clock first */
+	att = tx_frame(&c, n, -30.0f);
+	CHECK(att <= -15.0, "RX stored a newer stamp: TX only %.1f dB down", att);
+	g_now_ms += 1;
+
+	tcall_close(&c);
 	bsdk_audio_processing_close();
 }
 
@@ -597,6 +813,39 @@ static void test_suppression_level_zero(void)
 	CHECK(att > -0.1, "level 0 still attenuates %.2f dB", att);
 	tcall_close(&c);
 	bsdk_audio_processing_close();
+}
+
+/* The init path clamps like the setter, NaN included: a NaN floor made every
+ * ducked frame NaN, i.e. whatever the float-to-int16 cast gives for it. */
+static void test_suppression_level_clamped_at_init(void)
+{
+	static const struct { float lvl; double lo, hi; } cases[] = {
+		{ NAN,  -0.1,  0.1 },   /* → 0: no attenuation */
+		{ -1.f, -0.1,  0.1 },
+		{ 2.0f, -17.0, -15.0 }, /* → 1: −16.5 dB floor */
+	};
+	size_t n = SR / 1000 * 20;
+
+	for (size_t k = 0; k < RE_ARRAY_SIZE(cases); k++) {
+		struct tcall c;
+		double att = 0;
+
+		g_has_aec  = false;
+		g_external = false;
+		bsdk_audio_processing_init(false, false, ECHOSDK_AEC_SUPPRESSOR,
+		                           cases[k].lvl, 0.0f, 0.0f);
+		tcall_open(&c, AU(0));
+		for (int t = 0; t < 300; t += 20) {
+			g_now_ms += 20;
+			rx_frame(&c, n, -20.0f);
+			att = tx_frame(&c, n, -30.0f);
+		}
+		CHECK(att >= cases[k].lo && att <= cases[k].hi,
+		      "init level %g: TX %.2f dB, want [%.1f, %.1f]",
+		      (double)cases[k].lvl, att, cases[k].lo, cases[k].hi);
+		tcall_close(&c);
+		bsdk_audio_processing_close();
+	}
 }
 
 /* ── AGC ─────────────────────────────────────────────────────────────────── */
@@ -763,12 +1012,18 @@ int main(void)
 	test_ns_live_toggle();
 	test_voice_path_veto();
 	test_suppressor_rules();
-	test_suppressor_per_call();
+	test_voice_path_matrix();
+	test_voice_path_reset();
+	test_tx_chain_log_app_voice_path();
+	test_suppressor_across_calls();
+	test_suppressor_slots_full();
+	test_suppressor_age_race();
 	for (size_t i = 0; i < RE_ARRAY_SIZE(ptimes); i++)
 		test_suppressor_release(ptimes[i]);
 	test_suppressor_settles_on_far_noise();
 	test_hold_resume_pairing();
 	test_suppression_level_zero();
+	test_suppression_level_clamped_at_init();
 	for (size_t i = 0; i < RE_ARRAY_SIZE(ptimes); i++)
 		test_agc_rate(ptimes[i]);
 #ifdef BSDK_TEST_WEBRTC

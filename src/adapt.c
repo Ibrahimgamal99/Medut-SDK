@@ -536,9 +536,15 @@ static void bitrate_tick(struct echosdk_call *lc,
 		         lc->fec.smooth <= lc->adapt_step_loss * (2.f / 3.f)) {
 			lc->adapt_congested = true;
 			lc->fec_applied     = false;   /* re-apply without FEC */
+			/* A pinned level stays set (fec_level_now()); the
+			 * encoder just codes no FEC at the rates below the
+			 * floor. */
 			info("EchoSDK: congested at %u bps (loss %.1f%%, "
-			     "%.1f%% before): FEC off, floor released\n",
-			     cur, lc->fec.smooth, lc->adapt_step_loss);
+			     "%.1f%% before): %s\n",
+			     cur, lc->fec.smooth, lc->adapt_step_loss,
+			     fec_auto() ? "FEC off, floor released"
+			                : "floor released (FEC pinned, not coded "
+			                  "at this rate)");
 		}
 
 		if (!lc->adapt_congested)

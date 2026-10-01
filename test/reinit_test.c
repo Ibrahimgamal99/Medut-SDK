@@ -48,13 +48,33 @@ static void on_event(const echosdk_event_t *ev, void *ud)
 	(void)ev; (void)ud;
 }
 
+static int stack_up_with(echosdk_config_t *cfg)
+{
+	cfg->log_level = 0;
+	cfg->event_cb  = on_event;
+	return echosdk_init(cfg);
+}
+
 static int stack_up(void)
 {
 	echosdk_config_t cfg;
 	echosdk_config_init(&cfg);
-	cfg.log_level = 0;
-	cfg.event_cb  = on_event;
-	return echosdk_init(&cfg);
+	return stack_up_with(&cfg);
+}
+
+/* Whether the account for AOR resolved Opus from its codec list. */
+static bool account_has_opus(const char *aor)
+{
+	struct ua *ua = uag_find_aor(aor);
+	struct account *acc = ua ? ua_account(ua) : NULL;
+	struct list *l = acc ? account_aucodecl(acc) : NULL;
+
+	for (struct le *le = list_head(l); le; le = le->next) {
+		const struct aucodec *ac = le->data;
+		if (ac && ac->name && !str_casecmp(ac->name, "opus"))
+			return true;
+	}
+	return false;
 }
 
 /* One init → probe → create → shutdown cycle. */
@@ -73,7 +93,8 @@ static void cycle(int n)
 	CHECK(list_count(baresip_aucodecl()) >= 2,
 	      "cycle %d: only %u audio codecs registered\n",
 	      n, list_count(baresip_aucodecl()));
-	CHECK(aucodec_find(baresip_aucodecl(), "opus", 48000, 2) != NULL,
+	/* Any channel count: mono unless cfg.opus.stereo. */
+	CHECK(aucodec_find(baresip_aucodecl(), "opus", 48000, 0) != NULL,
 	      "cycle %d: opus missing\n", n);
 	CHECK(menc_find(baresip_mencl(), "dtls_srtp") != NULL,
 	      "cycle %d: dtls_srtp missing\n", n);
@@ -91,10 +112,63 @@ static void cycle(int n)
 	CHECK(err == 0 && h != NULL,
 	      "cycle %d: account_create with dtls_srtp+ice returned %d\n",
 	      n, err);
+	/* The default codec list must resolve Opus against the module as it
+	 * registered: spelled opus/48000/2 against a mono module, the account
+	 * silently had none and every call went out G.711. */
+	CHECK(account_has_opus("sip:100@192.0.2.1"),
+	      "cycle %d: the account resolved no Opus\n", n);
 	if (h)
 		echosdk_account_destroy(h);
 
 	echosdk_shutdown();
+}
+
+/* The opus module reads its settings into globals once per init, and used to
+ * write only the ones a key was present for: a later init that left a key
+ * out kept the earlier value, and one mono init made every later one mono.
+ * (cmake/patch-baresip-sources.cmake, job 7.) */
+extern uint32_t opus_complexity;     /* modules/opus/opus.c */
+extern int32_t  opus_packet_loss;
+
+static void test_opus_settings_per_init(void)
+{
+	static const struct {
+		bool     stereo;
+		int      complexity;      /* -1: left at the SDK default */
+		uint32_t pinned_loss;
+		uint8_t  want_ch;
+		uint32_t want_complexity;
+		int32_t  want_loss;
+	} inits[] = {
+		{ true,  0,  20, 2, 0,  20 },
+		{ false, -1, 0,  1, 10, 0  },
+		{ true,  -1, 0,  2, 10, 0  },
+	};
+
+	for (size_t i = 0; i < sizeof(inits) / sizeof(inits[0]); i++) {
+		echosdk_config_t cfg;
+		const struct aucodec *opus;
+
+		echosdk_config_init(&cfg);
+		cfg.opus.stereo             = inits[i].stereo;
+		cfg.opus.complexity         = inits[i].complexity;
+		cfg.opus_expected_loss_pct  = inits[i].pinned_loss;
+		if (stack_up_with(&cfg)) {
+			CHECK(false, "opus init %zu: echosdk_init failed\n", i);
+			continue;
+		}
+		opus = aucodec_find(baresip_aucodecl(), "opus", 48000, 0);
+		CHECK(opus && opus->ch == inits[i].want_ch,
+		      "opus init %zu: %u channels, want %u\n", i,
+		      opus ? opus->ch : 0, inits[i].want_ch);
+		CHECK(opus_complexity == inits[i].want_complexity,
+		      "opus init %zu: complexity %u, want %u\n", i,
+		      opus_complexity, inits[i].want_complexity);
+		CHECK(opus_packet_loss == inits[i].want_loss,
+		      "opus init %zu: expected loss %d, want %d\n", i,
+		      opus_packet_loss, inits[i].want_loss);
+		echosdk_shutdown();
+	}
 }
 
 /* With the registries deliberately emptied the way the bug left them,
@@ -144,6 +218,9 @@ int main(void)
 
 	printf("reinit_test: account_create refuses a missing mediaenc\n");
 	test_create_refuses_on_empty_registry();
+
+	printf("reinit_test: opus settings come from each init alone\n");
+	test_opus_settings_per_init();
 
 	printf("reinit_test: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail ? 1 : 0;

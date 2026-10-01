@@ -18,6 +18,12 @@ TESTS += test_ws_pin test_audio_external test_fmtp_bitrate \
 ifeq ($(shell pkg-config --exists webrtc-audio-processing-1 && echo y),y)
 TESTS += test_audio_processing_webrtc
 endif
+# Needs the baresip tree a build has patched, at the patch version the test
+# was written for (cmake/patch-baresip-sources.cmake, job 6).
+BARESIP_SRC ?= ../../third_party/baresip
+ifneq ($(shell grep -l "echosdk-patch aurecv-plc v1" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
+TESTS += test_aurecv_plc
+endif
 endif
 
 .PHONY: all clean test
@@ -149,6 +155,16 @@ test_audio_processing_webrtc: test_audio_processing.c ../../src/audio_processing
 	  -DECHOSDK_WEBRTC_SONAME=\"$(WEBRTC_SONAME)\" \
 	  -o $@ $^ $(AP_LIBS) -ldl
 
+# Compiles the patched aureceiver.c itself, against libre only: the test
+# stubs the player registry and logging, and models the jitter buffer.
+test_aurecv_plc: test_aurecv_plc.c $(BARESIP_SRC)/src/aureceiver.c \
+                 $(BARESIP_SRC)/src/timestamp.c
+	$(CC) $(CFLAGS) -Wno-unused-parameter -D_GNU_SOURCE \
+	  -I$(BARESIP_SRC)/include -I$(BARESIP_SRC)/src \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
 test: all
 	@failed=0; \
 	for t in $(TESTS); do \
@@ -163,4 +179,4 @@ test: all
 	fi
 
 clean:
-	rm -f $(TESTS) webrtc_apm_test.o
+	rm -f $(TESTS) test_aurecv_plc webrtc_apm_test.o

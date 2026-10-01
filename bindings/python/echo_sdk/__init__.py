@@ -851,6 +851,20 @@ def external_audio_active() -> bool:
     return bool(lib.echosdk_audio_external_is_active())
 
 
+def external_audio_set_voice_path(active: bool):
+    """Say whether your capture runs through the platform's voice path.
+
+    True when your device has already cancelled echo and run its own noise
+    suppression and AGC (iOS VoiceProcessingIO, Android VOICE_COMMUNICATION):
+    the SDK's NS and AGC then stay off rather than stacking on top. The
+    suppressor is unaffected — on an app-owned device it runs only when asked
+    for with set_aec_mode(SUPPRESSOR). Call it when your device starts and
+    stops, not from the audio callback. A raw microphone (the default) is
+    False.
+    """
+    lib.echosdk_audio_external_set_voice_path(bool(active))
+
+
 def external_audio_push(pcm) -> int:
     """Push captured microphone audio. This is what the far end hears.
 
@@ -1237,6 +1251,7 @@ __all__ = [
     # App-owned audio device
     "use_external_audio", "external_audio_format", "external_audio_active",
     "external_audio_push", "external_audio_pull",
+    "external_audio_set_voice_path",
     # Network handover
     "network_changed", "network_set_monitor_interval",
     "network_set_handover_policy", "network_local_addr", "network_is_up",

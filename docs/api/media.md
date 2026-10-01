@@ -159,7 +159,7 @@ sdk.set_speaker_gain(-3.0)             # RX gain dB [-20, +20]; 0 = unity (bypas
 >
 > **Which filters touch the mic** is logged as one line at init and after every change, e.g. `EchoSDK: TX chain [set_ns]: mic_gain=unity/bypass ns=off (platform voice path) agc=off aec=off (platform canceller)`. Start there when the far end cannot hear a caller.
 >
-> **Mobile (Android / iOS):** full-duplex AEC is handled by the OS audio driver — Android captures through the `VOICE_COMMUNICATION` recording preset, iOS through `VoiceProcessingIO`. The echo is gone before the SDK sees a sample, so the software suppressor is **not** run there even when `aec_mode` is left at `SUPPRESSOR`: ducking the mic another 16.5 dB would only half-duplex a call the hardware had already made full-duplex. No SDK flag needed, and setting one changes nothing. The same holds for `ns` and `agc`: the voice path already does both, and the SDK's own stay off there. They all come back when the app owns the device (`echosdk_audio_use_external`; the suppressor only when asked for with `set_aec_mode(SUPPRESSOR)`), and on an Android device that refuses the `VOICE_COMMUNICATION` preset — the SDK reads the preset back from each new recorder.
+> **Mobile (Android / iOS):** full-duplex AEC is handled by the OS audio driver — Android captures through the `VOICE_COMMUNICATION` recording preset, iOS through `VoiceProcessingIO`. The echo is gone before the SDK sees a sample, so the software suppressor is **not** run there even when `aec_mode` is left at `SUPPRESSOR`: ducking the mic another 16.5 dB would only half-duplex a call the hardware had already made full-duplex. No SDK flag needed, and setting one changes nothing. The same holds for `ns` and `agc`: the voice path already does both, and the SDK's own stay off there. They all come back when the app owns the device (`echosdk_audio_use_external`; the suppressor only when asked for with `set_aec_mode(SUPPRESSOR)`, NS and AGC unless the app reports its own voice path with `echosdk_audio_external_set_voice_path`), and on an Android device that refuses the `VOICE_COMMUNICATION` preset — the SDK reads the preset back from each new recorder.
 
 ---
 
@@ -239,6 +239,7 @@ C (`include/echosdk.h`):
 | `echosdk_audio_external_pull(pcm, nsamp)` | far end → speaker; always fills |
 | `echosdk_audio_external_format(&srate, &ch, &ptime)` | negotiated format, `ENODEV` until media |
 | `echosdk_audio_external_is_active()` | is a call using the app-owned device |
+| `echosdk_audio_external_set_voice_path(bool)` | capture runs through the platform voice path; SDK NS/AGC stay off |
 
 Flutter (`EchoSDK`):
 
@@ -296,6 +297,15 @@ Android `MediaRecorder.AudioSource.VOICE_COMMUNICATION` with
 `AudioManager.MODE_IN_COMMUNICATION`, iOS `VoiceProcessingIO` — see the echo
 note below.
 
+Then say so: call `echosdk_audio_external_set_voice_path(true)` once capture is
+running and `false` when it stops (from the device's start and stop, never the
+audio callback). With it the SDK keeps its own NS and AGC off, as it does on its
+own mobile drivers — stacked on the platform's they only cost speech. Without
+it the SDK assumes a raw microphone. The shipped engines (`AppOwnedAudioEngine`
+on Android, `EchoSDKExternalAudio` on iOS) report it; on an iPhone with NS, AGC
+and AEC all on, the TX chain line then reads
+`ns=off (app-owned voice path) agc=off (app-owned voice path) aec=off (app-owned voice path)`.
+
 ### Capture channel count (Android)
 
 Opus commonly negotiates 48 kHz **stereo**, but no phone has a stereo
@@ -347,9 +357,11 @@ Mixing two calls together is conferencing, and out of scope here.
 > The SDK's own half-duplex suppressor does become *available* again while the
 > app owns the device, since the hardware canceller is out of the path — but it
 > stays **off** unless asked for with
-> `echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR)`. Switching it on automatically
-> would silently duck the TX of an app that is already cancelling properly. It
-> is forced back off when the platform device returns, so the two never stack.
+> `echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR)`, on every platform, desktop
+> included. `echosdk_set_aec(true)` is not that request. Switching it on
+> automatically would silently duck the TX of an app that is already
+> cancelling properly. It is forced back off when the platform device returns,
+> so the two never stack.
 
 ---
 

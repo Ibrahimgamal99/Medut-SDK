@@ -212,11 +212,13 @@ static void use_external_fn(void *arg)
 	 * full-duplex, and the gate and AGC only cost speech.
 	 *
 	 * Deliberately one-directional for the suppressor: taking the device
-	 * does NOT switch it on.  An app that displaces our drivers is expected
-	 * to capture through VOICE_COMMUNICATION / VoiceProcessingIO itself, and
-	 * silently ducking its TX by 16.5 dB would be the SDK fighting the
-	 * platform — the exact failure this feature exists to avoid.  Apps that
-	 * want the fallback ask for it with echosdk_set_aec_mode(). */
+	 * does NOT switch it on, on any platform.  An app that displaces our
+	 * drivers is expected to capture through VOICE_COMMUNICATION /
+	 * VoiceProcessingIO itself, and silently ducking its TX by 16.5 dB
+	 * would be the SDK fighting the platform — the exact failure this
+	 * feature exists to avoid.  Apps that want the fallback ask for it with
+	 * echosdk_set_aec_mode().  NS and AGC follow what the app's engine
+	 * reports through echosdk_audio_external_set_voice_path(). */
 	bsdk_audio_external_sync();
 	bsdk_ap_external_changed(*enable);
 }
@@ -225,6 +227,13 @@ int echosdk_audio_use_external(bool enable)
 {
 	bool flag = enable;
 	return bsdk_dispatch_sync(use_external_fn, &flag);
+}
+
+/* Not dispatched: an atomic the filters read per frame, written from the
+ * app's device start/stop, which must not wait on the SIP thread. */
+void echosdk_audio_external_set_voice_path(bool active)
+{
+	bsdk_ap_external_voice_path(active);
 }
 
 static RE_ATOMIC bool s_external_selected;
@@ -362,13 +371,17 @@ int echosdk_audio_list_output_devices(echosdk_audio_device_t *devices, int max_c
 static void set_ns_fn(void *arg)  { bsdk_ap_set_ns(*(bool *)arg); }
 static void set_agc_fn(void *arg) { bsdk_ap_set_agc(*(bool *)arg); }
 static void set_aec_fn(void *arg) { bsdk_ap_set_aec(*(bool *)arg); }
+static void set_aec_mode_fn(void *arg) { bsdk_ap_set_aec_mode(*(bool *)arg); }
 
 void echosdk_set_aec(bool enable)
 {
 	/* Re-enables the echo control init settled on (the aec_mode, or the
 	 * suppressor if WEBRTC fell back); disables it when enable=false.
 	 * Back-compat shim for the former bool aec API — so it does not go
-	 * through set_aec_mode's ENOTSUP for a WEBRTC that fell back. */
+	 * through set_aec_mode's ENOTSUP for a WEBRTC that fell back.  Not a
+	 * request for the suppressor on an app-owned device: apps call this
+	 * to mean "keep echo control on", and on iOS that put the suppressor
+	 * on top of VoiceProcessingIO. */
 	bool on = enable && g_bsdk.cfg.aec_mode != ECHOSDK_AEC_OFF;
 	bsdk_dispatch_sync(set_aec_fn, &on);
 }
@@ -393,12 +406,13 @@ int echosdk_set_aec_mode(echosdk_aec_mode_t mode)
 #endif
 
 	bool on = mode != ECHOSDK_AEC_OFF;
-	return bsdk_dispatch_sync(set_aec_fn, &on);
+	return bsdk_dispatch_sync(set_aec_mode_fn, &on);
 }
 
 void echosdk_set_aec_suppression_level(float level)
 {
-	if (level < 0.0f) level = 0.0f;
+	/* Negated so NaN clamps to 0 too: NaN fails every comparison. */
+	if (!(level >= 0.0f)) level = 0.0f;
 	if (level > 1.0f) level = 1.0f;
 	/* aec_suppression_level=0 → floor=1.0 (no attenuation)
 	 * aec_suppression_level=1 → floor=0.15 (−16.5 dB, default)

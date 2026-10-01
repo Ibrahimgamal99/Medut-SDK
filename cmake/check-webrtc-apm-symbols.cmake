@@ -18,7 +18,11 @@ set(_allowed
   "_ZN6webrtc22AudioProcessingBuilder6CreateEv"
   # compiler-emitted for large struct copies
   "memcpy" "memmove" "memset"
-  "_GLOBAL_OFFSET_TABLE_")
+  "_GLOBAL_OFFSET_TABLE_"
+  # hardened toolchains (-fstack-protector-strong, -D_FORTIFY_SOURCE=2, both
+  # distro defaults): libc's, so no new dependency
+  "__stack_chk_fail" "__stack_chk_guard" "__stack_chk_fail_local"
+  "__memcpy_chk" "__memmove_chk" "__memset_chk")
 
 foreach(_obj IN LISTS OBJS)
   execute_process(COMMAND "${NM}" -u "${_obj}"
