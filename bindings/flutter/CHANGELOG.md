@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`MediaStats.fecRecovered` / `MediaStats.plcConcealed`.** How each frame
+  the jitter buffer reported lost was filled in, cumulative for the call:
+  rebuilt from the redundant copy the next Opus packet carried, or concealed
+  by the decoder alone. 0 for a codec other than Opus.
+
+### Fixed
+
+- **`Call.getStats()` wrote 8 bytes past its buffer.** The native libraries
+  shipped with `fec_recovered` / `plc_concealed` in
+  `echosdk_ev_media_stats_t` (424 bytes on 64-bit) while the Dart struct still
+  ended at `fec_level_pct` (416), and `getStats()` allocates the Dart size for
+  `echosdk_call_get_stats()` to fill. `MediaStatsEvent` was unaffected: the
+  native side owns that buffer.
+
 ## 1.1.0
 
 Defaults changed (see **Changed** below) and `MediaStats` grew, hence the minor

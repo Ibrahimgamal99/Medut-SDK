@@ -2494,6 +2494,16 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
   /// Expected loss % the FEC is sized for; 0 when off
   @ffi.Uint32()
   external int fec_level_pct;
+
+  /// Lost frames rebuilt from the redundant copy the next Opus packet
+  /// carried (cumulative; 0 for a codec other than Opus)
+  @ffi.Uint32()
+  external int fec_recovered;
+
+  /// Lost frames the decoder concealed alone, no redundant copy at hand
+  /// (cumulative; 0 for a codec other than Opus)
+  @ffi.Uint32()
+  external int plc_concealed;
 }
 
 final class echosdk_ev_log_t extends ffi.Struct {

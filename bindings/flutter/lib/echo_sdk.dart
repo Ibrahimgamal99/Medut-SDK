@@ -268,6 +268,14 @@ class MediaStats {
   /// Expected loss % the FEC is sized for (5–25); 0 when off.
   final int fecLevelPct;
 
+  /// Opus FEC we receive: how each frame the jitter buffer reported lost was
+  /// filled in, cumulative for the call — rebuilt from the redundant copy the
+  /// next packet carried ([fecRecovered]), or concealed by the decoder alone
+  /// ([plcConcealed]).  [plcFrames] counts the gaps; these two say what became
+  /// of them.  0 for a codec other than Opus.
+  final int fecRecovered;
+  final int plcConcealed;
+
   MediaStats({
     required this.call,
     required this.packetsSent,
@@ -324,6 +332,8 @@ class MediaStats {
     required this.iceRemoteAddr,
     required this.fecActive,
     required this.fecLevelPct,
+    required this.fecRecovered,
+    required this.plcConcealed,
   });
 }
 
@@ -1835,5 +1845,7 @@ MediaStats _decodeStats(echosdk_ev_media_stats_t s, Call call) {
     iceRemoteAddr: _charArr(s.ice_remote_addr, 64),
     fecActive: s.fec_active,
     fecLevelPct: s.fec_level_pct,
+    fecRecovered: s.fec_recovered,
+    plcConcealed: s.plc_concealed,
   );
 }
