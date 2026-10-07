@@ -460,7 +460,7 @@ def configure(**kwargs):
     """Set global SDK options. Must be called before the first create_account().
 
     Common options:
-      log_level         — int (0=off, 1=error, 2=warning, 3=info, 4=debug)
+      log_level         — int (0=error, 1=warning (default), 2=info, 3=debug)
       stats_interval_ms — how often media_stats events fire (default 2000;
                           0 disables RTCP accounting entirely, which also
                           disables quality alerts, media-stall detection and

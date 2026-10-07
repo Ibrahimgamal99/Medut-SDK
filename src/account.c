@@ -462,6 +462,20 @@ static int configure_baresip_account(struct echosdk_account *acct)
 			account_set_stun_uri(ba, stun);
 		if (tu)   account_set_stun_user(ba, tu);
 		if (tp)   account_set_stun_pass(ba, tp);
+
+		/* ICE with nothing to learn a public address from offers only
+		 * this host's own addresses.  Behind NAT that is a private one,
+		 * and FreeSWITCH drops private candidates by default
+		 * (apply-candidate-acl), finds none left and answers 488 —
+		 * measured on 2026-10-07 against FreeSWITCH 1.11. */
+		if ((acct->cfg.ice_enabled || cfg->ice_enabled) &&
+		    !(stun && stun[0]) && !(turn && turn[0])) {
+			warning("EchoSDK/account: %s has ICE on but no STUN or "
+			        "TURN server: its calls offer only local "
+			        "addresses, which a peer across NAT cannot "
+			        "reach (FreeSWITCH rejects them with 488)\n",
+			        acct->cfg.uri);
+		}
 	}
 
 	/* Audio codecs — account names > account enums > global names >
@@ -1397,9 +1411,12 @@ static void create_fn(void *arg)
 		                      &sv_port, ws_path, sizeof(ws_path));
 		if (!acct->parsed_host[0])
 			str_ncpy(acct->parsed_host, sv_host, sizeof(acct->parsed_host));
-		acct->parsed_port = sv_port;
 		/* The WS server is the server_url host, which may legitimately
-		 * differ from the AOR domain (edge proxy vs SIP domain). */
+		 * differ from the AOR domain (edge proxy vs SIP domain).  So its
+		 * port is where the connection goes (the outbound proxy takes it
+		 * from the URL), not part of the identity: parsed_port stays the
+		 * uri's own.  Copying it here put ":443" in every From, To and
+		 * Request-URI, and an edge proxy's port on the SIP domain. */
 		str_ncpy(ws_host, sv_host, sizeof(ws_host));
 		ws_port = sv_port;
 	} else {

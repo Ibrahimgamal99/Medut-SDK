@@ -26,7 +26,7 @@
  *   "ice_enabled":  true,
  *   "rtcp_mux":     true,
  *   "stun_server":  "stun:stun.l.google.com:19302",
- *   "verify_tls":   false,
+ *   "verify_tls":   true,                    // false skips the certificate check
  *   "audio_codec":  "opus"                   // "opus" | "ulaw" | "alaw" | "g722" | "g726"
  * }
  *
@@ -70,7 +70,7 @@
  * Talk time is kept on a steady_clock here rather than read from
  * echosdk_ev_media_stats_t::call_duration_ms: that figure only advances once
  * per stats_interval_ms and is not produced at all when stats are disabled, so
- * a clock built on it moves in five-second jumps.  The SDK's figure is the one
+ * a clock built on it moves in jumps.  The SDK's figure is the one
  * to report; this one is the one to watch.
  *
  * The ticker owns a single terminal line and rewrites it in place with '\r'.
@@ -314,7 +314,7 @@ struct AccountConfig {
     bool                   ice_enabled = true;
     bool                   rtcp_mux    = false;
     bool                   rtcp_mux_set = false;
-    bool                   verify_tls  = false;
+    bool                   verify_tls  = true;
     echosdk_100rel_mode_t  rel100      = ECHOSDK_100REL_DISABLED;
     echosdk_dtmf_mode_t    dtmf_mode   = ECHOSDK_DTMF_RFC4733;
 
@@ -374,7 +374,7 @@ struct AccountConfig {
         media_enc    = ECHOSDK_MEDIA_ENC_DTLS_SRTP;
         ice_enabled  = true;
         stun_server  = "stun:stun.l.google.com:19302";
-        verify_tls   = false;
+        verify_tls   = true;
     }
 
     /* ── construct from JSON ── */
@@ -420,7 +420,7 @@ struct AccountConfig {
         turn_server  = str("turn_server");
         turn_user    = str("turn_user");
         turn_pass    = str("turn_pass");
-        verify_tls   = flag("verify_tls", false);
+        verify_tls   = flag("verify_tls", true);
 
         {
             std::string r = str("rel100");
@@ -696,11 +696,18 @@ int main(int argc, char* argv[])
 
     /* ── SDK setup ────────────────────────────────────────────────────── */
     EchoSDK::SDK sdk;
-    sdk.config().log_level         = 0;  /* debug level for audio troubleshooting */
-    sdk.config().stats_interval_ms = 5000;
+    sdk.config().log_level         = 0;  /* errors only; 3 = debug for audio troubleshooting */
     sdk.config().trace_sip         = false;
     sdk.config().prefer_ipv6       = false;
-    sdk.config().verify_server     = false;
+    /* Certificate checking is SDK-wide: the account's verify_tls alone does
+     * not turn it off, so the JSON flag is applied here. */
+    sdk.config().verify_server     = cfg.verify_tls;
+    /* Desktop audio.  WebRTC AEC3 cancels echo while both sides talk; on a
+     * build or machine without it, init falls back to the half-duplex
+     * suppressor.  A raw laptop mic also wants noise suppression and AGC. */
+    sdk.config().aec_mode          = ECHOSDK_AEC_WEBRTC;
+    sdk.config().ns                = true;
+    sdk.config().agc               = true;
     sdk.config().audio_codecs[0]   = ECHOSDK_CODEC_OPUS;
     sdk.config().audio_codecs[1]   = ECHOSDK_CODEC_PCMU;
     sdk.config().audio_codecs[2]   = ECHOSDK_CODEC_PCMA;
@@ -810,7 +817,11 @@ int main(int argc, char* argv[])
             }
 
             case ECHOSDK_EV_MEDIA_STATS:
-                print_stats(ev.u.stats);
+                /* The SDK polls every 2 s (stats_interval_ms) because FEC,
+                 * bitrate adaptation and quality alerts all run off that
+                 * tick; print every third one to keep the console readable. */
+                if (ev.u.stats.is_final || ev.u.stats.stats_tick % 3 == 1)
+                    print_stats(ev.u.stats);
                 break;
 
             case ECHOSDK_EV_LOG:

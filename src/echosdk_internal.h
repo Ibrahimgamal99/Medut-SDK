@@ -588,6 +588,9 @@ void bsdk_call_setup_watch_close(void);
 /* ── timers.c ──────────────────────────────────────────────────────────── */
 
 void bsdk_timers_configure(const echosdk_config_t *cfg);
+/* Jitter buffer type and bounds → conf_config(); 0 = default bound. */
+void bsdk_jbuf_configure(echosdk_jbuf_type_t type, uint32_t min_ms,
+                         uint32_t max_ms);
 
 /* ── trace.c ───────────────────────────────────────────────────────────── */
 

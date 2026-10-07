@@ -534,7 +534,13 @@ static void bevent_handler(enum bevent_ev bev,
 		if (lc) lc->state = ECHOSDK_CALL_RINGING;
 		break;
 
+	/* Outgoing only: the 2xx to our INVITE, reported before its SDP answer
+	 * is decoded.  libre runs the established handler right after it in
+	 * the same 2xx, so mapping both gave the app ESTABLISHED twice. */
 	case BEVENT_CALL_ANSWERED:
+		post = false;
+		break;
+
 	case BEVENT_CALL_ESTABLISHED:
 		ev.type = ECHOSDK_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;

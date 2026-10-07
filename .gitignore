@@ -91,3 +91,4 @@ desktop.ini
 /test/unit/test_audio_processing_webrtc
 /test/unit/webrtc_apm_test.o
 /test/unit/test_aurecv_plc
+/test/unit/test_jbuf_adapt

@@ -24,6 +24,10 @@ BARESIP_SRC ?= ../../third_party/baresip
 ifneq ($(shell grep -l "echosdk-patch aurecv-plc v1" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
 TESTS += test_aurecv_plc
 endif
+# Same for the jitter buffer's adaptive sizing (job 8).
+ifneq ($(shell grep -l "echosdk-patch jbuf-adapt v1" $(BARESIP_SRC)/src/jbuf.c 2>/dev/null),)
+TESTS += test_jbuf_adapt
+endif
 endif
 
 .PHONY: all clean test
@@ -165,6 +169,15 @@ test_aurecv_plc: test_aurecv_plc.c $(BARESIP_SRC)/src/aureceiver.c \
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 
+# Compiles the patched jbuf.c itself, against libre only, on a simulated
+# clock: the test drives it the way rtprecv.c does.
+test_jbuf_adapt: test_jbuf_adapt.c $(BARESIP_SRC)/src/jbuf.c
+	$(CC) $(CFLAGS) -Wno-unused-parameter -D_GNU_SOURCE \
+	  -I$(BARESIP_SRC)/include -I$(BARESIP_SRC)/src \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re \
+	  -o $@ $^ -Wl,--wrap=tmr_jiffies \
+	  -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz $(LDFLAGS)
+
 test: all
 	@failed=0; \
 	for t in $(TESTS); do \
@@ -179,4 +192,4 @@ test: all
 	fi
 
 clean:
-	rm -f $(TESTS) test_aurecv_plc webrtc_apm_test.o
+	rm -f $(TESTS) test_aurecv_plc test_jbuf_adapt webrtc_apm_test.o

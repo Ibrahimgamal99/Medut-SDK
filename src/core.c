@@ -15,7 +15,7 @@
 
 struct bsdk_ctx g_bsdk;
 
-/* Defined by the code EchoSDK splices into baresip (jobs 5-7 of
+/* Defined by the code EchoSDK splices into baresip (jobs 5-8 of
  * cmake/patch-baresip-sources.cmake) — the patches nothing else calls into,
  * and so the ones a tree could lose without anything noticing.  Referenced
  * here, a build without one fails to link; logged at init, a field log says
@@ -24,6 +24,7 @@ struct bsdk_ctx g_bsdk;
 extern const char bsdk_patch_opus_fec[];
 extern const char bsdk_patch_aurecv_plc[];
 extern const char bsdk_patch_opus_init[];
+extern const char bsdk_patch_jbuf_adapt[];
 
 #define ECHOSDK_EV_QUEUE_MAX 4096
 
@@ -493,8 +494,9 @@ int echosdk_init(const echosdk_config_t *cfg)
 	if (err)
 		goto fail;
 	BSDK_TRACE("[bsdk] step 9 done\n");
-	info("EchoSDK: baresip patches: %s, %s, %s\n",
-	     bsdk_patch_opus_fec, bsdk_patch_aurecv_plc, bsdk_patch_opus_init);
+	info("EchoSDK: baresip patches: %s, %s, %s, %s\n",
+	     bsdk_patch_opus_fec, bsdk_patch_aurecv_plc, bsdk_patch_opus_init,
+	     bsdk_patch_jbuf_adapt);
 
 	/* After modules_init (baresip's media-NAT list exists) and before any
 	 * account can ask for medianat "ice": register EchoSDK's own ICE agent. */
@@ -506,11 +508,6 @@ int echosdk_init(const echosdk_config_t *cfg)
 	 * a CallKit-owned activation) still leaves the stack usable. */
 	if (bsdk_platform_audio_init(g_bsdk.cfg.platform_audio_activate))
 		warning("EchoSDK: platform audio init failed\n");
-
-	if (g_bsdk.cfg.jbuf_type == ECHOSDK_JBUF_FIXED) {
-		struct config *c = conf_config();
-		c->avt.audio.jbtype = JBUF_FIXED;
-	}
 
 	BSDK_TRACE("[bsdk] step 10: audio_processing_init\n");
 	bsdk_audio_processing_init(g_bsdk.cfg.ns, g_bsdk.cfg.agc,

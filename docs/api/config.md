@@ -150,8 +150,8 @@ as convenience only — it is applied straight after `init()`, not marshalled in
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `jitter_buffer_min_ms` | `uint32_t` | 0 | Minimum depth ms (0 = baresip default) |
-| `jitter_buffer_max_ms` | `uint32_t` | 0 | Maximum depth ms (0 = baresip default) |
+| `jitter_buffer_min_ms` | `uint32_t` | 0 | Minimum depth ms (0 = 40 ms; fixed: 100 ms, the depth it holds) |
+| `jitter_buffer_max_ms` | `uint32_t` | 0 | Maximum depth ms (0 = 400 ms; fixed: 200 ms) |
 | `jbuf_type` | `echosdk_jbuf_type_t` | `ADAPTIVE` | `ADAPTIVE` or `FIXED` depth |
 
 ### Registration

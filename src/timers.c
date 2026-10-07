@@ -10,6 +10,33 @@
 #include <string.h>
 #include "echosdk_internal.h"
 
+/* Defaults for a bound left at 0.  Fixed keeps baresip's own {100, 200}:
+ * a fixed buffer holds its min, and 40 ms would be too shallow to hold. */
+enum {
+	JB_ADAPTIVE_MIN_MS = 40,
+	JB_ADAPTIVE_MAX_MS = 400,
+	JB_FIXED_MIN_MS    = 100,
+	JB_FIXED_MAX_MS    = 200,
+};
+
+void bsdk_jbuf_configure(echosdk_jbuf_type_t type, uint32_t min_ms,
+                         uint32_t max_ms)
+{
+	struct config *c = conf_config();
+	const bool fixed = (type == ECHOSDK_JBUF_FIXED);
+
+	if (!min_ms)
+		min_ms = fixed ? JB_FIXED_MIN_MS : JB_ADAPTIVE_MIN_MS;
+	if (!max_ms)
+		max_ms = fixed ? JB_FIXED_MAX_MS : JB_ADAPTIVE_MAX_MS;
+	if (max_ms < min_ms)
+		max_ms = min_ms;
+
+	c->avt.audio.jbtype       = fixed ? JBUF_FIXED : JBUF_ADAPTIVE;
+	c->avt.audio.jbuf_del.min = min_ms;
+	c->avt.audio.jbuf_del.max = max_ms;
+}
+
 void bsdk_timers_configure(const echosdk_config_t *cfg)
 {
 	struct config *c = conf_config();
@@ -42,15 +69,11 @@ void bsdk_timers_configure(const echosdk_config_t *cfg)
 	 * 0 leaves it off, which is baresip's own default. */
 	c->avt.rtp_timeout = cfg->rtp_timeout_s;
 
-	/* Jitter buffer — adaptive mode with caller-supplied min/max bounds.
-	 * Only applied when at least one bound is non-zero to preserve baresip
-	 * defaults for callers that don't set either field. */
-	if (cfg->jitter_buffer_min_ms || cfg->jitter_buffer_max_ms) {
-		c->avt.audio.jbtype        = JBUF_ADAPTIVE;
-		c->avt.audio.jbuf_del.min  = cfg->jitter_buffer_min_ms;
-		c->avt.audio.jbuf_del.max  = cfg->jitter_buffer_max_ms
-		                             ? cfg->jitter_buffer_max_ms : 150u;
-	}
+	/* Jitter buffer.  Always applied: baresip's own default is a fixed
+	 * 100 ms buffer, which drops every packet later than that on a
+	 * jittery link instead of growing. */
+	bsdk_jbuf_configure(cfg->jbuf_type, cfg->jitter_buffer_min_ms,
+	                    cfg->jitter_buffer_max_ms);
 
 	/* Bind interface */
 	if (cfg->bind_interface)

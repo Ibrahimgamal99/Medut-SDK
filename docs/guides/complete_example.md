@@ -88,7 +88,7 @@ cfg.mic_gain_db           = 0.0f;  /* TX gain dB, [-20,+20]; 0=unity */
 cfg.speaker_gain_db       = 0.0f;  /* RX gain dB, [-20,+20]; 0=unity */
 cfg.ns  = true;   /* noise suppression  */
 cfg.agc = true;   /* auto gain control  */
-cfg.jitter_buffer_min_ms = 20;   /* adaptive JB lower bound (0 = fixed 100 ms default) */
+cfg.jitter_buffer_min_ms = 20;   /* adaptive JB lower bound (0 = 40 ms) */
 cfg.jitter_buffer_max_ms = 300;  /* adaptive JB upper bound */
 
 /* Observability */

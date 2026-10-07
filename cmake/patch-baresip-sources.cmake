@@ -1,5 +1,5 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Seven jobs:
+# Apply EchoSDK's baresip patches at build time.  Eight jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
 #   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
@@ -10,6 +10,8 @@
 #      next packet happens to arrive — no silence, no added delay.
 #   7. Start the opus module from its defaults on every init, so one init's
 #      settings do not carry into the next.
+#   8. Size the adaptive jitter buffer from the delays actually seen, not
+#      from twice a mean jitter that sits below every delay spike.
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -18,7 +20,7 @@
 # a baresip bump moves the text it splices at, rather than silently building
 # without the fix.
 #
-# Jobs 5-7 are the ones nothing in the SDK calls into, so nothing would notice
+# Jobs 5-8 are the ones nothing in the SDK calls into, so nothing would notice
 # them missing.  Each defines a `bsdk_patch_*` string that src/core.c
 # references: a tree without the patch fails to link, and
 # `strings libechosdk.so | grep echosdk-patch` names the versions a binary
@@ -746,3 +748,210 @@ set(_keys OI1 OI2 OI3)
 bsdk_patch_file("${OPUS_C}" "echosdk-patch opus-init v1"
   "defaults reset on every init"
   "carries one init's opus settings, and mono, into every later one")
+
+# ---------------------------------------------------------------------------
+# Job 8: jbuf — size the adaptive buffer from the delays actually seen
+#
+# Upstream's adaptive mode tracks a mean jitter (only of steps over half the
+# minimum delay) and, on every third late packet, resets the buffer to twice
+# it.  On a link whose delay comes in spikes the mean sits far below them,
+# and the reset can shrink the buffer in answer to lateness.  Measured live
+# (2026-10-07, Asterisk *43 echo over office Wi-Fi, Opus): the echoed stream
+# arrived up to ~200 ms late (p99), 47% of it behind a later packet; the
+# buffer held ~100 ms and 12-15% of packets came after their slot.
+#
+# Instead, each packet's delay over the fastest packet seen goes into a
+# histogram that forgets over ~10 s, and the buffer covers 97% of it plus
+# 10 ms: at once when that grows, by 10 ms a second when it falls.  Packets
+# that came too late to use count too.  Replaying two recorded traces through
+# the real jbuf.c: 14.4% -> 0.8% and 3.5% -> 0.9% too late, at 90 -> 143 ms
+# and 123 -> 112 ms average depth, with the depth moving 21 times instead of
+# 325.  A clean link stays at the minimum.
+#
+# A timestamp jump with the sequence running on (a PBX prompt handing over
+# to its echo jumped 1059 ms) restarts the fastest-packet baseline instead of
+# counting as a second of jitter: upstream that pinned the buffer at its
+# maximum for the rest of the call.
+# ---------------------------------------------------------------------------
+
+set(JBUF_C "${SOURCE_DIR}/src/jbuf.c")
+if(NOT EXISTS "${JBUF_C}")
+  message(FATAL_ERROR "patch-baresip-sources: ${JBUF_C} does not exist")
+endif()
+
+set(_OLD_JB1 [=[
+	JBUF_DRIFT_WINDOW  = 10 * 1000 /* [ms] */
+};
+]=])
+set(_NEW_JB1 [=[
+	JBUF_DRIFT_WINDOW  = 10 * 1000 /* [ms] */
+};
+
+/* EchoSDK-patched: adaptive sizing, see delay_target() */
+enum {
+	JB_HIST_BIN_MS     = 10,    /* delay histogram bin [ms]           */
+	JB_HIST_BINS       = 128,   /* bins; the last also holds above    */
+	JB_MARGIN_MS       = 10,    /* on top of the covering delay [ms]  */
+	JB_SHRINK_MS       = 10,    /* most one shrink step takes [ms]    */
+	JB_SHRINK_EVERY_MS = 1000,  /* between shrink steps [ms]          */
+	JB_DISCONT_MS      = 1000,  /* transit step that is not delay [ms] */
+};
+#define JB_QUANTILE 0.97f   /* share of recent packets the delay covers */
+#define JB_TAU_S    10.f    /* histogram memory [s] at 20 ms packets    */
+]=])
+set(_OLD_JB2 [=[
+		int32_t max_skew_ms;	 /**< Max. skew in [ms]              */
+	} p;                 /**< Playout specific values                    */
+]=])
+set(_NEW_JB2 [=[
+		int32_t max_skew_ms;	 /**< Max. skew in [ms]              */
+		/* EchoSDK-patched: see delay_target() */
+		float hist[JB_HIST_BINS]; /**< Decaying histogram of delay
+					   over the fastest packet      */
+		float hist_sum;		 /**< Total weight in hist           */
+		uint64_t shrink_t;	 /**< Last grow or shrink step [ms]  */
+	} p;                 /**< Playout specific values                    */
+]=])
+set(_OLD_JB3 [=[
+static uint32_t adjust_due_to_jitter(struct jbuf *jb, struct packet *p)
+{
+]=])
+set(_NEW_JB3 [=[
+/* EchoSDK-patched: src/core.c references this, so a build without the
+ * adaptive sizing below fails to link instead of shipping without it. */
+extern const char bsdk_patch_jbuf_adapt[];
+const char bsdk_patch_jbuf_adapt[] = "echosdk-patch jbuf-adapt v1";
+
+
+/* EchoSDK-patched: one packet's delay over the fastest packet seen
+ * (jb->p.offset) goes into a histogram that forgets with JB_TAU_S. */
+static void delay_note(struct jbuf *jb, uint32_t transit)
+{
+	const float f = 1.f - 1.f / (JB_TAU_S * 50.f);
+	int32_t rel = (int32_t)(transit - jb->p.offset);
+	uint32_t ms = rel > 0 ? (uint32_t)delay_ms(rel, jb->srate) : 0;
+	uint32_t bin = ms / JB_HIST_BIN_MS;
+
+	if (bin >= JB_HIST_BINS)
+		bin = JB_HIST_BINS - 1;
+
+	for (uint32_t i = 0; i < JB_HIST_BINS; i++)
+		jb->p.hist[i] *= f;
+
+	jb->p.hist[bin] += 1.f - f;
+	jb->p.hist_sum = jb->p.hist_sum * f + (1.f - f);
+}
+
+
+/* EchoSDK-patched: the delay that JB_QUANTILE of recent packets arrived
+ * within, plus JB_MARGIN_MS, in timestamp units.  Grows at once; shrinks
+ * by at most JB_SHRINK_MS per JB_SHRINK_EVERY_MS, so a quiet second does
+ * not throw away the buffer the next burst needs, and each step is small. */
+static uint32_t delay_target(struct jbuf *jb)
+{
+	uint32_t cur = jb->p.jitter_offset;
+	uint64_t now = tmr_jiffies();
+	float need = JB_QUANTILE * jb->p.hist_sum;
+	float acc = 0.f;
+	uint32_t i;
+
+	if (jb->p.hist_sum <= 0.f)
+		return cur;
+
+	for (i = 0; i < JB_HIST_BINS - 1; i++) {
+		acc += jb->p.hist[i];
+		if (acc >= need)
+			break;
+	}
+
+	uint32_t ms = (i + 1) * JB_HIST_BIN_MS + JB_MARGIN_MS;
+	if (ms < jb->mind)
+		ms = jb->mind;
+	if (ms > jb->maxd)
+		ms = jb->maxd;
+
+	uint32_t want = ms * (jb->srate / 1000);
+	uint32_t step = JB_SHRINK_MS * (jb->srate / 1000);
+
+	if (want > cur) {
+		cur = want;
+		jb->p.shrink_t = now;
+	}
+	else if (want < cur && now - jb->p.shrink_t >= JB_SHRINK_EVERY_MS) {
+		cur = cur - want > step ? cur - step : want;
+		jb->p.shrink_t = now;
+	}
+
+	return cur;
+}
+
+
+static uint32_t adjust_due_to_jitter(struct jbuf *jb, struct packet *p)
+{
+]=])
+set(_OLD_JB4 [=[
+	int d = transit - jb->p.last_transit;
+	if (d < 0)
+		d = -d;
+
+	uint32_t d_ms = delay_ms(d, jb->srate);
+]=])
+set(_NEW_JB4 [=[
+	int d = transit - jb->p.last_transit;
+	if (d < 0)
+		d = -d;
+
+	uint32_t d_ms = delay_ms(d, jb->srate);
+
+	/* EchoSDK-patched: a timestamp jump with the sequence running on (a
+	 * PBX prompt handing over to an echo, say) is a new timeline, not
+	 * delay: start the fastest-packet baseline over instead of letting a
+	 * one-second step count as jitter. */
+	if (d_ms > JB_DISCONT_MS && d_ms > 2 * jb->maxd) {
+		jb->p.offset       = transit;
+		jb->p.last_transit = transit;
+		return jb->p.jitter_offset;
+	}
+]=])
+set(_OLD_JB5 [=[
+	/* Only fatal events should trigger adaption */
+	if (jb->p.late_pkts >= JBUF_LATE_TRESHOLD) {
+		jb->p.late_pkts = 0;
+
+		jb->p.jitter_offset = 2 * jitter;
+		RE_TRACE_ID_INSTANT_I(
+			"jbuf", "jitter_adjust",
+			delay_ms(jb->p.jitter_offset, jb->srate), jb->id);
+	}
+]=])
+set(_NEW_JB5 [=[
+	/* EchoSDK-patched: size the buffer from the delays actually seen.
+	 * Upstream reset it to 2x the mean jitter on every third late packet,
+	 * which on a link whose delay comes in spikes sits far below the
+	 * spikes — and could shrink the buffer in answer to lateness. */
+	(void)jitter;
+	delay_note(jb, (uint32_t)transit);
+	jb->p.jitter_offset = delay_target(jb);
+	RE_TRACE_ID_INSTANT_I("jbuf", "jitter_adjust",
+			      delay_ms(jb->p.jitter_offset, jb->srate), jb->id);
+]=])
+set(_OLD_JB6 [=[
+			STAT_INC(n_late_lost);
+			jb->p.late_pkts++;
+]=])
+set(_NEW_JB6 [=[
+			STAT_INC(n_late_lost);
+			jb->p.late_pkts++;
+
+			/* EchoSDK-patched: the packets that came too late are
+			 * the ones the buffer most needs to hear about. */
+			if (jb->jbtype == JBUF_ADAPTIVE && jb->p.offset) {
+				delay_note(jb, (uint32_t)hdr->ts_arrive -
+					   hdr->ts);
+				jb->p.jitter_offset = delay_target(jb);
+			}
+]=])
+set(_keys JB1 JB2 JB3 JB4 JB5 JB6)
+bsdk_patch_file("${JBUF_C}" "echosdk-patch jbuf-adapt v1"
+  "adaptive sizing from the delays seen"
+  "holds the adaptive buffer at 2x the mean jitter, below every delay spike")

@@ -488,34 +488,33 @@ int echosdk_call_set_dscp_rtp(echosdk_call_handle_t call, uint8_t dscp)
 
 /* ── Global jitter buffer bounds ─────────────────────────────────────────── */
 
+typedef struct {
+	echosdk_jbuf_type_t type;
+	uint32_t            min_ms;
+	uint32_t            max_ms;
+} jbuf_ctx_t;
+
 static void set_jbuf_fn(void *arg)
 {
-	uint32_t *bounds = arg; /* [0]=min, [1]=max */
-	struct config *c = conf_config();
-	c->avt.audio.jbtype       = JBUF_ADAPTIVE;
-	c->avt.audio.jbuf_del.min = bounds[0];
-	c->avt.audio.jbuf_del.max = bounds[1] ? bounds[1] : 150u;
+	jbuf_ctx_t *ctx = arg;
+	bsdk_jbuf_configure(ctx->type, ctx->min_ms, ctx->max_ms);
 }
 
 void echosdk_set_jitter_buffer(uint32_t min_ms, uint32_t max_ms)
 {
-	uint32_t bounds[2] = { min_ms, max_ms };
-	bsdk_dispatch_sync(set_jbuf_fn, bounds);
+	jbuf_ctx_t ctx = { g_bsdk.cfg.jbuf_type, min_ms, max_ms };
+	bsdk_dispatch_sync(set_jbuf_fn, &ctx);
 	g_bsdk.cfg.jitter_buffer_min_ms = min_ms;
 	g_bsdk.cfg.jitter_buffer_max_ms = max_ms;
 }
 
 /* ── echosdk_set_jitter_buffer_type ──────────────────────────────────────── */
 
-static void set_jbuf_type_fn(void *arg)
-{
-	echosdk_jbuf_type_t *type = arg;
-	struct config *c = conf_config();
-	c->avt.audio.jbtype = (*type == ECHOSDK_JBUF_FIXED) ? JBUF_FIXED : JBUF_ADAPTIVE;
-}
-
 void echosdk_set_jitter_buffer_type(echosdk_jbuf_type_t type)
 {
-	bsdk_dispatch_sync(set_jbuf_type_fn, &type);
+	/* The bounds' defaults depend on the type, so re-apply them too. */
+	jbuf_ctx_t ctx = { type, g_bsdk.cfg.jitter_buffer_min_ms,
+	                   g_bsdk.cfg.jitter_buffer_max_ms };
+	bsdk_dispatch_sync(set_jbuf_fn, &ctx);
 	g_bsdk.cfg.jbuf_type = type;
 }

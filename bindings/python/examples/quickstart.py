@@ -21,7 +21,7 @@ Minimal JSON account config (account.json):
   "ice_enabled":  true,
   "rtcp_mux":     true,
   "stun_server":  "stun:stun.l.google.com:19302",
-  "verify_tls":   false,
+  "verify_tls":   true,
   "audio_codec":  "opus"
 }
 
@@ -168,8 +168,7 @@ def _config_from_cli(sip_uri: str, password: str):
         "ice_enabled": True,
         "stun_server": "stun:stun.l.google.com:19302",
     }
-    sdk_kwargs = {"verify_server": False}
-    return sip_uri, password, True, account_kwargs, sdk_kwargs
+    return sip_uri, password, True, account_kwargs, {}
 
 
 def print_devices():
@@ -214,11 +213,12 @@ def main():
         print("No URI in config.")
         return 1
 
-    # Global SDK config
-    sdk.configure(log_level=0, stats_interval_ms=5000, **sdk_kwargs)
-    sdk.set_aec(True)
-    sdk.set_ns(True)
-    sdk.set_agc(True)
+    # Global SDK config.  stats_interval_ms stays at its 2 s default: FEC,
+    # bitrate adaptation and quality alerts run off that tick (the printing
+    # cadence is STATS_INTERVAL_S, separately).  aec_mode=2 is WebRTC AEC3,
+    # full duplex; init falls back to the half-duplex suppressor on a build or
+    # machine without it.  A raw desktop mic also wants NS and AGC.
+    sdk.configure(log_level=0, aec_mode=2, ns=True, agc=True, **sdk_kwargs)
 
     acc = sdk.create_account(uri, password, **account_kwargs)
     acc.register()

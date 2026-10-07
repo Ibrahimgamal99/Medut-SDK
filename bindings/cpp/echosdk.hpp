@@ -924,8 +924,9 @@ typedef struct {
 
 	/* ── Jitter buffer ────────────────────────────────────────────── */
 	echosdk_jbuf_type_t jbuf_type;          /* adaptive (default) or fixed */
-	uint32_t jitter_buffer_min_ms; /* JB min depth (default: 40 ms) */
-	uint32_t jitter_buffer_max_ms; /* JB max depth (default: 400 ms) */
+	uint32_t jitter_buffer_min_ms; /* JB min depth; 0 = 40 ms (fixed: 100 ms,
+	                                  the depth a fixed buffer holds) */
+	uint32_t jitter_buffer_max_ms; /* JB max depth; 0 = 400 ms (fixed: 200 ms) */
 
 	/* ── Registration ─────────────────────────────────────────────── */
 	uint32_t  reg_expires;           /* seconds; default 3600 */
@@ -1354,7 +1355,9 @@ typedef struct {
 	/* ── Media / NAT ──────────────────────────────────────────────────── */
 
 	echosdk_media_enc_t  media_enc;   /* ECHOSDK_MEDIA_ENC_NONE / SDES / DTLS_SRTP */
-	bool                 ice_enabled; /* false by default */
+	bool                 ice_enabled; /* false by default; set stun_server or
+	                                     turn_server too, or calls offer only
+	                                     local addresses (logged at create) */
 	bool                 rtcp_mux;     /* used when rtcp_mux_set is true */
 	bool                 rtcp_mux_set; /* false = inherit global; true = use rtcp_mux above */
 	const char          *stun_server; /* NULL = no STUN, e.g. "stun:stun.l.google.com:19302" */
@@ -2015,7 +2018,8 @@ ECHOSDK_EXPORT int echosdk_call_set_dscp_rtp(echosdk_call_handle_t call,
 /**
  * Update jitter buffer bounds.  Takes effect on calls established after
  * this call — existing streams keep their current adaptive depth.
- * Pass 0 for either bound to restore the baresip default (~0 / 150 ms).
+ * Pass 0 for either bound to restore its default (see jitter_buffer_min_ms
+ * and jitter_buffer_max_ms).  Keeps the current jbuf_type.
  */
 ECHOSDK_EXPORT void echosdk_set_jitter_buffer(uint32_t min_ms, uint32_t max_ms);
 
