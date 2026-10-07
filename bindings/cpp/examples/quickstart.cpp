@@ -559,6 +559,11 @@ struct AccountConfig {
 
 static void print_stats(const echosdk_ev_media_stats_t& s)
 {
+    /* Nothing to say before the codec is negotiated: the panel would read
+     * "? 0 kHz ch=0" with a flush count from a buffer that has carried no
+     * media.  The first real tick follows within stats_interval_ms. */
+    if (!s.codec_name) return;
+
     const char* method = (s.mos_method == ECHOSDK_MOS_EMODEL) ? "E-model" : "simplified";
     std::cout
     << "┌─ Media Stats ─────────────────────────────────\n"
@@ -570,8 +575,8 @@ static void print_stats(const echosdk_ev_media_stats_t& s)
     <<   "  SSRC rx=" << s.ssrc_rx << "  tx=" << s.ssrc_tx << "\n"
     << "│  Packets   : tx=" << s.packets_sent
     <<   "  rx=" << s.packets_received
-    <<   "  lost_tx=" << s.packets_lost << " (" << s.loss_pct << "%)"
-    <<   "  lost_rx=" << s.packets_lost_rx << " (" << s.loss_pct_rx << "%)\n"
+    <<   "  lost_tx=" << s.packets_lost << " (" << s.loss_pct << "% last RR)"
+    <<   "  lost_rx=" << s.packets_lost_rx << " (" << s.loss_pct_rx << "% window)\n"
     << "│  Bandwidth : tx=" << s.bandwidth_kbps_tx << " kbps"
     <<   "  rx=" << s.bandwidth_kbps_rx << " kbps"
     <<   "  (avg tx=" << s.avg_bandwidth_kbps_tx
@@ -583,6 +588,11 @@ static void print_stats(const echosdk_ev_media_stats_t& s)
     <<   "  load=" << s.jitter_buffer_load
     <<   "  late=" << s.late_packets
     <<   "  discarded=" << s.discarded_packets << "\n"
+    << "│  FEC/PLC   : fec_tx=" << (s.fec_active ? "on " : "off")
+    <<   " " << s.fec_level_pct << "%"
+    <<   "  plc_frames=" << s.plc_frames
+    <<   "  fec_recovered=" << s.fec_recovered
+    <<   "  plc_concealed=" << s.plc_concealed << "\n"
     << "│  MOS (" << method << "): LQ=" << s.mos_lq << "  CQ=" << s.mos_cq << "\n";
     std::cout << "│  Speaker   : "
     << (std::isnan(s.audio_level_dbov) ? "---" : std::to_string(s.audio_level_dbov) + " dBov")

@@ -92,3 +92,4 @@ desktop.ini
 /test/unit/webrtc_apm_test.o
 /test/unit/test_aurecv_plc
 /test/unit/test_jbuf_adapt
+/test/unit/test_stats_loss

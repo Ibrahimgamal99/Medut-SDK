@@ -40,7 +40,9 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" -GNinja \
   -DHAVE_THREADS=OFF \
   -DCMAKE_C_FLAGS="-std=gnu11 -D_GNU_SOURCE -D_DEFAULT_SOURCE -Wno-error=deprecated-declarations"
 
-cmake --build "${BUILD_DIR}" --target echosdk -j"$(nproc)"
+# gen_hpp re-embeds include/echosdk.h into bindings/cpp/echosdk.hpp; without
+# it the C++ binding falls behind the header it ships with.
+cmake --build "${BUILD_DIR}" --target echosdk gen_hpp -j"$(nproc)"
 cmake --install "${BUILD_DIR}"
 
 # ── Link shared library ───────────────────────────────────────────────────────

@@ -226,7 +226,10 @@ typedef struct {
 	int  bitrate;    /* target bps (VBR); default 32000; 0 = Opus picks (~50 kbps mono) */
 	int  complexity; /* 0-10 CPU trade-off; -1 = opus default (9) */
 	bool cbr;        /* constant bitrate; false = VBR (default) */
-	bool dtx;        /* discontinuous transmission (silence suppression) */
+	bool dtx;        /* discontinuous transmission: the encoder sends nothing
+	                    in silence and the offer carries usedtx=1 (RFC 7587
+	                    3.1.3); default false.  Our own switch: it does not
+	                    wait for the peer to ask. */
 	bool fec;        /* in-band FEC; default true (echosdk_config_init) */
 	bool stereo;     /* send and ask for stereo; false = mono (default) */
 } echosdk_opus_config_t;
@@ -663,6 +666,15 @@ typedef struct {
 	 * too, whose level fec_level_pct still reports. */
 	bool     fec_active;
 	uint32_t fec_level_pct;
+
+	/* ── Opus FEC we receive ───────────────────────────────────────────── */
+	/* How each frame the jitter buffer reported lost was filled in,
+	 * cumulative for the call: rebuilt from the redundant copy the next
+	 * packet carried (fec_recovered), or concealed by the decoder alone
+	 * (plc_concealed).  plc_frames counts the gaps the buffer saw; these
+	 * two say what became of them.  0 for a codec other than Opus. */
+	uint32_t fec_recovered;
+	uint32_t plc_concealed;
 } echosdk_ev_media_stats_t;
 
 typedef struct {

@@ -25,6 +25,7 @@ extern const char bsdk_patch_opus_fec[];
 extern const char bsdk_patch_aurecv_plc[];
 extern const char bsdk_patch_opus_init[];
 extern const char bsdk_patch_jbuf_adapt[];
+extern const char bsdk_patch_audio_tx[];
 
 #define ECHOSDK_EV_QUEUE_MAX 4096
 
@@ -494,9 +495,9 @@ int echosdk_init(const echosdk_config_t *cfg)
 	if (err)
 		goto fail;
 	BSDK_TRACE("[bsdk] step 9 done\n");
-	info("EchoSDK: baresip patches: %s, %s, %s, %s\n",
+	info("EchoSDK: baresip patches: %s, %s, %s, %s, %s\n",
 	     bsdk_patch_opus_fec, bsdk_patch_aurecv_plc, bsdk_patch_opus_init,
-	     bsdk_patch_jbuf_adapt);
+	     bsdk_patch_jbuf_adapt, bsdk_patch_audio_tx);
 
 	/* After modules_init (baresip's media-NAT list exists) and before any
 	 * account can ask for medianat "ice": register EchoSDK's own ICE agent. */

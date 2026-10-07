@@ -14,7 +14,43 @@ All notable changes to EchoSDK are documented here.
   against the old header gets memory written past the end of its struct.  The
   Dart, Python and C++ bindings in this tree match the header they ship with.
 
+### Added
+
+- **`fec_recovered` / `plc_concealed` in `echosdk_ev_media_stats_t`.**  How
+  each frame the jitter buffer reported lost was filled in: rebuilt from the
+  redundant copy the next Opus packet carried, or concealed by the decoder
+  alone.  Until now `plc_frames` counted the gaps and nothing said which of
+  the two decode paths filled them, so FEC could not be shown to do anything.
+  The C++ quickstart prints them with `fec_active` / `fec_level_pct`.
+
 ### Fixed
+
+- **Loss rates read 0% on most ticks, and the MOS swung between its
+  ceiling and the truth.**  `loss_pct` and `loss_pct_rx` were differenced
+  over the 2 s poll window, but baresip refreshes its RTCP counters only
+  when an RTCP packet arrives — every 5 s on Asterisk — so three ticks in
+  five saw no new loss and scored a clean link while `packets_lost` kept
+  climbing.  Both are now the loss over the interval each report covers,
+  held until the next report (src/stats_loss.h, test/unit/test_stats_loss.c).
+  Verified against a 1-in-12 drop injected on an echo call: every tick
+  reads 8.0–8.8% and the TX MOS holds at 3.55.
+- **The Opus MOS ceiling moved with how much the user talked.**  The G.113
+  Ie bucket was picked from the session's measured average bitrate; VBR
+  codes silence in a few kbps, so a quiet microphone pulled the average
+  under 12 kbps and the ceiling from 4.43 to 4.37 with no loss on the link.
+  The bucket now follows the bitrate the encoder is set to.
+- **`opus.dtx` did not switch DTX on.**  The vendored encoder took its DTX
+  flag from the peer's `usedtx` alone, so the setting only changed our
+  offer; and when DTX did engage, the 1-byte frames libopus returns for
+  silence were sent anyway, 50 a second.  The flag is now ours, frames of
+  2 bytes or less are dropped with the timestamp still advancing, and the
+  first packet after a gap carries the marker (RFC 7587 3.1.3).
+- **PulseAudio capture holes were zero-filled silently.**  A hole from the
+  server fed digital silence to the encoder, which reads -127 dBov on the
+  meter and a few kbps on the wire exactly like a dead microphone.  Holes
+  are now counted and logged (first, then every hundredth).
+- **The C++ quickstart printed a stats panel before the codec was
+  negotiated** (`Codec: ? 0 kHz ch=0`).  It waits for the first real tick.
 
 - **iOS: the SDK's noise gate, AGC and echo suppressor ran on top of
   VoiceProcessingIO on an app-owned device.**  Two causes.

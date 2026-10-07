@@ -74,6 +74,7 @@ typedef struct {
  int complexity;
  bool cbr;
  bool dtx;
+
  bool fec;
  bool stereo;
 } echosdk_opus_config_t;
@@ -300,6 +301,9 @@ typedef struct {
  char ice_remote_addr[64];
  bool fec_active;
  uint32_t fec_level_pct;
+
+ uint32_t fec_recovered;
+ uint32_t plc_concealed;
 } echosdk_ev_media_stats_t;
 
 typedef struct {
@@ -440,6 +444,7 @@ typedef struct {
  echosdk_opus_config_t opus;
  echosdk_jbuf_type_t jbuf_type;
  uint32_t jitter_buffer_min_ms;
+
  uint32_t jitter_buffer_max_ms;
  uint32_t reg_expires;
  uint32_t reg_refresh_pct;
@@ -651,6 +656,7 @@ typedef struct {
  void echosdk_set_speaker_gain_db(float db);
  int echosdk_call_set_dscp_rtp(echosdk_call_handle_t call,
                                               uint8_t dscp);
+
  void echosdk_set_jitter_buffer(uint32_t min_ms, uint32_t max_ms);
  void echosdk_set_jitter_buffer_type(echosdk_jbuf_type_t type);
  int echosdk_call_set_rtp_timeout(echosdk_call_handle_t call,

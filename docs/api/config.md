@@ -142,7 +142,7 @@ as convenience only — it is applied straight after `init()`, not marshalled in
 | `opus.bitrate` | `int` | 32000 | Target bitrate bps (VBR). 32 kbps is where speech quality levels off; 0 lets Opus pick (~50 kbps mono) |
 | `opus.complexity` | `int` | −1 | 0–10 CPU/quality trade-off (−1 = opus default: 9) |
 | `opus.cbr` | `bool` | false | Constant bitrate (false = VBR) |
-| `opus.dtx` | `bool` | false | Discontinuous transmission (silence suppression) |
+| `opus.dtx` | `bool` | false | Discontinuous transmission: the encoder sends nothing in silence (packets of 2 bytes or less are dropped, the RTP timestamp keeps advancing, the first packet after the gap carries the marker) and the offer says `usedtx=1`. Our own switch — it does not wait for the peer's `usedtx` |
 | `opus.fec` | `bool` | true | In-band forward error correction: ask the peer for it, and send our own sized by `opus_expected_loss_pct`. `false` turns it off both ways |
 | `opus.stereo` | `bool` | false | Send and ask for stereo (false = mono both ways) |
 

@@ -3,7 +3,7 @@ CFLAGS  := -Wall -Wextra -std=c11 -O2 -g
 LDFLAGS := -lm
 
 TESTS := test_mos test_url_parser test_mwi_parser test_codec_str test_transport_str \
-         test_sip_status
+         test_sip_status test_stats_loss
 
 # test_ws_pin links the real src/ws_path.c, so it needs the re/baresip headers
 # and libs a host build installs. Built only when that sysroot is present
@@ -21,7 +21,7 @@ endif
 # Needs the baresip tree a build has patched, at the patch version the test
 # was written for (cmake/patch-baresip-sources.cmake, job 6).
 BARESIP_SRC ?= ../../third_party/baresip
-ifneq ($(shell grep -l "echosdk-patch aurecv-plc v1" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
+ifneq ($(shell grep -l "echosdk-patch aurecv-plc v2" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
 TESTS += test_aurecv_plc
 endif
 # Same for the jitter buffer's adaptive sizing (job 8).
@@ -52,6 +52,10 @@ test_transport_str: test_transport_str.c
 # Includes src/sip_status.h directly — the header is free of re/baresip so the
 # shipped mapping is the one under test, with no sysroot needed.
 test_sip_status: test_sip_status.c ../../src/sip_status.h
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+# Includes src/stats_loss.h directly — free of re/baresip, like sip_status.h.
+test_stats_loss: test_stats_loss.c ../../src/stats_loss.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 # No --wrap: ws_path.c owns the public websock_connect/sip_dialog_route names

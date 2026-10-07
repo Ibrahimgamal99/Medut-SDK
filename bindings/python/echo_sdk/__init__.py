@@ -204,6 +204,8 @@ def _raw_stats_to_event(s) -> MediaStatsEvent:
         ice_remote_addr         = _s(s.ice_remote_addr) or "",
         fec_active              = bool(s.fec_active),
         fec_level_pct           = s.fec_level_pct,
+        fec_recovered           = s.fec_recovered,
+        plc_concealed           = s.plc_concealed,
     )
 
 

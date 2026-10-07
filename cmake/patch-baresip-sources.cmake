@@ -1,5 +1,5 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Eight jobs:
+# Apply EchoSDK's baresip patches at build time.  Ten jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
 #   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
@@ -12,6 +12,9 @@
 #      settings do not carry into the next.
 #   8. Size the adaptive jitter buffer from the delays actually seen, not
 #      from twice a mean jitter that sits below every delay spike.
+#   9. Set the marker on the first packet after an Opus DTX gap, and reach
+#      the receive decoder's state for the counters only it keeps.
+#  10. Count PulseAudio capture holes instead of zero-filling them silently.
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -20,7 +23,7 @@
 # a baresip bump moves the text it splices at, rather than silently building
 # without the fix.
 #
-# Jobs 5-8 are the ones nothing in the SDK calls into, so nothing would notice
+# Jobs 5-9 are the ones nothing in the SDK calls into, so nothing would notice
 # them missing.  Each defines a `bsdk_patch_*` string that src/core.c
 # references: a tree without the patch fails to link, and
 # `strings libechosdk.so | grep echosdk-patch` names the versions a binary
@@ -373,44 +376,124 @@ foreach(_f "${OPUS_ENC_C}" "${OPUS_DEC_C}")
   endif()
 endforeach()
 
-set(_ENC_OLD [=[
+set(_OLD_ENC0 [=[
+struct auenc_state {
+	OpusEncoder *enc;
+	unsigned ch;
+};
+]=])
+set(_NEW_ENC0 [=[
+/* EchoSDK-patched (echosdk-patch opus-fec v2): the local DTX switch, set by
+ * modules/opus/opus.c from the opus_dtx config key (job 7). */
+extern opus_int32 opus_dtx;
+
+
+struct auenc_state {
+	OpusEncoder *enc;
+	unsigned ch;
+};
+]=])
+set(_OLD_ENC1 [=[
 	if (opus_packet_loss) {
 		opus_encoder_ctl(aes->enc,
 				 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
 	}
 ]=])
-set(_ENC_NEW [=[
+set(_NEW_ENC1 [=[
 	/* EchoSDK-patched: unconditional, so the level can return to 0. */
 	opus_encoder_ctl(aes->enc,
 			 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
 ]=])
+set(_OLD_ENC2 [=[
+	(void)opus_encoder_ctl(aes->enc, OPUS_SET_DTX(prm.dtx));
+]=])
+set(_NEW_ENC2 [=[
+	/* EchoSDK-patched: usedtx in the peer's fmtp is only its preference
+	 * (RFC 7587 6.1); DTX is ours to switch on, and a DTX stream decodes
+	 * anywhere. */
+	(void)opus_encoder_ctl(aes->enc, OPUS_SET_DTX(prm.dtx || opus_dtx));
+]=])
+set(_OLD_ENC3 [=[
+	*len = n;
 
-file(READ "${OPUS_ENC_C}" _content)
-string(FIND "${_content}" "${_ENC_NEW}" _done)
-if(NOT _done EQUAL -1)
-  message(STATUS "patch-baresip-sources: ${OPUS_ENC_C} already patched (expected loss can return to 0)")
-else()
-  string(FIND "${_content}" "${_ENC_OLD}" _pos)
-  if(_pos EQUAL -1)
-    message(FATAL_ERROR
-      "patch-baresip-sources: anchor not found in ${OPUS_ENC_C} (expected "
-      "loss can return to 0).\nThe pinned baresip revision has moved the opus "
-      "module. Re-derive this patch — building without it leaves FEC "
-      "redundancy stuck once raised.")
-  endif()
-  string(REPLACE "${_ENC_OLD}" "${_ENC_NEW}" _content "${_content}")
-  file(WRITE "${OPUS_ENC_C}" "${_content}")
-  message(STATUS "patch-baresip-sources: patched ${OPUS_ENC_C} (expected loss can return to 0)")
-endif()
+	return 0;
+}
+]=])
+set(_NEW_ENC3 [=[
+	/* EchoSDK-patched: a packet of 2 bytes or less is one the encoder says
+	 * not to transmit (DTX).  Zero length makes src/audio.c skip the send
+	 * while its RTP timestamp still advances, so the next packet lands a
+	 * whole number of frames later (RFC 7587 3.1.3). */
+	*len = (n <= 2) ? 0 : (size_t)n;
 
-# decode.c: the FEC gate, and the marker src/core.c links against.
+	return 0;
+}
+]=])
+set(_keys ENC0 ENC1 ENC2 ENC3)
+bsdk_patch_file("${OPUS_ENC_C}" "echosdk-patch opus-fec v2"
+  "expected loss can return to 0, local DTX, DTX frames dropped"
+  "leaves FEC redundancy stuck once raised and sends DTX silence at 50 pps")
+
+# decode.c: the FEC gate, the FEC/PLC split, and the marker src/core.c links
+# against.
+set(_OLD_DEC0 [=[
+struct audec_state {
+	OpusDecoder *dec;
+	unsigned ch;
+};
+]=])
+set(_NEW_DEC0 [=[
+struct audec_state {
+	OpusDecoder *dec;
+	unsigned ch;
+	/* EchoSDK-patched: how lost frames were filled in, for src/stats.c */
+	uint32_t n_fec;   /**< Rebuilt from the next packet's LBRR copy */
+	uint32_t n_plc;   /**< Concealed by the decoder alone           */
+};
+
+
+/* EchoSDK-patched: the split, read by src/stats.c through
+ * audio_decoder_state() (job 9). */
+int opus_decode_fec_stats(const struct audec_state *ads,
+			  uint32_t *fec, uint32_t *plc);
+int opus_decode_fec_stats(const struct audec_state *ads,
+			  uint32_t *fec, uint32_t *plc)
+{
+	if (!ads)
+		return EINVAL;
+	if (fec)
+		*fec = ads->n_fec;
+	if (plc)
+		*plc = ads->n_plc;
+	return 0;
+}
+]=])
 set(_OLD_DEC [=[
 	fec = buf && len && opus_packet_loss > 0;
 ]=])
 set(_NEW_DEC [=[
 	/* EchoSDK-patched: whether the peer sent FEC is not a question our
-	 * own expected loss (opus_packet_loss) can answer. */
-	fec = buf && len;
+	 * own expected loss (opus_packet_loss) can answer — the packet is.
+	 * Without an LBRR copy libopus would conceal anyway; asking first
+	 * tells the two apart for the counters. */
+	fec = buf && len && opus_packet_has_lbrr(buf, (opus_int32)len) == 1;
+]=])
+set(_OLD_DEC2 [=[
+	nsamp = (n * ads->ch);
+
+	if (nsamp > *sampc) {
+		warning("opus: pkloss: buffer too small.\n");
+]=])
+set(_NEW_DEC2 [=[
+	if (fec)
+		ads->n_fec++;
+	else
+		ads->n_plc++;
+
+	nsamp = (n * ads->ch);
+
+	if (nsamp > *sampc) {
+		warning("opus: pkloss: buffer too small.\n");
 ]=])
 set(_OLD_DECMARK [=[
 int opus_decode_pkloss(struct audec_state *ads,
@@ -419,14 +502,14 @@ set(_NEW_DECMARK [=[
 /* EchoSDK-patched: src/core.c references this, so a build without the FEC
  * patch below fails to link instead of shipping without it. */
 extern const char bsdk_patch_opus_fec[];
-const char bsdk_patch_opus_fec[] = "echosdk-patch opus-fec v1";
+const char bsdk_patch_opus_fec[] = "echosdk-patch opus-fec v2";
 
 
 int opus_decode_pkloss(struct audec_state *ads,
 ]=])
-set(_keys DEC DECMARK)
-bsdk_patch_file("${OPUS_DEC_C}" "echosdk-patch opus-fec v1"
-  "FEC decode not gated on our expected loss"
+set(_keys DEC0 DEC DEC2 DECMARK)
+bsdk_patch_file("${OPUS_DEC_C}" "echosdk-patch opus-fec v2"
+  "FEC decode not gated on our expected loss, FEC/PLC split counted"
   "throws away the FEC the peer sends")
 
 # ---------------------------------------------------------------------------
@@ -503,7 +586,7 @@ set(_NEW_AR2 [=[
 /* EchoSDK-patched: src/core.c references this, so a build without burst
  * concealment fails to link instead of shipping without it. */
 extern const char bsdk_patch_aurecv_plc[];
-const char bsdk_patch_aurecv_plc[] = "echosdk-patch aurecv-plc v1";
+const char bsdk_patch_aurecv_plc[] = "echosdk-patch aurecv-plc v2";
 
 
 /* EchoSDK-patched: how many of `lostc` lost frames to conceal.  None that
@@ -681,8 +764,24 @@ set(_NEW_AR7 [=[
 		ar->plc_read_sz  = 0;
 	}
 ]=])
-set(_keys AR1 AR2 AR3 AR4 AR5 AR6 AR7)
-bsdk_patch_file("${AURECV_C}" "echosdk-patch aurecv-plc v1"
+set(_OLD_AR8 [=[
+const struct aucodec *aurecv_codec(const struct audio_recv *ar)
+{
+]=])
+set(_NEW_AR8 [=[
+/* EchoSDK-patched: the decoder's state, for codec-specific counters that
+ * only it keeps (modules/opus/decode.c: the FEC/PLC split). */
+struct audec_state *aurecv_decoder(const struct audio_recv *ar)
+{
+	return ar ? ar->dec : NULL;
+}
+
+
+const struct aucodec *aurecv_codec(const struct audio_recv *ar)
+{
+]=])
+set(_keys AR1 AR2 AR3 AR4 AR5 AR6 AR7 AR8)
+bsdk_patch_file("${AURECV_C}" "echosdk-patch aurecv-plc v2"
   "burst concealment at playout"
   "plays a burst of loss as silence, or leaves the call permanently delayed after one")
 
@@ -712,7 +811,7 @@ set(_NEW_OI1 [=[
 /* EchoSDK-patched: src/core.c references this, so a build without the
  * defaults reset below fails to link instead of shipping without it. */
 extern const char bsdk_patch_opus_init[];
-const char bsdk_patch_opus_init[] = "echosdk-patch opus-init v1";
+const char bsdk_patch_opus_init[] = "echosdk-patch opus-init v2";
 
 
 static int module_init(void)
@@ -736,6 +835,7 @@ set(_NEW_OI2 [=[
 	opus_complexity  = 10;
 	opus_application = OPUS_APPLICATION_AUDIO;
 	opus_packet_loss = 0;
+	opus_dtx         = 0;
 ]=])
 set(_OLD_OI3 [=[
 	if (!stereo || !sprop_stereo)
@@ -744,9 +844,29 @@ set(_OLD_OI3 [=[
 set(_NEW_OI3 [=[
 	opus.ch = (stereo && sprop_stereo) ? 2 : 1;   /* EchoSDK-patched */
 ]=])
-set(_keys OI1 OI2 OI3)
-bsdk_patch_file("${OPUS_C}" "echosdk-patch opus-init v1"
-  "defaults reset on every init"
+set(_OLD_OI4 [=[
+opus_int32 opus_packet_loss = 0;
+]=])
+set(_NEW_OI4 [=[
+opus_int32 opus_packet_loss = 0;
+opus_int32 opus_dtx = 0;   /* EchoSDK-patched: local DTX switch, encode.c */
+]=])
+set(_OLD_OI5 [=[
+	if (0 == conf_get_bool(conf, "opus_dtx", &b)) {
+
+		n = re_snprintf(p, sizeof(fmtp) - str_len(p),
+				";usedtx=%d", b);
+]=])
+set(_NEW_OI5 [=[
+	if (0 == conf_get_bool(conf, "opus_dtx", &b)) {
+
+		opus_dtx = b;   /* EchoSDK-patched: ours to switch, not the peer's */
+		n = re_snprintf(p, sizeof(fmtp) - str_len(p),
+				";usedtx=%d", b);
+]=])
+set(_keys OI1 OI2 OI3 OI4 OI5)
+bsdk_patch_file("${OPUS_C}" "echosdk-patch opus-init v2"
+  "defaults reset on every init, local DTX switch"
   "carries one init's opus settings, and mono, into every later one")
 
 # ---------------------------------------------------------------------------
@@ -955,3 +1075,117 @@ set(_keys JB1 JB2 JB3 JB4 JB5 JB6)
 bsdk_patch_file("${JBUF_C}" "echosdk-patch jbuf-adapt v1"
   "adaptive sizing from the delays seen"
   "holds the adaptive buffer at 2x the mean jitter, below every delay spike")
+
+# ---------------------------------------------------------------------------
+# Job 9: audio.c — the marker after a DTX gap, and the decoder's state
+#
+# With DTX the encoder hands back a frame of no length (job 5) and
+# encode_rtp_send() sends nothing, as it should — but the marker bit that
+# RFC 7587 3.1.3 wants on the first packet after the gap was only ever set
+# on the first packet of the stream.  And nothing in baresip's API reaches
+# the receive decoder's state, which is where the Opus module keeps the
+# FEC/PLC split that src/stats.c reports.
+# ---------------------------------------------------------------------------
+
+set(AUDIO_C "${SOURCE_DIR}/src/audio.c")
+if(NOT EXISTS "${AUDIO_C}")
+  message(FATAL_ERROR "patch-baresip-sources: ${AUDIO_C} does not exist")
+endif()
+
+set(_OLD_AT1 [=[
+ out:
+	tx->marker = false;
+}
+]=])
+set(_NEW_AT1 [=[
+ out:
+	/* EchoSDK-patched: a frame the encoder dropped (Opus DTX) leaves the
+	 * marker set, for the first packet after the gap (RFC 7587 3.1.3). */
+	tx->marker = (len == 0);
+}
+]=])
+set(_OLD_AT2 [=[
+static int tx_thread(void *arg)
+{
+]=])
+set(_NEW_AT2 [=[
+/* EchoSDK-patched: src/core.c references this, so a build without the DTX
+ * marker fix fails to link instead of shipping without it. */
+extern const char bsdk_patch_audio_tx[];
+const char bsdk_patch_audio_tx[] = "echosdk-patch audio-tx v1";
+
+
+struct audec_state *aurecv_decoder(const struct audio_recv *ar);
+
+
+/* EchoSDK-patched: the receive decoder's state, for the codec-specific
+ * counters only it keeps (src/stats.c: the Opus FEC/PLC split). */
+struct audec_state *audio_decoder_state(const struct audio *a);
+struct audec_state *audio_decoder_state(const struct audio *a)
+{
+	return a ? aurecv_decoder(a->aur) : NULL;
+}
+
+
+static int tx_thread(void *arg)
+{
+]=])
+set(_keys AT1 AT2)
+bsdk_patch_file("${AUDIO_C}" "echosdk-patch audio-tx v1"
+  "DTX marker and decoder state accessor"
+  "sends the first packet after a DTX gap without its marker")
+
+# ---------------------------------------------------------------------------
+# Job 10: pulse recorder — count capture holes
+#
+# PulseAudio/PipeWire hands the read callback a NULL buffer for a hole (an
+# overrun on the server side); the module zero-filled it without a word.
+# Digital silence into the encoder reads -127 dBov on the meter and a few
+# kbps on the wire, exactly like a dead microphone, and there was no way to
+# tell the two apart.
+# ---------------------------------------------------------------------------
+
+set(PULSE_REC_C "${SOURCE_DIR}/modules/pulse/recorder.c")
+if(NOT EXISTS "${PULSE_REC_C}")
+  message(FATAL_ERROR "patch-baresip-sources: ${PULSE_REC_C} does not exist")
+endif()
+
+set(_OLD_PR1 [=[
+	uint64_t samps;
+
+	void *arg;
+};
+]=])
+set(_NEW_PR1 [=[
+	uint64_t samps;
+	uint64_t holes;   /* EchoSDK-patched: NULL peeks zero-filled so far */
+
+	void *arg;
+};
+]=])
+set(_OLD_PR2 [=[
+		if (pabuf)
+			memcpy((uint8_t *) st->sampv + idx, pabuf, rlen);
+		else
+			memset((uint8_t *) st->sampv + idx, 0, rlen);
+]=])
+set(_NEW_PR2 [=[
+		if (pabuf) {
+			memcpy((uint8_t *) st->sampv + idx, pabuf, rlen);
+		}
+		else {
+			/* EchoSDK-patched (echosdk-patch pulse-holes v1): a hole
+			 * is the server's gap, not the microphone's silence.  It
+			 * has to be zero-filled, but never quietly: downstream
+			 * it reads exactly like a dead microphone (-127 dBov). */
+			memset((uint8_t *) st->sampv + idx, 0, rlen);
+			if (st->holes++ % 100 == 0)
+				warning("pulse: %s capture hole, %zu bytes "
+					"(%llu so far)\n", st->b->sname, rlen,
+					(unsigned long long)st->holes);
+		}
+]=])
+set(_keys PR1 PR2)
+bsdk_patch_file("${PULSE_REC_C}" "echosdk-patch pulse-holes v1"
+  "capture holes counted"
+  "zero-fills capture holes silently, indistinguishable from a dead microphone")

@@ -9,10 +9,16 @@
  * convention as WebRTC getStats() and PJSIP, both of which expect the
  * application to difference consecutive samples to obtain a rate.  We do
  * that differencing here: packets_lost/packets_lost_rx stay cumulative (they
- * are counters and documented as such), while loss_pct/loss_pct_rx are rates
- * over the last poll window.  Feeding a lifetime average into the E-model
- * would let one early burst depress MOS for the rest of the call with no
- * way to recover.
+ * are counters and documented as such), while loss_pct/loss_pct_rx are
+ * rates.  Feeding a lifetime average into the E-model would let one early
+ * burst depress MOS for the rest of the call with no way to recover.
+ *
+ * Both rates are over the peer's RTCP report interval, not the poll window
+ * (stats_loss.h): baresip refreshes its rtcp_stats snapshot only when an
+ * RTCP packet arrives — every 5 s on Asterisk against a 2 s poll — so a
+ * poll-window rate read 0% on most ticks and the MOS swung between its
+ * ceiling and the truth.  The jitter-buffer discard rate is read live and
+ * stays on the poll window.
  *
  * ── E-model (ITU-T G.107 narrowband, G.107.1 wideband) ───────────────────
  *   Ie-eff = Ie + (95-Ie)·Ppl/(Ppl+Bpl)      per-codec, ITU-T G.113
@@ -85,8 +91,11 @@ static codec_params_t codec_emodel_params(const char *name, uint32_t srate,
 		 * Opus.  Treat as indicative, not normative. */
 		bsdk_bw_class_t bw = (srate >= 16000) ? BSDK_BW_WIDE
 		                                      : BSDK_BW_NARROW;
-		if (bitrate_kbps <= 8)  return (codec_params_t){14.f, 12.0f, bw};
-		if (bitrate_kbps <= 12) return (codec_params_t){11.f, 14.0f, bw};
+		/* 0 = Opus picks its own rate (~50 kbps mono): full rate. */
+		if (bitrate_kbps && bitrate_kbps <= 8)
+			return (codec_params_t){14.f, 12.0f, bw};
+		if (bitrate_kbps && bitrate_kbps <= 12)
+			return (codec_params_t){11.f, 14.0f, bw};
 		return (codec_params_t){7.f, 14.0f, bw};
 	}
 
@@ -199,6 +208,46 @@ static uint32_t counter_delta_i(int32_t now, int32_t prev)
 
 /* ── Shared stats population ──────────────────────────────────── */
 
+/* The bitrate our Opus encoder is set to, in kbps: the adaptive controller's
+ * level once it has stepped, else the lower of the peer's maxaveragebitrate
+ * and our configured target — the choice modules/opus/encode.c makes.
+ * 0 = Opus picks (OPUS_AUTO).
+ *
+ * Not the measured average bitrate, which this used to key the Ie table
+ * on: VBR codes silence in a few kbps, so a quiet microphone pulled the
+ * session average under 12 kbps, the Ie bucket down a step and the MOS
+ * ceiling from 4.43 to 4.37 with no loss on the link at all. */
+static uint32_t opus_encoder_kbps(const struct echosdk_call *lc,
+                                  struct stream *strm)
+{
+	uint32_t bps = lc->adapt_bitrate;
+
+	if (!bps) {
+		const struct sdp_format *sc =
+			sdp_media_rformat(stream_sdpmedia(strm), NULL);
+		struct pl params, v;
+
+		bps = g_bsdk.cfg.opus.bitrate > 0
+		    ? (uint32_t)g_bsdk.cfg.opus.bitrate : 0;
+		if (sc && sc->params) {
+			pl_set_str(&params, sc->params);
+			if (fmt_param_get(&params, "maxaveragebitrate", &v)) {
+				uint32_t peer = pl_u32(&v);
+				if (peer && (!bps || peer < bps))
+					bps = peer;
+			}
+		}
+	}
+	return bps / 1000;
+}
+
+/* Both EchoSDK-patched into baresip (cmake/patch-baresip-sources.cmake,
+ * jobs 9 and 5): the receive decoder's state, and the Opus module's count
+ * of how each lost frame was filled in. */
+struct audec_state *audio_decoder_state(const struct audio *a);
+int opus_decode_fec_stats(const struct audec_state *ads,
+                          uint32_t *fec, uint32_t *plc);
+
 /* Fill all numeric/address fields of *s from the live audio stream.
  * Does NOT set s->codec_name (pointer lifetime differs per caller).
  *
@@ -270,6 +319,31 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 		jb_get_total     = jb.n_get;
 	}
 
+	/* ── How the lost frames were filled in (Opus only) ───────── */
+	/* Summed into the call from the decoder's own count, which starts
+	 * over with the decoder — on a codec change, and before the final
+	 * tick, when it is already gone. */
+	{
+		const struct aucodec *rac = audio_codec(au, false);
+		struct audec_state *ads = NULL;
+		uint32_t fec = 0, plc = 0;
+
+		if (rac && rac->name && !str_casecmp(rac->name, "opus"))
+			ads = audio_decoder_state(au);
+		if (ads && !opus_decode_fec_stats(ads, &fec, &plc)) {
+			if (fec < lc->stats_fec_prev || plc < lc->stats_plc_prev) {
+				lc->stats_fec_prev = 0;   /* a new decoder */
+				lc->stats_plc_prev = 0;
+			}
+			lc->stats_fec_total += fec - lc->stats_fec_prev;
+			lc->stats_plc_total += plc - lc->stats_plc_prev;
+			lc->stats_fec_prev = fec;
+			lc->stats_plc_prev = plc;
+		}
+		s->fec_recovered = lc->stats_fec_total;
+		s->plc_concealed = lc->stats_plc_total;
+	}
+
 	/* ── RTCP (may be absent early in a call; leave zeros if so) ─── */
 	s->mos_method = g_bsdk.cfg.mos_method;
 
@@ -298,32 +372,23 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 		s->packets_lost    = cum_tx_lost > 0 ? (uint32_t)cum_tx_lost : 0u;
 		s->packets_lost_rx = cum_rx_lost > 0 ? (uint32_t)cum_rx_lost : 0u;
 
-		/* ── TX loss rate over the poll window ──────────────── */
-		/* Denominator is what we sent in the window; the peer's RR is
-		 * the only source for the numerator and can lag it by up to one
-		 * RTCP interval, so a burst shows up slightly smeared. */
-		uint32_t d_tx_sent = counter_delta(rs->tx.sent,
-		                                   lc->stats_prev_tx_sent);
-		uint32_t d_tx_lost = counter_delta_i(cum_tx_lost,
-		                                     lc->stats_prev_tx_lost);
-		if (d_tx_lost > d_tx_sent)
-			d_tx_lost = d_tx_sent;
-		s->loss_pct = d_tx_sent > 0
-		            ? (float)d_tx_lost * 100.f / (float)d_tx_sent : 0.f;
+		/* ── TX loss rate, per receiver report ─────────────── */
+		/* Lost over the sequence range the report covers, held until
+		 * the next one (stats_loss.h).  Folded on every read, not only
+		 * the tick: a report folds once, whoever sees it first, and
+		 * both then read the same figure. */
+		bsdk_tx_loss_fold(&lc->stats_tx_loss, rs->tx.ehsn,
+		                  cum_tx_lost, rs->tx.sent);
+		s->loss_pct = lc->stats_tx_loss.pct;
 
-		/* ── RX loss rate over the poll window ──────────────── */
+		/* ── RX loss rate, per RTCP snapshot ───────────────── */
 		/* rs->rx.sent is the RTCP source's own received count — the
 		 * very counter rtp_source_calc_lost() differences against, so
-		 * received + lost is exactly `expected`.  Using the stream
-		 * metric here instead mixed two counters that do not agree. */
-		uint32_t d_rx_recv = counter_delta(rs->rx.sent,
-		                                   lc->stats_prev_rx_recv);
-		uint32_t d_rx_lost = counter_delta_i(cum_rx_lost,
-		                                     lc->stats_prev_rx_lost);
-		uint32_t d_rx_expected = d_rx_recv + d_rx_lost;
-		s->loss_pct_rx = d_rx_expected > 0
-		               ? (float)d_rx_lost * 100.f / (float)d_rx_expected
-		               : 0.f;
+		 * received + lost is exactly `expected`.  Both are frozen in
+		 * baresip's snapshot between RTCP packets, hence the same
+		 * windowing as TX. */
+		bsdk_rx_loss_fold(&lc->stats_rx_loss, rs->rx.sent, cum_rx_lost);
+		s->loss_pct_rx = lc->stats_rx_loss.pct;
 
 		/* ── Jitter buffer discard rate over the window ───────── */
 		uint32_t d_jb_disc = counter_delta(jb_discard_total,
@@ -343,7 +408,7 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 		codec_params_t cp = codec_emodel_params(ac ? ac->name : NULL,
 		                                        s->codec_sample_rate,
-		                                        s->avg_bandwidth_kbps_tx);
+		                                        opus_encoder_kbps(lc, strm));
 
 		/* Each direction is scored from its own loss and its own jitter.
 		 * Pairing TX loss with RX jitter (as this used to) described a
@@ -367,10 +432,6 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 		s->mos_cq_rx = rx.cq;
 
 		if (advance) {
-			lc->stats_prev_tx_sent    = rs->tx.sent;
-			lc->stats_prev_tx_lost    = cum_tx_lost;
-			lc->stats_prev_rx_recv    = rs->rx.sent;
-			lc->stats_prev_rx_lost    = cum_rx_lost;
 			lc->stats_prev_jb_discard = jb_discard_total;
 			lc->stats_prev_jb_get     = jb_get_total;
 

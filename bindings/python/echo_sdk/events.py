@@ -147,6 +147,11 @@ class MediaStatsEvent:
     # False / 0 for G.711 or a peer that did not ask for FEC.
     fec_active: bool = False
     fec_level_pct: int = 0
+    # Opus FEC we receive: how each frame the jitter buffer reported lost
+    # was filled in, cumulative — from the next packet's redundant copy, or
+    # by concealment alone.  0 for a codec other than Opus.
+    fec_recovered: int = 0
+    plc_concealed: int = 0
 
 
 @dataclass
@@ -382,7 +387,7 @@ class CallStats:
         "ice_state", "ice_local_type", "ice_remote_type", "ice_rtt_ms",
         "ice_generation", "ice_local_addr", "ice_remote_addr",
         # Opus FEC
-        "fec_active", "fec_level_pct",
+        "fec_active", "fec_level_pct", "fec_recovered", "plc_concealed",
     )
 
     def __init__(self):

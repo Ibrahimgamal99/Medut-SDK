@@ -16,6 +16,7 @@
 #include <re.h>
 #include <baresip.h>
 #include "../include/echosdk.h"
+#include "stats_loss.h"
 
 /* ── Forward declarations ──────────────────────────────────────────────── */
 
@@ -296,10 +297,14 @@ struct echosdk_call {
 	 * over the poll window or one early burst depresses the figure for the
 	 * rest of the call and recovery never shows.  Advanced only by the
 	 * polling tick — the sync getter reads the same window read-only. */
-	uint32_t                   stats_prev_tx_sent;
-	int32_t                    stats_prev_tx_lost;
-	uint32_t                   stats_prev_rx_recv;
-	int32_t                    stats_prev_rx_lost;
+	/* Loss rates are windowed on the peer's RTCP reports instead
+	 * (stats_loss.h): baresip's rtcp_stats snapshot only moves when
+	 * one arrives. */
+	struct bsdk_tx_loss_win    stats_tx_loss;
+	struct bsdk_rx_loss_win    stats_rx_loss;
+	/* Opus decoder FEC/PLC split, summed over the call's decoders */
+	uint32_t                   stats_fec_total, stats_fec_prev;
+	uint32_t                   stats_plc_total, stats_plc_prev;
 	uint32_t                   stats_prev_jb_get;
 	uint32_t                   stats_prev_jb_discard;
 	/* Previous-tick values for quality alert threshold crossing detection */

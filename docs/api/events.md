@@ -231,8 +231,8 @@ Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchro
 
 | Field | Type | Description |
 |---|---|---|
-| `loss_pct` | `float` | TX-side loss % **over the last poll window**, not lifetime |
-| `loss_pct_rx` | `float` | RX-side loss % over the last poll window |
+| `loss_pct` | `float` | TX-side loss % **over the peer's last RTCP report interval**, held until the next report; not lifetime |
+| `loss_pct_rx` | `float` | RX-side loss % over the peer's last RTCP report interval, held until the next report |
 
 **Delay and jitter**
 
@@ -261,6 +261,8 @@ Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchro
 | `plc_ratio` | `float` | `plc_frames` / total RX frames (0.0–1.0) |
 | `fec_active` | `bool` | Our encoder is sending Opus in-band FEC: on at 4% peer-reported loss (or 2% in two reports running), off after 10 s under 1%. False for G.711 or a peer without `useinbandfec=1` |
 | `fec_level_pct` | `uint32_t` | Expected loss the FEC is sized for (5–25); 0 when off |
+| `fec_recovered` | `uint32_t` | Lost frames rebuilt from the redundant copy the next packet carried (cumulative; Opus only) |
+| `plc_concealed` | `uint32_t` | Lost frames the decoder concealed on its own, no redundant copy at hand (cumulative; Opus only) |
 
 **Bandwidth**
 
