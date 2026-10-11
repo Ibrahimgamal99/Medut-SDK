@@ -222,6 +222,30 @@ typedef enum {
 	ECHOSDK_ICE_CAND_NONE,
 } echosdk_ice_cand_type_t;
 
+/**
+ * One STUN or TURN server, in the URL grammar browsers accept (RFC 7064 /
+ * RFC 7065): "stun:host[:port]", "stuns:host[:port]", "turn:host[:port]
+ * [?transport=udp|tcp]", "turns:host[:port][?transport=tcp]".  Default
+ * ports 3478 (5349 for the TLS schemes).  `user`/`pass` are the TURN
+ * long-term credentials and ignored for STUN.  TURN over TCP/TLS entries are
+ * accepted and currently skipped at gathering time with a warning.
+ */
+typedef struct {
+	const char *url;
+	const char *user;
+	const char *pass;
+} echosdk_ice_server_t;
+
+/** Which candidates a call may use (WebRTC's iceTransportPolicy). */
+typedef enum {
+	ECHOSDK_ICE_TRANSPORT_ALL = 0,   /**< host, reflexive and relayed */
+	ECHOSDK_ICE_TRANSPORT_RELAY,     /**< relayed only: offer and accept
+	                                      nothing but TURN candidates.  A
+	                                      call with no usable TURN server
+	                                      fails fast instead of leaking a
+	                                      direct path */
+} echosdk_ice_transport_policy_t;
+
 typedef struct {
 	int  bitrate;    /* target bps (VBR); default 32000; 0 = Opus picks (~50 kbps mono) */
 	int  complexity; /* 0-10 CPU trade-off; -1 = opus default (9) */
@@ -1317,6 +1341,33 @@ typedef struct {
 	 */
 	uint32_t  ice_gathering_timeout_ms;
 
+	/* ── ICE servers (append-only ABI) ─────────────────────────────────── */
+	/**
+	 * Every STUN/TURN server to gather from, in preference order; the
+	 * array is deep-copied at init.  NULL or 0 entries = fold in the legacy
+	 * stun_server / turn_server fields above (TURN first).  Each server is
+	 * resolved and asked on every gather, including the re-gather of an
+	 * ICE restart, so credentials changed through
+	 * echosdk_account_set_ice_servers() reach the next restart.
+	 */
+	const echosdk_ice_server_t     *ice_servers;
+	uint32_t                        ice_server_count;
+	echosdk_ice_transport_policy_t  ice_transport_policy; /* default ALL */
+
+	/**
+	 * Gather on every interface the platform can pin a socket to, not only
+	 * the one the call signals from — cellular next to Wi-Fi on a phone, a
+	 * VPN on a desktop (at most two extra; loopback, bridges and container
+	 * interfaces are never used).  A handover then offers candidates that
+	 * already exist instead of waiting on a fresh gather.  On Android the
+	 * extra interface must be known through
+	 * echosdk_network_set_interface_handle(); the Flutter plugin does that
+	 * when EchoSDKConfig.iceMultipath is set.  Experimental: verified on
+	 * Linux; on Android the pinned socket got no replies on the device it
+	 * was tried on (docs/guides/network_handover.md).  Default false.
+	 */
+	bool                            ice_multipath;
+
 } echosdk_config_t;
 
 /* ── Account config ───────────────────────────────────────────────────────── */
@@ -1455,6 +1506,13 @@ typedef struct {
 	/* ── DTMF ──────────────────────────────────────────────────────────── */
 	echosdk_dtmf_mode_t dtmf_mode; /* default ECHOSDK_DTMF_RFC4733 (0) */
 
+	/* ── ICE servers (append-only ABI) ─────────────────────────────────── */
+	/** Per-account STUN/TURN list and policy; NULL / 0 = inherit the global
+	 *  list, then the legacy single-server fields.  See echosdk_config_t. */
+	const echosdk_ice_server_t     *ice_servers;
+	uint32_t                        ice_server_count;
+	echosdk_ice_transport_policy_t  ice_transport_policy;
+
 } echosdk_account_config_t;
 
 /* ── Lifecycle ────────────────────────────────────────────────────────────── */
@@ -1567,6 +1625,21 @@ ECHOSDK_EXPORT int echosdk_account_cancel_retry(echosdk_account_handle_t acct);
 /** Skip the current backoff delay and re-register immediately.
  *  Resets the attempt counter. No-op if the account is not in a retry loop. */
 ECHOSDK_EXPORT int echosdk_account_retry_now(echosdk_account_handle_t acct);
+
+/**
+ * Replace the account's STUN/TURN server list and transport policy.
+ *
+ * Takes effect on the next gather: a new call, or the re-gather of an ICE
+ * restart on a live call (network handover, media stall), which is how
+ * short-lived TURN credentials (RFC 7635 / TURN REST) are refreshed without
+ * re-creating the account.  `count` 0 clears the per-account list, so the
+ * global list and then the legacy single-server fields apply again.  The
+ * array is copied; the caller keeps ownership of its memory.
+ */
+ECHOSDK_EXPORT int echosdk_account_set_ice_servers(
+	echosdk_account_handle_t acct,
+	const echosdk_ice_server_t *servers, uint32_t count,
+	echosdk_ice_transport_policy_t policy);
 
 /**
  * Update the push token for an account at runtime (e.g. on OS token rotation).
@@ -2248,6 +2321,22 @@ ECHOSDK_EXPORT int echosdk_call_get_stats(echosdk_call_handle_t     call,
  * @return ECHOSDK_OK, or ECHOSDK_ERR_STATE if the SDK is not initialized.
  */
 ECHOSDK_EXPORT int echosdk_network_changed(void);
+
+/**
+ * Tell the SDK that interface `ifname` belongs to platform network `handle`
+ * (Android: Network.getNetworkHandle()), or forget it with
+ * echosdk_network_clear_interface_handle().
+ *
+ * With a handle on file for a second interface (typically cellular while
+ * Wi-Fi is the default), every new ICE generation gathers on that interface
+ * too, with its sockets pinned to that network, so a handover offers
+ * candidates that already exist instead of waiting on a fresh gather.  The
+ * plugin feeds this from a ConnectivityManager NetworkRequest; no-op on
+ * platforms that pin by interface name (iOS) or cannot pin at all.
+ */
+ECHOSDK_EXPORT int echosdk_network_set_interface_handle(const char *ifname,
+                                                         uint64_t handle);
+ECHOSDK_EXPORT int echosdk_network_clear_interface_handle(const char *ifname);
 
 /**
  * Change the built-in interface poll interval at runtime.

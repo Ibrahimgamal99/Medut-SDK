@@ -14,7 +14,54 @@ All notable changes to EchoSDK are documented here.
   against the old header gets memory written past the end of its struct.  The
   Dart, Python and C++ bindings in this tree match the header they ship with.
 
+- **`echosdk_config_t` and `echosdk_account_config_t` grew again** (ICE server
+  list, transport policy, multipath), appended at the end.  Rebuild C callers;
+  the bindings in this tree match.
+
 ### Added
+
+- **ICE server lists and transport policy.**  `ice_servers` /
+  `ice_server_count` on both config structs take any number of STUN/TURN
+  servers in the browser URL grammar; every entry is resolved and asked on
+  every gather, including the re-gather of an ICE restart, and the list is
+  read again at each restart so `echosdk_account_set_ice_servers()` refreshes
+  short-lived TURN credentials on a live call.  `ice_transport_policy =
+  ECHOSDK_ICE_TRANSPORT_RELAY` offers and accepts relayed candidates only and
+  fails a call fast when no relay could be allocated.  The legacy
+  `stun_server` / `turn_server` fields keep working and are now both used
+  (TURN first) instead of TURN shadowing STUN.  Dart: `IceServer`,
+  `EchoSDKConfig.iceServers`, `Account.setIceServers()`; Python:
+  `ice_servers=`, `Account.set_ice_servers()`.
+- **ICE multipath, experimental** (`ice_multipath`, Dart `EchoSDKConfig.iceMultipath`):
+  gather on cellular next to Wi-Fi (or a VPN next to wired) with sockets
+  pinned to that network, so a handover offers candidates that already exist.
+  Android: `echosdk_network_set_interface_handle()` and a plugin cellular
+  request held while the SDK is started; iOS and Linux pin by interface name.
+  Verified on Linux; on the Android device tried the pinned socket got no
+  replies, so it stays off by default (docs/guides/network_handover.md).
+  Ports on the extra interface carry over into the next ICE generation with
+  the reflexive mapping they learned, and the offer is released as soon as a
+  port on the signalling interface has gathered.
+- **Automatic ICE restart on `failed`.**  A generation whose every pair timed
+  out now restarts ICE under the media-stall budget (three rounds, ten seconds
+  apart) before the app is left with `ECHOSDK_NET_CALL_ICE_FAILED` alone —
+  what a browser app does on `iceConnectionState == "failed"`.
+
+### Fixed
+
+- **Inbound calls broke on network handover; outbound were fine.**  The ICE
+  agent kept the answerer's CONTROLLED role across its own restart offer, so
+  an inbound call's handover met Asterisk also CONTROLLED and depended on the
+  role-conflict procedure, which had two bugs of its own: the 487 handler
+  flipped whatever role was held instead of the role the request was sent
+  with (a late 487 after a request-side switch put both sides back in the same
+  role with nobody nominating), and a USE-CANDIDATE arriving on the host pair
+  was never carried to the valid peer-reflexive pair — the LTE case — so the
+  generation stayed CONNECTED for good.  The restart offerer is now
+  controlling (libwebrtc / Asterisk convention), the conflict rules follow
+  RFC 8445 §7.2.5.1 / §7.3.1.1 to the letter, and nominations land on the
+  valid pair.  Measured on a Galaxy A54: inbound restarts went from a coin
+  toss with a ~4–5 s gap to controlling-and-completed in ~0.55 s.
 
 - **`fec_recovered` / `plc_concealed` in `echosdk_ev_media_stats_t`.**  How
   each frame the jitter buffer reported lost was filled in: rebuilt from the

@@ -20,6 +20,7 @@
  * mutex-guarded txsel snapshot and never touches agent state.
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include "echosdk_internal.h"
 #include "ice_internal.h"
@@ -40,14 +41,14 @@ struct icea_sess {
 	int af;
 	bool offerer;
 
-	/* configured NAT server, resolved into serverl */
-	bool srv_set, srv_turn;
-	char *srv_host;
-	uint16_t srv_port;
-	char *user, *pass;
-	struct stun_dns *dnsq;        /* owned                                  */
+	/* configured NAT servers (account > global > legacy single fields),
+	 * re-read and re-resolved on every gather so refreshed TURN credentials
+	 * reach the next restart; resolved into serverl */
+	struct list srv_lookups;      /* owned struct srv_lookup               */
+	unsigned srv_pending;         /* lookups still outstanding               */
 	struct list serverl;          /* owned struct icea_server              */
 	bool servers_ready;           /* DNS done (or nothing to resolve)        */
+	bool srv_tcp_warned;
 
 	/* credentials shared by every stream of one generation */
 	uint32_t gen_seq;
@@ -442,11 +443,23 @@ static void gather_deadline_h(void *arg)
 	 * candidate; the deadline itself concludes gathering for it. */
 	LIST_FOREACH(&s->medial, le) {
 		struct icea_media *m = le->data;
-		if (m->cur && !m->cur->gathered) {
-			m->cur->gather_pending = 0;
-			m->cur->gathered = true;
-			icea_cand_redund_elim(m->cur);
+		if (!m->cur || m->cur->gathered)
+			continue;
+		/* Still waiting on the server lookups: the gather never ran,
+		 * so not even the host candidates exist yet.  Host-only now;
+		 * a lookup landing later only matters to the next gather. */
+		if (list_isempty(&m->cur->lcandl)) {
+			s->servers_ready = true;
+			list_flush(&s->srv_lookups);
+			s->srv_pending = 0;
+			/* a held completion: the gather must not conclude (and
+			 * release the offer) from inside this loop */
+			m->cur->gather_pending = 1;
+			(void)icea_gather_start(m->cur, NULL, 0, 0);
 		}
+		m->cur->gather_pending = 0;
+		m->cur->gathered = true;
+		icea_cand_redund_elim(m->cur);
 	}
 
 	release_offer(s, "deadline");
@@ -763,6 +776,156 @@ static void sess_new_credentials(struct icea_sess *s)
 }
 
 
+/* ── Per-interface ports (PR3) ───────────────────────────────────────────── */
+
+enum { ICEA_EXTRA_IFS_MAX = 2 };
+
+struct extra_if_ctx {
+	struct icea_media *m;
+	struct icea_gen *gen;
+	const struct sa *sig;
+	const char *sig_ifname;
+	unsigned added;
+	uint16_t pmin, pmax;
+};
+
+/* Interfaces that never carry a call: loopback, container bridges and
+ * their veth halves, libvirt, Docker. */
+static bool ifname_is_virtual(const char *name)
+{
+	return (!strncmp(name, "lo", 2) && (name[2] == 0 || name[2] == ':')) ||
+	       !strncmp(name, "docker", 6) || !strncmp(name, "br-", 3) ||
+	       !strncmp(name, "veth", 4)   || !strncmp(name, "virbr", 5) ||
+	       !strncmp(name, "vmnet", 5)  || !strncmp(name, "vboxnet", 7) ||
+	       !strncmp(name, "awdl", 4)   || !strncmp(name, "llw", 3) ||
+	       !strncmp(name, "p2p", 3)    || !strncmp(name, "dummy", 5);
+}
+
+static bool extra_if_h(const char *ifname, const struct sa *sa, void *arg)
+{
+	struct extra_if_ctx *ctx = arg;
+	struct icea_media *m = ctx->m;
+	struct icea_gen *gen = ctx->gen;
+	int cost;
+
+	if (ctx->added >= ICEA_EXTRA_IFS_MAX)
+		return true;                       /* stop */
+	if (!ifname || !sa || sa_af(sa) != gen->af)
+		return false;
+	if (sa_is_loopback(sa) || sa_is_linklocal(sa) || sa_is_any(sa))
+		return false;
+	if (ctx->sig && sa_cmp(sa, ctx->sig, SA_ADDR))
+		return false;                      /* the signalling path */
+	if (ctx->sig_ifname && ctx->sig_ifname[0] &&
+	    !strcmp(ifname, ctx->sig_ifname))
+		return false;                      /* a second address of it */
+	if (ifname_is_virtual(ifname) || !bsdk_net_if_pinnable(ifname))
+		return false;
+
+	/* already carried over from the previous generation */
+	{
+		struct le *le;
+		LIST_FOREACH(&gen->portl, le) {
+			const struct icea_port *p = le->data;
+			if (!p->is_stream_sock && sa_cmp(&p->laddr, sa, SA_ADDR))
+				return false;
+		}
+	}
+
+	cost = bsdk_net_if_cost(ifname);
+
+	for (unsigned i = 0; i < m->ncomp; i++) {
+		struct icea_port *port = NULL;
+		int err;
+
+		/* pinned to the interface's network before bind: see
+		 * icea_port_alloc() and conf.pin_fd */
+		err = icea_port_alloc(gen, i + 1, sa, ifname, cost, ctx->pmin,
+				      ctx->pmax, &port);
+		if (err) {
+			debug("EchoSDK/ice: no pinned port on %s (%j): %m —"
+			      " not gathering there\n", ifname, sa, err);
+			return false;
+		}
+	}
+
+	ctx->added++;
+	info("EchoSDK/ice: also gathering on %s (%j, cost %d)\n", ifname, sa,
+	     cost);
+	return false;
+}
+
+struct if_present_ctx {
+	const struct sa *addr;
+	const char *ifname;
+	bool present;
+};
+
+static bool if_present_h(const char *ifname, const struct sa *sa, void *arg)
+{
+	struct if_present_ctx *ctx = arg;
+
+	if (ifname && sa && !strcmp(ifname, ctx->ifname) &&
+	    sa_cmp(sa, ctx->addr, SA_ADDR))
+		ctx->present = true;
+	return ctx->present;
+}
+
+/* Move the previous generation's own (non-stream, non-relay) ports to the
+ * new one when their interface still carries that address.  A gather still
+ * in flight on them is cancelled and re-run by the new generation. */
+static void gen_carry_ports(struct icea_media *m, struct icea_gen *gen,
+			    const char *sig_ifname)
+{
+	struct le *le, *tmp;
+
+	if (!m->cur || !g_bsdk.cfg.ice_multipath)
+		return;
+
+	LIST_FOREACH_SAFE(&m->cur->portl, le, tmp) {
+		struct icea_port *port = le->data;
+		struct if_present_ctx ctx = { .addr = &port->laddr,
+					      .ifname = port->ifname };
+
+		if (port->is_stream_sock || port->turnc)
+			continue;
+
+		(void)net_if_apply(if_present_h, &ctx);
+		if (!ctx.present)
+			continue;
+
+		list_unlink(&port->le);
+		port->gen     = gen;
+		port->ct_gath = mem_deref(port->ct_gath);
+		if (!port->gathered)
+			sa_init(&port->srflx, AF_UNSPEC);
+		port->carried = true;
+		port->primary = sig_ifname && !strcmp(port->ifname, sig_ifname);
+		list_append(&gen->portl, &port->le, port);
+
+		info("EchoSDK/ice: carrying %s (%J%s) into generation %u\n",
+		     port->ifname, &port->laddr,
+		     port->gathered ? ", mapping known" : "", gen->seq);
+	}
+}
+
+static void gen_add_interface_ports(struct icea_media *m, struct icea_gen *gen,
+				    const struct sa *sig, const char *sig_ifname)
+{
+	const struct config *cfg = conf_config();
+	struct extra_if_ctx ctx = {
+		.m = m, .gen = gen, .sig = sig, .sig_ifname = sig_ifname,
+		.pmin = cfg ? (uint16_t)cfg->avt.rtp_ports.min : 0,
+		.pmax = cfg ? (uint16_t)cfg->avt.rtp_ports.max : 0,
+	};
+
+	if (!g_bsdk.cfg.ice_multipath)
+		return;
+
+	(void)net_if_apply(extra_if_h, &ctx);
+}
+
+
 /* A generation for `m`: the session's current credentials, the stream
  * sockets attached as ports on the signalling address (PR1: one wildcard
  * socket per component, labelled with the interface the call signals from
@@ -812,11 +975,40 @@ static int gen_new(struct icea_media *m, const struct sa *laddr)
 		if (err)
 			break;
 		port->bypass_uh = m->uh[i];
+		port->primary   = true;
+
+		/* Same socket, same interface as the previous generation: the
+		 * NAT mapping it learned is still the one (a stall repair
+		 * restarts on an unchanged path) — no second round trip. */
+		if (m->cur) {
+			struct icea_port *prev = icea_port_find(m->cur, m->sock[i]);
+			if (prev && prev->gathered &&
+			    sa_isset(&prev->srflx, SA_ADDR) &&
+			    !strcmp(prev->ifname, port->ifname)) {
+				port->srflx    = prev->srflx;
+				port->gathered = true;
+				port->carried  = true;
+			}
+		}
 	}
 	if (err) {
 		mem_deref(gen);
 		return err;
 	}
+
+	/* Ports on other interfaces survive a restart: the socket, its
+	 * network pinning and the reflexive mapping it learned all stay
+	 * valid, so the new generation offers them at once — which is the
+	 * whole point of gathering on cellular before Wi-Fi goes away. */
+	gen_carry_ports(m, gen, ifname);
+
+	/* PR3: a port of our own on every other interface the platform can
+	 * pin a socket to (cellular next to Wi-Fi on a phone, a VPN on a
+	 * desktop), so the generation gathers and checks on it alongside the
+	 * signalling path.  A handover then offers candidates that already
+	 * exist instead of waiting on a fresh gather, and against a peer that
+	 * renominates the switch needs no re-INVITE at all. */
+	gen_add_interface_ports(m, gen, sig, ifname);
 
 	mem_deref(m->cur);
 	m->cur = gen;
@@ -1080,33 +1272,214 @@ static void sess_destructor(void *data)
 		list_unlink(&m->le);
 	}
 
-	mem_deref(s->dnsq);
+	list_flush(&s->srv_lookups);
 	list_flush(&s->serverl);
 	mem_deref(s->sdp);
-	mem_deref(s->srv_host);
-	mem_deref(s->user);
-	mem_deref(s->pass);
 }
 
 
-static void dns_h(int err, const struct sa *srv, void *arg)
+/* ── Servers ─────────────────────────────────────────────────────────────── */
+
+struct srv_lookup {
+	struct le le;
+	struct icea_sess *sess;       /* borrowed parent                         */
+	bool turn, tls;
+	int proto;
+	char host[256];
+	uint16_t port;
+	char *user, *pass;
+	struct stun_dns *dnsq;        /* owned                                  */
+};
+
+
+static void srv_lookup_destructor(void *arg)
 {
-	struct icea_sess *s = arg;
+	struct srv_lookup *lk = arg;
+
+	list_unlink(&lk->le);
+	mem_deref(lk->dnsq);
+	mem_deref(lk->user);
+	mem_deref(lk->pass);
+}
+
+
+/* "stun:host[:port]", "stuns:…", "turn:host[:port][?transport=udp|tcp]",
+ * "turns:…" (RFC 7064 / RFC 7065); IPv6 hosts in brackets.  Returns EINVAL
+ * for anything else. */
+static int ice_url_parse(const char *url, struct srv_lookup *lk)
+{
+	const char *p, *q, *hend;
+	size_t hlen;
+
+	if (!url || !lk)
+		return EINVAL;
+
+	if (!strncasecmp(url, "stuns:", 6))      { lk->tls = true;  lk->turn = false; p = url + 6; }
+	else if (!strncasecmp(url, "stun:", 5))  { lk->tls = false; lk->turn = false; p = url + 5; }
+	else if (!strncasecmp(url, "turns:", 6)) { lk->tls = true;  lk->turn = true;  p = url + 6; }
+	else if (!strncasecmp(url, "turn:", 5))  { lk->tls = false; lk->turn = true;  p = url + 5; }
+	else
+		return EINVAL;
+
+	if (!strncmp(p, "//", 2))
+		p += 2;
+
+	lk->proto = lk->tls ? IPPROTO_TCP : IPPROTO_UDP;
+	lk->port  = lk->tls ? 5349 : 3478;
+
+	q = strchr(p, '?');
+	if (q) {
+		const char *t = strstr(q + 1, "transport=");
+		if (t) {
+			if (!strncasecmp(t + 10, "tcp", 3))
+				lk->proto = IPPROTO_TCP;
+			else if (!strncasecmp(t + 10, "udp", 3))
+				lk->proto = IPPROTO_UDP;
+			else
+				return EINVAL;
+		}
+	}
+	else {
+		q = p + strlen(p);
+	}
+
+	if (*p == '[') {
+		hend = memchr(p, ']', (size_t)(q - p));
+		if (!hend)
+			return EINVAL;
+		p++;
+		hlen = (size_t)(hend - p);
+		hend++;
+	}
+	else {
+		hend = memchr(p, ':', (size_t)(q - p));
+		if (!hend)
+			hend = q;
+		hlen = (size_t)(hend - p);
+	}
+	if (!hlen || hlen >= sizeof(lk->host))
+		return EINVAL;
+	memcpy(lk->host, p, hlen);
+	lk->host[hlen] = '\0';
+
+	if (hend < q && *hend == ':') {
+		unsigned long v = strtoul(hend + 1, NULL, 10);
+		if (!v || v > 65535)
+			return EINVAL;
+		lk->port = (uint16_t)v;
+	}
+	return 0;
+}
+
+
+static void srv_dns_h(int err, const struct sa *srv, void *arg)
+{
+	struct srv_lookup *lk = arg;
+	struct icea_sess *s = lk->sess;
 	struct icea_server *server = NULL;
 
-	if (err || !srv) {
-		warning("EchoSDK/ice: NAT server %s could not be resolved (%m)"
-			" — host candidates only\n",
-			s->srv_host ? s->srv_host : "?", err);
+	if (err || !srv || !sa_isset(srv, SA_ADDR)) {
+		warning("EchoSDK/ice: %s server %s could not be resolved (%m)"
+			" — skipped\n", lk->turn ? "TURN" : "STUN", lk->host,
+			err);
 	}
-	else if (0 == icea_server_alloc(&server, s->srv_turn, IPPROTO_UDP,
-					false, srv, s->user, s->pass)) {
+	else if (lk->proto != IPPROTO_UDP) {
+		if (!s->srv_tcp_warned) {
+			s->srv_tcp_warned = true;
+			warning("EchoSDK/ice: %s server %s is TCP/TLS, which this"
+				" build does not gather from yet — skipped\n",
+				lk->turn ? "TURN" : "STUN", lk->host);
+		}
+	}
+	else if (0 == icea_server_alloc(&server, lk->turn, lk->proto, lk->tls,
+					srv, lk->user, lk->pass)) {
 		list_append(&s->serverl, &server->le, server);
-		info("EchoSDK/ice: %s server %J\n",
-		     s->srv_turn ? "TURN" : "STUN", srv);
+		info("EchoSDK/ice: %s server %J (%s)\n",
+		     lk->turn ? "TURN" : "STUN", srv, lk->host);
 	}
 
-	sess_start_gathering(s);
+	/* stun_server_discover() answers an IP literal from inside the call,
+	 * before the lookup is even on the list: the pending count was
+	 * pre-charged by sess_servers_begin(), so this is always balanced. */
+	if (s->srv_pending)
+		s->srv_pending--;
+	if (!s->srv_pending)
+		sess_start_gathering(s);
+}
+
+
+/* (Re)read the server list for this call and resolve every entry.  Returns
+ * the number of lookups still pending; 0 means serverl is final now. */
+static unsigned sess_servers_begin(struct icea_sess *s)
+{
+	struct bsdk_ice_server_snap snap;
+	struct le *le;
+	unsigned started = 0;
+
+	list_flush(&s->srv_lookups);
+	list_flush(&s->serverl);
+	s->servers_ready = false;
+	s->srv_pending   = 0;
+
+	if (bsdk_ice_servers_for_call((const struct call *)s->call, &snap))
+		return 0;
+
+	s->conf.policy = snap.policy == ECHOSDK_ICE_TRANSPORT_RELAY
+		       ? ICEA_TRANSPORT_RELAY : ICEA_TRANSPORT_ALL;
+
+	/* Pre-charge: a numeric host answers synchronously below. */
+	s->srv_pending = snap.n + 1;
+
+	for (uint32_t i = 0; i < snap.n; i++) {
+		struct srv_lookup *lk = mem_zalloc(sizeof(*lk),
+						   srv_lookup_destructor);
+		int err;
+
+		if (!lk)
+			break;
+		lk->sess = s;
+		if (ice_url_parse(snap.v[i].url, lk)) {
+			warning("EchoSDK/ice: ICE server URL '%s' not understood"
+				" — skipped\n", snap.v[i].url);
+			mem_deref(lk);
+			continue;
+		}
+		if (snap.v[i].user) (void)str_dup(&lk->user, snap.v[i].user);
+		if (snap.v[i].pass) (void)str_dup(&lk->pass, snap.v[i].pass);
+		list_append(&s->srv_lookups, &lk->le, lk);
+
+		if (!s->dnsc) {
+			struct sa addr;
+			if (0 == sa_set_str(&addr, lk->host, lk->port))
+				srv_dns_h(0, &addr, lk);
+			else
+				srv_dns_h(ENOENT, NULL, lk);
+			continue;
+		}
+
+		err = stun_server_discover(&lk->dnsq, s->dnsc,
+					   lk->turn ? stun_usage_relay
+						    : stun_usage_binding,
+					   lk->proto == IPPROTO_TCP
+						? stun_proto_tcp : stun_proto_udp,
+					   s->af, lk->host, lk->port,
+					   srv_dns_h, lk);
+		if (err) {
+			warning("EchoSDK/ice: lookup of %s failed (%m)\n",
+				lk->host, err);
+			if (s->srv_pending)
+				s->srv_pending--;
+			continue;
+		}
+		started++;
+	}
+
+	/* Entries whose URL was rejected never called back: settle them. */
+	s->srv_pending -= 1u + (snap.n - (uint32_t)list_count(&s->srv_lookups));
+	bsdk_ice_server_snap_clear(&snap);
+
+	(void)le; (void)started;
+	return s->srv_pending;
 }
 
 
@@ -1117,6 +1490,8 @@ static void conf_from_sdk(struct icea_conf *c)
 	*c = def;
 	c->debug   = g_bsdk.cfg.log_level >= 3;
 	c->debug_h = sdk_debug_h;
+	c->pin_fd  = bsdk_net_bind_socket;
+	c->pin_bind_any = bsdk_net_pin_bind_any();
 	/* transport policy and server arrays arrive with the PR4 config */
 }
 
@@ -1154,18 +1529,10 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	conf_from_sdk(&s->conf);
 	sess_new_credentials(s);
 
-	/* the account's one NAT server (arrays: PR4) — copied, the account
-	 * can be reconfigured under a live call */
-	if (srv && srv->host) {
-		s->srv_set  = true;
-		s->srv_turn = srv->scheme == STUN_SCHEME_TURN;
-		s->srv_port = srv->port;
-		err  = str_dup(&s->srv_host, srv->host);
-		if (user) err |= str_dup(&s->user, user);
-		if (pass) err |= str_dup(&s->pass, pass);
-	}
-	if (err)
-		goto out;
+	/* baresip's one NAT-server slot is superseded by the account's list
+	 * (account > global > the legacy fields it was filled from) */
+	(void)srv; (void)user; (void)pass;
+	list_init(&s->srv_lookups);
 
 	/* session-level credentials go out with the very first SDP */
 	err  = sdp_session_set_lattr(sdp, true, ice_attr_ufrag, "%s", s->lufrag);
@@ -1173,23 +1540,10 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	if (err)
 		goto out;
 
-	if (s->srv_set && dnsc) {
-		err = stun_server_discover(&s->dnsq, dnsc,
-					   s->srv_turn ? stun_usage_relay
-						       : stun_usage_binding,
-					   stun_proto_udp, af, s->srv_host,
-					   s->srv_port, dns_h, s);
-		if (err) {
-			warning("EchoSDK/ice: NAT server lookup failed (%m)\n",
-				err);
-			err = 0;
-			s->bounce_gather = true;
-			tmr_start(&s->tmr_bounce, 0, bounce_h, s);
-		}
-	}
-	else {
-		/* nothing to resolve — but never gather from inside sessh:
-		 * baresip has not attached the streams yet */
+	list_append(&g_sessl, &s->le, s);
+	if (sess_servers_begin(s) == 0) {
+		/* nothing left to resolve — but never gather from inside
+		 * sessh: baresip has not attached the streams yet */
 		s->bounce_gather = true;
 		tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 	}
@@ -1199,8 +1553,6 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	if (g_bsdk.cfg.ice_gathering_timeout_ms)
 		tmr_start(&s->tmr_gather, g_bsdk.cfg.ice_gathering_timeout_ms,
 			  gather_deadline_h, s);
-
-	list_append(&g_sessl, &s->le, s);
 
  out:
 	if (err)
@@ -1384,6 +1736,19 @@ static int icea_updateh(struct mnat_sess *sess)
 			info("EchoSDK/ice: peer changed its ICE credentials"
 			     " while media is up — checks continue against"
 			     " the new ones\n");
+			/* The peer offered the restart, so it has taken the
+			 * controlling role (the same convention as our own
+			 * restart in bsdk_ice_restart); meet it as controlled
+			 * rather than through a role conflict. */
+			s->offerer = false;
+			LIST_FOREACH(&s->medial, le) {
+				struct icea_media *m = le->data;
+				if (m->cur && !m->plain &&
+				    m->cur->role == ICE_ROLE_CONTROLLING) {
+					m->cur->role = ICE_ROLE_CONTROLLED;
+					m->cur->role_switch_pending = true;
+				}
+			}
 		}
 	}
 
@@ -1476,6 +1841,15 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 
 	sess_new_credentials(s);
 
+	/* The restart offer is ours, so the new generation is controlling.
+	 * RFC 8445 §6.1.1 lets the peer re-determine roles on a restart and
+	 * both libwebrtc and Asterisk do (offerer = controlling); keeping the
+	 * answerer's CONTROLLED role put every inbound call's handover through
+	 * a role conflict with Asterisk, also CONTROLLED as the answerer, and
+	 * the conflict is a coin toss that sometimes left the generation
+	 * without a nominated pair (2026-10-11). */
+	s->offerer = true;
+
 	if (laddr && sa_isset(laddr, SA_ADDR))
 		sdp_session_set_laddr(s->sdp, laddr);
 
@@ -1521,9 +1895,14 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 
 	/* Off this call stack: a host-only gather concludes at once, and the
 	 * re-INVITE must follow from the estab handler, not from inside the
-	 * netmon timer that asked for the restart. */
-	s->bounce_gather = true;
-	tmr_start(&s->tmr_bounce, 0, bounce_h, s);
+	 * netmon timer that asked for the restart.  The server list is read
+	 * again first — credentials may have been refreshed since the call
+	 * started — and a lookup still pending starts the gather itself when
+	 * it lands; the deadline below bounds the wait. */
+	if (sess_servers_begin(s) == 0) {
+		s->bounce_gather = true;
+		tmr_start(&s->tmr_bounce, 0, bounce_h, s);
+	}
 
 	deadline = g_bsdk.cfg.ice_gathering_timeout_ms
 		 ? g_bsdk.cfg.ice_gathering_timeout_ms

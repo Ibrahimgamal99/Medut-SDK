@@ -63,6 +63,9 @@ struct bsdk_ctx {
 	char              *cfg_turn_pass;
 	char              *cfg_pcap_path;
 	char              *cfg_tmp_dir;
+	struct bsdk_ice_server *cfg_ice_srvv;   /* deep copy of cfg.ice_servers */
+	echosdk_ice_server_t   *cfg_ice_srv_api;/* what cfg.ice_servers points at */
+	uint32_t                cfg_ice_srvc;
 
 	/* re_main thread */
 	thrd_t             re_thread;
@@ -136,6 +139,12 @@ struct echosdk_account {
 	char                     *cfg_outbound_proxy;  /* alias for outbound */
 	char                     *cfg_push_token;
 	char                     *cfg_push_param;
+	/* ICE server list: the config copy, replaceable at runtime through
+	 * echosdk_account_set_ice_servers() (re_main only) */
+	struct bsdk_ice_server   *ice_srvv;
+	echosdk_ice_server_t     *ice_srv_api;
+	uint32_t                  ice_srvc;
+	echosdk_ice_transport_policy_t ice_policy;
 	/* derived from uri at create time */
 	char                      parsed_user[64];
 	char                      parsed_host[256];
@@ -344,6 +353,9 @@ struct echosdk_call {
 	 * moved at all, so the "same path — nothing to do" shortcut has to be
 	 * skipped and the ICE restart taken anyway. */
 	bool                       net_mig_stall;
+	bool                       net_mig_force_restart; /* repair must restart ICE
+	                                                   * whatever the address did:
+	                                                   * the agent reported FAILED */
 	uint64_t                   net_stall_repair_at; /* jiffies of the last
 	                                                 * stall repair, 0=never */
 	uint8_t                    net_stall_rounds;    /* stall repairs this call */
@@ -509,6 +521,36 @@ const char *bsdk_platform_ca_bundle(const char *dir);
 /* ── account.c ─────────────────────────────────────────────────────────── */
 
 struct echosdk_account *bsdk_account_find_by_ua(const struct ua *ua);
+
+/* One configured STUN/TURN server, owned copy of the strings. */
+struct bsdk_ice_server {
+	char *url, *user, *pass;
+};
+int  bsdk_ice_servers_copy(struct bsdk_ice_server **vp,
+                           echosdk_ice_server_t **apip, uint32_t *np,
+                           const echosdk_ice_server_t *src, uint32_t n);
+void bsdk_ice_servers_free(struct bsdk_ice_server **vp,
+                           echosdk_ice_server_t **apip, uint32_t *np);
+
+/* The server list a call gathers from, resolved account > global > legacy
+ * single-server fields, as an owned snapshot (strings copied) so the account
+ * may be reconfigured while the ICE session still holds it.  re_main only. */
+struct bsdk_ice_server_snap {
+	struct bsdk_ice_server *v;
+	uint32_t n;
+	echosdk_ice_transport_policy_t policy;
+};
+int  bsdk_ice_servers_for_call(const struct call *bc,
+                               struct bsdk_ice_server_snap *snap);
+void bsdk_ice_server_snap_clear(struct bsdk_ice_server_snap *snap);
+
+/* ── netbind.c: pin a socket to an interface's network ───────────────── */
+/* 0 on success, ENOENT when nothing is known about the interface on a
+ * platform that needs a handle, ENOTSUP where pinning is impossible. */
+int  bsdk_net_bind_socket(re_sock_t fd, const char *ifname, int af);
+bool bsdk_net_if_pinnable(const char *ifname);
+bool bsdk_net_pin_bind_any(void);   /* bind pinned ports to the any-address */
+int  bsdk_net_if_cost(const char *ifname);   /* 0 wifi/wired, 1 vpn, 2 cellular */
 void bsdk_account_schedule_retry(struct echosdk_account *acct);
 void bsdk_account_watch_registration(struct echosdk_account *acct);
 

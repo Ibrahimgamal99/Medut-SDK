@@ -620,6 +620,71 @@ static void test_role_conflict(void)
 }
 
 
+static void test_role_conflict_both_controlled(void)
+{
+	/* An inbound call's ICE restart against a peer that re-determines
+	 * roles per offer/answer (Asterisk, libwebrtc): both sides start
+	 * controlled.  Exactly one must end up controlling and nominate --
+	 * the 487 for a check still in flight after a request-side switch
+	 * used to flip the switched agent straight back. */
+	struct node *na = node_new("A", "10.0.0.1", 5000, NULL, 0);
+	struct node *nb = node_new("B", "10.0.0.2", 6000, NULL, 0);
+	struct agent a, b, *ab[2] = { &a, &b };
+
+	agent_init(&a, &fast_conf, ICE_ROLE_CONTROLLED, 1, &na);
+	agent_init(&b, &fast_conf, ICE_ROLE_CONTROLLED, 1, &nb);
+	agent_learn(&a, &b);
+	agent_learn(&b, &a);
+	CHECK(0 == icea_gen_start_checks(a.gen));
+	CHECK(0 == icea_gen_start_checks(b.gen));
+
+	CHECK(run_until(both_completed, ab, 3000));
+	CHECK(a.gen->role != b.gen->role);
+	{
+		const struct icea_gen *ctl = a.gen->role == ICE_ROLE_CONTROLLING
+					   ? a.gen : b.gen;
+		const struct icea_gen *cld = ctl == a.gen ? b.gen : a.gen;
+		CHECK(count_nominated(ctl, 1, false) == 1);
+		CHECK(count_nominated(cld, 1, true) == 1);
+	}
+
+	agent_close(&a);
+	agent_close(&b);
+	nodes_flush();
+}
+
+
+static void test_remote_nomination_behind_nat(void)
+{
+	/* The controlled agent is the one behind the NAT (a phone on LTE
+	 * after a handover, offering only its host candidate).  A's
+	 * USE-CANDIDATE arrives on B's host port while B's valid pair is the
+	 * peer-reflexive one its own check produced; the nomination must
+	 * land on that pair or B never completes. */
+	struct node *na = node_new("A", "198.51.100.2", 6000, NULL, 0);
+	struct node *nb = node_new("B", "192.168.1.2", 5000, "203.0.113.1", 40000);
+	struct agent a, b, *ab[2] = { &a, &b };
+
+	agent_init(&a, &fast_conf, ICE_ROLE_CONTROLLING, 1, &na);
+	agent_init(&b, &fast_conf, ICE_ROLE_CONTROLLED, 1, &nb);
+	agent_learn(&a, &b);
+	agent_learn(&b, &a);
+	CHECK(0 == icea_gen_start_checks(a.gen));
+	CHECK(0 == icea_gen_start_checks(b.gen));
+
+	CHECK(run_until(both_completed, ab, 3000));
+	CHECK(b.gen->selected[0]->lc->type == ICE_CAND_TYPE_PRFLX);
+	CHECK(sa_cmp(&b.gen->selected[0]->lc->addr, &nb->pub, SA_ALL));
+	CHECK(b.gen->selected[0]->remote_nominated);
+	CHECK(count_nominated(b.gen, 1, true) == 1);
+	CHECK(a.gen->selected[0]->rc->type == ICE_CAND_TYPE_PRFLX);
+
+	agent_close(&a);
+	agent_close(&b);
+	nodes_flush();
+}
+
+
 static void test_401_storm_is_not_terminal(void)
 {
 	/* B rejects everything for a while (it is "rebuilding", like Asterisk
@@ -1291,6 +1356,8 @@ int main(void)
 	test_peer_reflexive_behind_nat();
 	test_ice_lite_peer();
 	test_role_conflict();
+	test_role_conflict_both_controlled();
+	test_remote_nomination_behind_nat();
 	test_401_storm_is_not_terminal();
 	test_two_components();
 	test_unknown_source_request_is_rejected();

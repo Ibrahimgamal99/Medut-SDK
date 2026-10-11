@@ -161,6 +161,14 @@ struct icea_conf {
 	bool     family_filter;     /* offer only the signalling family        */
 	bool     debug;
 	void   (*debug_h)(const char *line);  /* NULL → re_printf             */
+	/* Pin a freshly created socket to the network behind `ifname` before
+	 * it is bound (Android: android_setsocknetwork; Darwin: IP_BOUND_IF;
+	 * Linux: SO_BINDTODEVICE).  NULL = ports bind to the interface address
+	 * only.  Pinned ports bind to the any-address, as libwebrtc does: the
+	 * kernel then picks the source from the network's own route. */
+	int    (*pin_fd)(re_sock_t fd, const char *ifname, int af);
+	bool   pin_bind_any;        /* pinned ports bind the any-address (Android)
+	                               rather than the interface address        */
 };
 
 #define ICEA_CONF_DEFAULT { \
@@ -208,6 +216,11 @@ struct icea_port {
 	struct stun_ctrans *ct_gath; /* owned; outstanding srflx request        */
 	struct stun_keepalive *ska;  /* owned; mapping refresh (PR3)            */
 	bool gathered;               /* srflx/relay attempt concluded           */
+	bool primary;                /* on the signalling interface: one gathered
+	                                primary port is enough to release the offer */
+	bool carried;                /* moved over from the previous generation  */
+	struct sa srflx;             /* reflexive mapping learned on this port;
+	                                reused when the port is carried over       */
 };
 
 /** A local or remote candidate. */
@@ -231,6 +244,7 @@ struct icea_ping {
 	struct icea_pair *pair;      /* borrowed; pairs outlive pingl           */
 	uint64_t sent;
 	bool nominating;             /* USE-CANDIDATE was set                   */
+	enum ice_role role;          /* our role when it was sent (§7.2.5.1)   */
 	bool early;                  /* sent before the peer could answer it:
 	                                never counted as lost, no rtt sample    */
 };
@@ -423,6 +437,9 @@ int  icea_server_alloc(struct icea_server **srvp, bool turn, int proto,
 int  icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 		       uint16_t port_min, uint16_t port_max);
 bool icea_gather_done(const struct icea_gen *gen);
+/* A port learned its mapping some other way (peer-reflexive): re-evaluate
+ * whether the generation can be offered. */
+void icea_gather_port_concluded(struct icea_gen *gen);
 
 /* ice_route.c — receive path of the agent's own ports, and the STUN demux
  * the media's stream-socket helper (ice_mod.c) shares with it */

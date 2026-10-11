@@ -74,6 +74,11 @@ class EchoSDKPlatform {
   static bool _handlerInstalled = false;
   static void Function()? onNetworkChanged;
 
+  /// Android: a secondary (cellular) network came up or went away while the
+  /// plugin had one requested; `handle` is `Network.getNetworkHandle()` or
+  /// null when it was lost.  Feeds `echosdk_network_set_interface_handle`.
+  static void Function(String ifname, int? handle)? onInterfaceHandle;
+
   /// Fired when the system's audio-route set (or the active route) changed —
   /// headset plugged/unplugged, Bluetooth connected, a system-initiated move.
   /// Re-list with [listAudioRoutes] to get the new truth.
@@ -101,6 +106,15 @@ class EchoSDKPlatform {
       switch (call.method) {
         case 'onNetworkChanged':
           onNetworkChanged?.call();
+        case 'onInterfaceHandle':
+          final args = call.arguments;
+          if (args is Map) {
+            final name = args['ifname'];
+            final handle = args['handle'];
+            if (name is String) {
+              onInterfaceHandle?.call(name, handle is int ? handle : null);
+            }
+          }
         case 'onAudioRoutesChanged':
           onAudioRoutesChanged?.call();
         case 'onAppOwnedAudioError':
@@ -114,6 +128,18 @@ class EchoSDKPlatform {
       }
       return null;
     });
+  }
+
+  /// Android: keep a cellular network requested (radio up next to Wi-Fi) so
+  /// the SDK can gather ICE candidates on it; released when `on` is false.
+  /// No-op elsewhere.
+  static Future<void> setCellularRequested(bool on) async {
+    if (!_isMobile) return;
+    try {
+      await _channel.invokeMethod('setCellularRequested', {'on': on});
+    } catch (_) {
+      // Older plugin binary or no cellular: multipath simply stays off.
+    }
   }
 
   /// Writable temp directory — used as EchoSDK `tmp_dir`. Null on desktop.

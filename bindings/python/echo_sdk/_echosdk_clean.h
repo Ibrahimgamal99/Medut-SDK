@@ -68,6 +68,15 @@ typedef enum {
  ECHOSDK_ICE_CAND_RELAY,
  ECHOSDK_ICE_CAND_NONE,
 } echosdk_ice_cand_type_t;
+typedef struct {
+ const char *url;
+ const char *user;
+ const char *pass;
+} echosdk_ice_server_t;
+typedef enum {
+ ECHOSDK_ICE_TRANSPORT_ALL = 0,
+ ECHOSDK_ICE_TRANSPORT_RELAY,
+} echosdk_ice_transport_policy_t;
 
 typedef struct {
  int bitrate;
@@ -501,6 +510,10 @@ typedef struct {
 
  echosdk_ice_handover_t net_ice_handover;
  uint32_t ice_gathering_timeout_ms;
+ const echosdk_ice_server_t *ice_servers;
+ uint32_t ice_server_count;
+ echosdk_ice_transport_policy_t ice_transport_policy;
+ bool ice_multipath;
 
 } echosdk_config_t;
 
@@ -541,6 +554,9 @@ typedef struct {
  char audio_codec_names[8][32];
  int audio_codec_name_count;
  echosdk_dtmf_mode_t dtmf_mode;
+ const echosdk_ice_server_t *ice_servers;
+ uint32_t ice_server_count;
+ echosdk_ice_transport_policy_t ice_transport_policy;
 
 } echosdk_account_config_t;
  void echosdk_config_init(echosdk_config_t *cfg);
@@ -566,6 +582,10 @@ typedef struct {
  int echosdk_account_cancel_retry(echosdk_account_handle_t acct);
 
  int echosdk_account_retry_now(echosdk_account_handle_t acct);
+ int echosdk_account_set_ice_servers(
+ echosdk_account_handle_t acct,
+ const echosdk_ice_server_t *servers, uint32_t count,
+ echosdk_ice_transport_policy_t policy);
  int echosdk_account_set_push_token(echosdk_account_handle_t acct,
                                                    const char *push_token);
  int echosdk_account_add_register_header(
@@ -702,6 +722,9 @@ typedef struct {
  int echosdk_call_get_stats(echosdk_call_handle_t call,
                             echosdk_ev_media_stats_t *out);
  int echosdk_network_changed(void);
+ int echosdk_network_set_interface_handle(const char *ifname,
+                                                         uint64_t handle);
+ int echosdk_network_clear_interface_handle(const char *ifname);
 
  int echosdk_network_set_monitor_interval(uint32_t seconds);
  int echosdk_network_set_handover_policy(bool reinvite_calls,

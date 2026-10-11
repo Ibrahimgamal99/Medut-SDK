@@ -45,6 +45,19 @@ class OpusConfig {
 ///
 /// Everything is optional; native defaults (see echosdk.h) apply for any
 /// field left at its Dart default.
+/// One STUN or TURN server in the URL grammar browsers accept (RFC 7064 /
+/// RFC 7065): `stun:host[:port]`, `stuns:…`, `turn:host[:port][?transport=udp|tcp]`,
+/// `turns:…`.  [user] / [pass] are the TURN long-term credentials.
+class IceServer {
+  final String url;
+  final String? user;
+  final String? pass;
+  const IceServer(this.url, {this.user, this.pass});
+
+  @override
+  String toString() => 'IceServer($url${user != null ? ', user: $user' : ''})';
+}
+
 class EchoSDKConfig {
   // ── Transport ──────────────────────────────────────────────────────────
   final Transport transport;
@@ -109,6 +122,23 @@ class EchoSDKConfig {
   /// call on network handover — there it is how long the call stays without
   /// audio before an offer goes out, and `0` means 3 s rather than "for ever".
   final int iceGatheringTimeoutMs;
+
+  /// Every STUN/TURN server to gather from, in preference order.  Empty =
+  /// fold in [stunServer] / [turnServer] (TURN first).  Each server is
+  /// resolved and asked on every gather, including the re-gather of an ICE
+  /// restart, so credentials refreshed with [Account.setIceServers] reach the
+  /// next handover.
+  final List<IceServer> iceServers;
+
+  /// Which candidates calls may use; see [IceTransportPolicy].
+  final IceTransportPolicy iceTransportPolicy;
+
+  /// Gather on every interface the platform can pin a socket to — cellular
+  /// next to Wi-Fi on a phone — so a handover offers candidates that already
+  /// exist.  On Android the plugin keeps a cellular network requested while
+  /// the SDK is started and hands its interface to the SDK; the modem stays
+  /// attached next to Wi-Fi, at some battery and data cost.  Default false.
+  final bool iceMultipath;
 
   // ── Media ──────────────────────────────────────────────────────────────
   final MediaEncryption mediaEnc;
@@ -367,6 +397,9 @@ class EchoSDKConfig {
     this.turnPass,
     this.iceEnabled = false,
     this.iceGatheringTimeoutMs = -1,
+    this.iceServers = const [],
+    this.iceTransportPolicy = IceTransportPolicy.all,
+    this.iceMultipath = false,
     this.rtcpMux = true,
     this.mediaEnc = MediaEncryption.none,
     this.audioCodecs = const [],
@@ -445,6 +478,9 @@ class EchoSDKConfig {
       turnPass: turnPass,
       iceEnabled: iceEnabled,
       iceGatheringTimeoutMs: iceGatheringTimeoutMs,
+      iceServers: iceServers,
+      iceTransportPolicy: iceTransportPolicy,
+      iceMultipath: iceMultipath,
       rtcpMux: rtcpMux,
       mediaEnc: mediaEnc,
       audioCodecs: audioCodecs,
@@ -528,6 +564,12 @@ class AccountConfig {
   final String? turnServer;
   final String? turnUser;
   final String? turnPass;
+
+  /// Per-account STUN/TURN list; empty = the global [EchoSDKConfig.iceServers],
+  /// then the legacy single-server fields.  Replaceable at runtime with
+  /// [Account.setIceServers].
+  final List<IceServer> iceServers;
+  final IceTransportPolicy iceTransportPolicy;
   final bool verifyTls;
 
   final PushProvider pushProvider;
@@ -555,6 +597,8 @@ class AccountConfig {
     this.turnServer,
     this.turnUser,
     this.turnPass,
+    this.iceServers = const [],
+    this.iceTransportPolicy = IceTransportPolicy.all,
     this.verifyTls = true,
     this.pushProvider = PushProvider.none,
     this.pushToken,
@@ -585,6 +629,19 @@ class NativeScope {
       arr[i] = str(list[i]);
     }
     arr[list.length] = nullptr;
+    _allocs.add(arr);
+    return arr;
+  }
+
+  /// `echosdk_ice_server_t[]` from a server list; nullptr if empty.
+  Pointer<c.echosdk_ice_server_t> iceServers(List<IceServer> list) {
+    if (list.isEmpty) return nullptr;
+    final arr = calloc<c.echosdk_ice_server_t>(list.length);
+    for (var i = 0; i < list.length; i++) {
+      arr[i].url = str(list[i].url);
+      arr[i].user = str(list[i].user);
+      arr[i].pass = str(list[i].pass);
+    }
     _allocs.add(arr);
     return arr;
   }
@@ -660,6 +717,10 @@ NativeScope fillNativeConfig(
   if (conf.iceGatheringTimeoutMs >= 0) {
     r.ice_gathering_timeout_ms = conf.iceGatheringTimeoutMs;
   }
+  r.ice_servers = scope.iceServers(conf.iceServers);
+  r.ice_server_count = conf.iceServers.length;
+  r.ice_transport_policy = conf.iceTransportPolicy.raw;
+  r.ice_multipath = conf.iceMultipath;
   r.rtcp_mux = conf.rtcpMux;
 
   r.media_enc = conf.mediaEnc.raw;
@@ -765,6 +826,9 @@ NativeScope fillNativeAccountConfig(Pointer<c.echosdk_account_config_t> cfg,
   r.turn_server = scope.str(conf.turnServer);
   r.turn_user = scope.str(conf.turnUser);
   r.turn_pass = scope.str(conf.turnPass);
+  r.ice_servers = scope.iceServers(conf.iceServers);
+  r.ice_server_count = conf.iceServers.length;
+  r.ice_transport_policy = conf.iceTransportPolicy.raw;
   r.verify_tls = conf.verifyTls;
 
   r.push_provider = conf.pushProvider.raw;

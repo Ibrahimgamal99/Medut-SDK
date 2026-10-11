@@ -126,6 +126,7 @@ static int send_ping(struct icea_gen *gen, struct icea_pair *p, bool use_cand)
 	ping->sent       = icea_now();
 	ping->nominating = use_cand;
 	ping->early      = gen->early_checks;
+	ping->role       = gen->role;
 
 	/* Headroom for a TURN channel header on relay pairs; unused else. */
 	presz = p->lc->type == ICE_CAND_TYPE_RELAY ? 4 : 0;
@@ -349,6 +350,23 @@ static void handle_success(struct icea_gen *gen, struct icea_pair *p,
 				   mapped);
 	}
 
+	/* The peer has just told us this port's mapping, which is as good as
+	 * a STUN answer — better, on a carrier that never answers STUN at all
+	 * (measured 2026-10-11: no Binding response over LTE in 20 s while
+	 * the PBX answered checks in 30 ms).  Remember it on the port so a
+	 * restart that carries the port over offers it at once, and let the
+	 * gather conclude on it rather than wait for the STUN ladder. */
+	if (p->lc->port && p->lc->type == ICE_CAND_TYPE_HOST &&
+	    !sa_cmp(mapped, &p->lc->addr, SA_ALL)) {
+		struct icea_port *port = p->lc->port;
+
+		port->srflx = *mapped;
+		if (!port->gathered) {
+			port->gathered = true;
+			icea_gather_port_concluded(gen);
+		}
+	}
+
 	/* §7.2.5.3.2: the valid pair is (candidate for mapped, remote). */
 	vp = (lc && lc != p->lc) ? icea_pair_create(gen, lc, p->rc) : p;
 	if (!vp)
@@ -366,6 +384,16 @@ static void handle_success(struct icea_gen *gen, struct icea_pair *p,
 		vp->err_count       = 0;
 	}
 	p->valid = p->valid || (vp == p);
+
+	/* §7.2.5.3.4 / §7.3.1.5: a USE-CANDIDATE that arrived on this pair
+	 * nominates the valid pair its check produced.  Behind a NAT that is
+	 * the peer-reflexive pair, not this host pair -- left on the host
+	 * pair the flag was never read, and an inbound call's handover onto
+	 * LTE stayed CONNECTED for good (2026-10-11). */
+	if (vp != p && p->use_cand_pending) {
+		vp->use_cand_pending = true;
+		p->use_cand_pending  = false;
+	}
 
 	/* §7.2.5.3.4: a nominating check that succeeded nominates the
 	 * valid pair; the controlled side's flag is remote_nominated. */
@@ -389,21 +417,38 @@ static void handle_error(struct icea_gen *gen, struct icea_pair *p,
 			 struct icea_ping *ping, uint16_t scode, uint64_t now)
 {
 	uint32_t backoff;
+	enum ice_role sent_as = ping->role;
 
 	mem_deref(ping);
 	p->unanswered = count_unanswered(gen, p);
 	p->last_scode = scode;
 
 	if (scode == 487) {
-		/* §7.2.5.1: role conflict.  Switch, re-prioritise at the
-		 * next tick, and repeat this check right away. */
-		gen->role = gen->role == ICE_ROLE_CONTROLLING
-			  ? ICE_ROLE_CONTROLLED : ICE_ROLE_CONTROLLING;
-		gen->role_switch_pending = true;
+		/* §7.2.5.1: a request that carried ICE-CONTROLLED makes us
+		 * controlling, ICE-CONTROLLING makes us controlled -- relative
+		 * to the role the request was SENT with, not the one we hold
+		 * now.  A request from the peer may already have switched us
+		 * (§7.3.1.1); flipping again on the late 487 for a check that
+		 * was still in flight put both sides back in the same role with
+		 * nobody nominating (test_role_conflict flaked 1 in 10;
+		 * 2026-10-11).  Re-prioritise at the next tick and repeat this
+		 * check right away either way. */
+		enum ice_role want = sent_as == ICE_ROLE_CONTROLLING
+				   ? ICE_ROLE_CONTROLLED : ICE_ROLE_CONTROLLING;
+
+		if (gen->role != want) {
+			gen->role = want;
+			gen->role_switch_pending = true;
+			ICEA_DEBUG(gen, "ice[gen %u]: 487 role conflict, now %s\n",
+				   gen->seq, ice_role2name(gen->role));
+		}
+		else {
+			ICEA_DEBUG(gen, "ice[gen %u]: 487 role conflict for a"
+				   " check sent as %s -- already %s\n", gen->seq,
+				   ice_role2name(sent_as), ice_role2name(gen->role));
+		}
 		p->triggered = true;
 		p->next_allowed_ping = now;
-		ICEA_DEBUG(gen, "ice[gen %u]: 487 role conflict, now %s\n",
-			   gen->seq, ice_role2name(gen->role));
 		return;
 	}
 

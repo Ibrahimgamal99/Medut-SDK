@@ -73,6 +73,9 @@ server_url = "wss://pbx.example.com:8089/ws"
 | `ice_enabled` | `bool` | false | Enable ICE |
 | `rtcp_mux` | `bool` | true | Multiplex RTCP on the RTP port (RFC 5761) |
 | `ice_gathering_timeout_ms` | `uint32_t` | 2000 | Deadline for ICE candidate gathering — on an outgoing call, and on the re-gather of a handover ICE restart. 0 waits indefinitely on dial; the restart falls back to 3 s |
+| `ice_servers` / `ice_server_count` | `const echosdk_ice_server_t *` / `uint32_t` | NULL / 0 | Every STUN/TURN server to gather from, in preference order (`{url, user, pass}`; URL grammar `stun:` / `stuns:` / `turn:` / `turns:` with optional `?transport=udp\|tcp`). Empty = fold in `stun_server` / `turn_server` above, TURN first. Resolved and asked on every gather, including the re-gather of an ICE restart |
+| `ice_transport_policy` | `echosdk_ice_transport_policy_t` | `ALL` | `RELAY` offers and accepts relayed candidates only; a call with no usable TURN server then fails fast instead of leaking a direct path |
+| `ice_multipath` | `bool` | false | Gather on every interface the platform can pin a socket to (cellular next to Wi-Fi, a VPN next to wired; at most two extra), so a handover offers candidates that already exist. Android needs the plugin's cellular request (`EchoSDKConfig.iceMultipath` does both) |
 
 With ICE enabled the INVITE is **not** sent when the call is placed — it is sent
 once the ICE stack reports that candidate gathering is done. Nothing in that
@@ -286,6 +289,7 @@ without tearing the stack down.
 | `stun_server` | `const char *` | No | Per-account STUN override |
 | `turn_server` | `const char *` | No | Per-account TURN override |
 | `turn_user` / `turn_pass` | `const char *` | No | TURN credentials |
+| `ice_servers` / `ice_server_count` / `ice_transport_policy` | see global | No | Per-account server list and policy; empty = the global list, then the legacy fields. Replaceable at runtime with `echosdk_account_set_ice_servers()` |
 | `rtcp_mux` | `bool` | No | RTCP-mux override; only read when `rtcp_mux_set` is true |
 | `rtcp_mux_set` | `bool` | No | false = inherit the global `rtcp_mux`; true = use the field above |
 | `outbound` | `const char *` | No | Outbound route override; NULL = auto-derived from server |

@@ -306,6 +306,40 @@ class EchoSDKBindings {
   late final _echosdk_account_retry_now = _echosdk_account_retry_nowPtr
       .asFunction<int Function(echosdk_account_handle_t)>();
 
+  /// Replace the account's STUN/TURN server list and transport policy.
+  ///
+  /// Takes effect on the next gather: a new call, or the re-gather of an ICE
+  /// restart on a live call (network handover, media stall), which is how
+  /// short-lived TURN credentials (RFC 7635 / TURN REST) are refreshed without
+  /// re-creating the account.  `count` 0 clears the per-account list, so the
+  /// global list and then the legacy single-server fields apply again.  The
+  /// array is copied; the caller keeps ownership of its memory.
+  int echosdk_account_set_ice_servers(
+    echosdk_account_handle_t acct,
+    ffi.Pointer<echosdk_ice_server_t> servers,
+    int count,
+    int policy,
+  ) {
+    return _echosdk_account_set_ice_servers(
+      acct,
+      servers,
+      count,
+      policy,
+    );
+  }
+
+  late final _echosdk_account_set_ice_serversPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Int Function(
+              echosdk_account_handle_t,
+              ffi.Pointer<echosdk_ice_server_t>,
+              ffi.Uint32,
+              ffi.Int32)>>('echosdk_account_set_ice_servers');
+  late final _echosdk_account_set_ice_servers =
+      _echosdk_account_set_ice_serversPtr.asFunction<
+          int Function(echosdk_account_handle_t,
+              ffi.Pointer<echosdk_ice_server_t>, int, int)>();
+
   /// Update the push token for an account at runtime (e.g. on OS token rotation).
   ///
   /// The new token is stored and the Contact URI params are updated.  A new
@@ -936,8 +970,14 @@ class EchoSDKBindings {
   /// VOICE_COMMUNICATION / VoiceProcessingIO on its own side, or expect echo.
   /// The SDK's own half-duplex suppressor becomes available as a fallback while
   /// the app owns the device, but stays off unless asked for with
-  /// echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR); it is switched off again when
-  /// the platform device comes back, so the two cancellers never stack.
+  /// echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR) — on every platform, desktop
+  /// included, and echosdk_set_aec(true) is not that request.  It is switched
+  /// off again when the platform device comes back, so the two cancellers never
+  /// stack.  NS and AGC follow cfg.ns / cfg.agc while the app owns the device,
+  /// unless its engine reports the platform's voice path under it
+  /// (echosdk_audio_external_set_voice_path), and stop again when the
+  /// platform's own come back.  All of it applies to calls already up, from
+  /// their next frame.
   ///
   /// Returns 0, or an errno on failure.
   int echosdk_audio_use_external(
@@ -1045,6 +1085,37 @@ class EchoSDKBindings {
   late final _echosdk_audio_external_is_active =
       _echosdk_audio_external_is_activePtr.asFunction<bool Function()>();
 
+  /// Say whether the app-owned device captures through the platform's voice
+  /// path — iOS VoiceProcessingIO, Android's VOICE_COMMUNICATION source — so
+  /// the device has already cancelled echo and run its own NS and AGC before
+  /// echosdk_audio_external_push() sees a sample.
+  ///
+  /// While true, the SDK's noise gate and AGC stay off, as they do on its own
+  /// mobile drivers: stacked on the platform's they only cost speech.  The
+  /// suppressor is not affected; on an app-owned device it runs only when asked
+  /// for with echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).  False, the default,
+  /// means a raw microphone.
+  ///
+  /// Call it from the device's start and stop: true once capture is running,
+  /// false when it stops.  Never from the audio callback — it logs.  Safe from
+  /// any other thread, and does not wait on the SIP thread.  Reset to false by
+  /// echosdk_audio_use_external(false) and by echosdk_init(); ignored while the
+  /// SDK's own device is in use.
+  void echosdk_audio_external_set_voice_path(
+    bool active,
+  ) {
+    return _echosdk_audio_external_set_voice_path(
+      active,
+    );
+  }
+
+  late final _echosdk_audio_external_set_voice_pathPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Bool)>>(
+          'echosdk_audio_external_set_voice_path');
+  late final _echosdk_audio_external_set_voice_path =
+      _echosdk_audio_external_set_voice_pathPtr
+          .asFunction<void Function(bool)>();
+
   /// Fill devices[] with available audio input devices, up to max_count entries.
   /// Returns the number of entries written (0 if no devices found yet).
   /// Call after echosdk_init(); device lists may be empty until the audio
@@ -1086,10 +1157,13 @@ class EchoSDKBindings {
       _echosdk_audio_list_output_devicesPtr
           .asFunction<int Function(ffi.Pointer<echosdk_audio_device_t>, int)>();
 
-  /// Enable or disable echo cancellation (takes effect on next audio frame).
-  /// Re-enables the aec_mode that was configured at echosdk_init().
+  /// Enable or disable echo cancellation.
+  /// Re-enables the echo control echosdk_init() settled on: the configured
+  /// aec_mode, or the suppressor if WEBRTC fell back.
   /// set_aec(false) → AEC_OFF; set_aec(true) → restores init mode.
   /// Back-compat: behavior is identical to the former bool aec API.
+  /// Not a request for the suppressor on an app-owned device; that is
+  /// echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).
   void echosdk_set_aec(
     bool enable,
   ) {
@@ -1105,10 +1179,15 @@ class EchoSDKBindings {
       _echosdk_set_aecPtr.asFunction<void Function(bool)>();
 
   /// Switch the AEC backend.  Only AEC_OFF ↔ init_mode transitions are valid
-  /// at runtime — module_load is one-way.  Switching between SUPPRESSOR and
-  /// WEBRTC at runtime returns EINVAL.  WEBRTC returns ENOTSUP on mobile builds
-  /// and when ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
-  /// Requires bsdk_dispatch_sync — NOT safe to call from the audio thread.
+  /// at runtime.  Switching between SUPPRESSOR and WEBRTC at runtime returns
+  /// EINVAL.  WEBRTC returns ENOTSUP on mobile builds and when
+  /// ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
+  ///
+  /// WEBRTC mode with AEC off keeps WebRTC's noise suppressor running if ns is
+  /// on.  While the app owns the device (echosdk_audio_use_external), on any
+  /// platform, SUPPRESSOR here is also the app asking for the suppressor there —
+  /// the only way it runs on an app-owned device.  The request lapses when the
+  /// platform device comes back.
   int echosdk_set_aec_mode(
     int mode,
   ) {
@@ -1126,6 +1205,8 @@ class EchoSDKBindings {
   /// Tune the built-in TX echo suppressor aggressiveness.  SUPPRESSOR mode only.
   /// 0.0 = no TX suppression (passes through even when far end is loud).
   /// 1.0 = maximum suppression (default — −16.5 dB floor on TX when RX active).
+  /// The floor is reached with the far end at −21 dBFS; below that the
+  /// attenuation eases off in dB, to none at −44 dBFS.
   /// Takes effect on the next audio frame via atomic store; safe from any thread.
   void echosdk_set_aec_suppression_level(
     double level,
@@ -1142,6 +1223,17 @@ class EchoSDKBindings {
       _echosdk_set_aec_suppression_levelPtr.asFunction<void Function(double)>();
 
   /// Enable/disable noise suppression globally (takes effect next frame).
+  ///
+  /// In WEBRTC mode this is WebRTC's noise suppressor.  Otherwise it is the
+  /// built-in gate, which turns the pauses down by 20 dB and leaves speech and
+  /// the noise under it alone.
+  ///
+  /// Never on top of the phone's own: while Android captures through the
+  /// VOICE_COMMUNICATION preset, or iOS through VoiceProcessingIO, the platform
+  /// already suppresses noise and this stays off (logged).  It applies again
+  /// while the app owns the device — unless the app reports its own voice path
+  /// (echosdk_audio_external_set_voice_path) — or on an Android device that
+  /// refuses the preset.
   void echosdk_set_ns(
     bool enable,
   ) {
@@ -1157,6 +1249,7 @@ class EchoSDKBindings {
       _echosdk_set_nsPtr.asFunction<void Function(bool)>();
 
   /// Enable/disable automatic gain control globally (takes effect next frame).
+  /// Like echosdk_set_ns(), never on top of the phone's own voice path.
   void echosdk_set_agc(
     bool enable,
   ) {
@@ -1229,7 +1322,8 @@ class EchoSDKBindings {
 
   /// Update jitter buffer bounds.  Takes effect on calls established after
   /// this call — existing streams keep their current adaptive depth.
-  /// Pass 0 for either bound to restore the baresip default (~0 / 150 ms).
+  /// Pass 0 for either bound to restore its default (see jitter_buffer_min_ms
+  /// and jitter_buffer_max_ms).  Keeps the current jbuf_type.
   void echosdk_set_jitter_buffer(
     int min_ms,
     int max_ms,
@@ -1578,6 +1672,19 @@ class EchoSDKBindings {
   /// cfg.net_settle_ms.  Returns immediately — progress is reported through
   /// ECHOSDK_EV_NETWORK events.
   ///
+  /// A report that changed nothing costs nothing.  When the local address set
+  /// is the one the transports are already bound to, every account is
+  /// REGISTERED over a connection-oriented transport (WS/WSS/TCP/TLS) and every
+  /// live call runs ICE, the SDK first sends one OPTIONS per account over its
+  /// existing connection.  If they all answer within 3 s the connections
+  /// survived, and no handover runs — no NET event, no RECONNECTING, no
+  /// re-REGISTER.  Any failure or timeout and the report is handled as the
+  /// handover below.  A browser behaves the same way: it keeps its WebSocket
+  /// until the WebSocket itself fails.  Reports that the platform monitors
+  /// repeat on every engine attach, a VPN coming up next to an unchanged
+  /// primary network, or a host calling this defensively on resume therefore no
+  /// longer tear down a working registration.
+  ///
   /// The handover performs, in order:
   /// 1. re-scan local addresses and refresh the DNS resolver list
   /// 2. flush and re-bind all SIP transports (drops dead TCP/TLS/WS sockets)
@@ -1595,6 +1702,49 @@ class EchoSDKBindings {
           'echosdk_network_changed');
   late final _echosdk_network_changed =
       _echosdk_network_changedPtr.asFunction<int Function()>();
+
+  /// Tell the SDK that interface `ifname` belongs to platform network `handle`
+  /// (Android: Network.getNetworkHandle()), or forget it with
+  /// echosdk_network_clear_interface_handle().
+  ///
+  /// With a handle on file for a second interface (typically cellular while
+  /// Wi-Fi is the default), every new ICE generation gathers on that interface
+  /// too, with its sockets pinned to that network, so a handover offers
+  /// candidates that already exist instead of waiting on a fresh gather.  The
+  /// plugin feeds this from a ConnectivityManager NetworkRequest; no-op on
+  /// platforms that pin by interface name (iOS) or cannot pin at all.
+  int echosdk_network_set_interface_handle(
+    ffi.Pointer<ffi.Char> ifname,
+    int handle,
+  ) {
+    return _echosdk_network_set_interface_handle(
+      ifname,
+      handle,
+    );
+  }
+
+  late final _echosdk_network_set_interface_handlePtr = _lookup<
+          ffi
+          .NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Uint64)>>(
+      'echosdk_network_set_interface_handle');
+  late final _echosdk_network_set_interface_handle =
+      _echosdk_network_set_interface_handlePtr
+          .asFunction<int Function(ffi.Pointer<ffi.Char>, int)>();
+
+  int echosdk_network_clear_interface_handle(
+    ffi.Pointer<ffi.Char> ifname,
+  ) {
+    return _echosdk_network_clear_interface_handle(
+      ifname,
+    );
+  }
+
+  late final _echosdk_network_clear_interface_handlePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
+          'echosdk_network_clear_interface_handle');
+  late final _echosdk_network_clear_interface_handle =
+      _echosdk_network_clear_interface_handlePtr
+          .asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
   /// Change the built-in interface poll interval at runtime.
   /// @param seconds  Poll period; 0 disables polling entirely.
@@ -1821,8 +1971,35 @@ abstract class echosdk_ice_cand_type_t {
   static const int ECHOSDK_ICE_CAND_NONE = 4;
 }
 
+/// One STUN or TURN server, in the URL grammar browsers accept (RFC 7064 /
+/// RFC 7065): "stun:host[:port]", "stuns:host[:port]", "turn:host[:port]
+/// [?transport=udp|tcp]", "turns:host[:port][?transport=tcp]".  Default
+/// ports 3478 (5349 for the TLS schemes).  `user`/`pass` are the TURN
+/// long-term credentials and ignored for STUN.  TURN over TCP/TLS entries are
+/// accepted and currently skipped at gathering time with a warning.
+final class echosdk_ice_server_t extends ffi.Struct {
+  external ffi.Pointer<ffi.Char> url;
+
+  external ffi.Pointer<ffi.Char> user;
+
+  external ffi.Pointer<ffi.Char> pass;
+}
+
+/// Which candidates a call may use (WebRTC's iceTransportPolicy).
+abstract class echosdk_ice_transport_policy_t {
+  /// < host, reflexive and relayed
+  static const int ECHOSDK_ICE_TRANSPORT_ALL = 0;
+
+  /// < relayed only: offer and accept
+  /// nothing but TURN candidates.  A
+  /// call with no usable TURN server
+  /// fails fast instead of leaking a
+  /// direct path
+  static const int ECHOSDK_ICE_TRANSPORT_RELAY = 1;
+}
+
 final class echosdk_opus_config_t extends ffi.Struct {
-  /// 0 = auto/VBR; otherwise bps, e.g. 32000
+  /// target bps (VBR); default 32000; 0 = Opus picks (~50 kbps mono)
   @ffi.Int()
   external int bitrate;
 
@@ -1834,15 +2011,18 @@ final class echosdk_opus_config_t extends ffi.Struct {
   @ffi.Bool()
   external bool cbr;
 
-  /// discontinuous transmission (silence suppression)
+  /// discontinuous transmission: the encoder sends nothing
+  /// in silence and the offer carries usedtx=1 (RFC 7587
+  /// 3.1.3); default false.  Our own switch: it does not
+  /// wait for the peer to ask.
   @ffi.Bool()
   external bool dtx;
 
-  /// in-band forward error correction
+  /// in-band FEC; default true (echosdk_config_init)
   @ffi.Bool()
   external bool fec;
 
-  /// stereo output; false = mono (default)
+  /// send and ask for stereo; false = mono (default)
   @ffi.Bool()
   external bool stereo;
 }
@@ -2487,21 +2667,30 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
   @ffi.Array.multi([64])
   external ffi.Array<ffi.Char> ice_remote_addr;
 
-  /// Our encoder is coding Opus in-band FEC
+  /// ── Opus FEC we send ──────────────────────────────────────────────── */
+  /// /* Whether our encoder is coding in-band FEC, and the expected loss it
+  /// is sized for.  Switched on and off from the peer's receiver reports:
+  /// on at 4% loss (2% in two reports running), off after 10 s under 1%
+  /// (see opus_expected_loss_pct).
+  /// False / 0 for G.711, or a peer that did not ask for FEC.  Also false
+  /// while the link is congested and the bitrate is below the FEC floor,
+  /// where the encoder codes none — with a pinned opus_expected_loss_pct
+  /// too, whose level fec_level_pct still reports.
   @ffi.Bool()
   external bool fec_active;
 
-  /// Expected loss % the FEC is sized for; 0 when off
   @ffi.Uint32()
   external int fec_level_pct;
 
-  /// Lost frames rebuilt from the redundant copy the next Opus packet
-  /// carried (cumulative; 0 for a codec other than Opus)
+  /// ── Opus FEC we receive ───────────────────────────────────────────── */
+  /// /* How each frame the jitter buffer reported lost was filled in,
+  /// cumulative for the call: rebuilt from the redundant copy the next
+  /// packet carried (fec_recovered), or concealed by the decoder alone
+  /// (plc_concealed).  plc_frames counts the gaps the buffer saw; these
+  /// two say what became of them.  0 for a codec other than Opus.
   @ffi.Uint32()
   external int fec_recovered;
 
-  /// Lost frames the decoder concealed alone, no redundant copy at hand
-  /// (cumulative; 0 for a codec other than Opus)
   @ffi.Uint32()
   external int plc_concealed;
 }
@@ -2811,11 +3000,11 @@ final class echosdk_config_t extends ffi.Struct {
   @echosdk_aec_mode_t()
   external int aec_mode;
 
-  /// noise suppression
+  /// noise suppression; off on the mobile voice path, see echosdk_set_ns()
   @ffi.Bool()
   external bool ns;
 
-  /// automatic gain control
+  /// automatic gain control; off on the mobile voice path, see echosdk_set_agc()
   @ffi.Bool()
   external bool agc;
 
@@ -2831,18 +3020,19 @@ final class echosdk_config_t extends ffi.Struct {
   @ffi.Float()
   external double speaker_gain_db;
 
-  /// all fields zero/false = use opus defaults
+  /// see echosdk_config_init() for defaults
   external echosdk_opus_config_t opus;
 
   /// adaptive (default) or fixed
   @ffi.Int32()
   external int jbuf_type;
 
-  /// JB min depth (default: 40 ms)
+  /// JB min depth; 0 = 40 ms (fixed: 100 ms,
+  /// the depth a fixed buffer holds)
   @ffi.Uint32()
   external int jitter_buffer_min_ms;
 
-  /// JB max depth (default: 400 ms)
+  /// JB max depth; 0 = 400 ms (fixed: 200 ms)
   @ffi.Uint32()
   external int jitter_buffer_max_ms;
 
@@ -3111,7 +3301,7 @@ final class echosdk_config_t extends ffi.Struct {
   external int media_stall_ms;
 
   /// Reduce the audio encoder's bitrate when the link degrades, and raise
-  /// it again when the link recovers.  Default false.
+  /// it again when the link recovers.  Default true.
   ///
   /// Evaluated on the stats tick against the remote's RTCP receiver report
   /// (`loss_pct`, i.e. what the peer is actually losing).  A step down is
@@ -3129,7 +3319,7 @@ final class echosdk_config_t extends ffi.Struct {
   @ffi.Bool()
   external bool adaptive_bitrate;
 
-  /// bps; 0 = 12000
+  /// bps; 0 = 12000; 20000 while FEC is on, unless congested
   @ffi.Uint32()
   external int adapt_min_bitrate;
 
@@ -3149,17 +3339,25 @@ final class echosdk_config_t extends ffi.Struct {
   @ffi.Uint32()
   external int adapt_recover_ticks;
 
-  /// Expected packet loss handed to the Opus encoder, percent.  0 = off.
+  /// Expected packet loss handed to the Opus encoder, percent.
+  /// 0 (default) = switched on and off with the link.
   ///
-  /// Turns on Opus in-band FEC (LBRR) at both ends — the encoder spends
-  /// part of its budget on a redundant low-bitrate copy of the previous
-  /// frame, and the decoder uses it to reconstruct a lost one.  Costs
-  /// bitrate and quality even on a clean link, which is why it is off by
-  /// default; 10–20 is a reasonable setting for mobile.
+  /// Sizes Opus in-band FEC (LBRR): the encoder spends part of its budget
+  /// on a redundant low-bitrate copy of the previous frame, and the peer
+  /// rebuilds a lost frame from the packet after it.  Received FEC is
+  /// always used, and a lost frame is concealed either way.
   ///
-  /// `opus.fec` only enables the mechanism.  This value is what tells the
-  /// encoder how much redundancy to actually spend, and the decoder to
-  /// look for it, so set both.
+  /// With `opus.fec` on (the default) and this left at 0, the SDK switches
+  /// our FEC on and off from the loss in the peer's RTCP receiver reports:
+  /// on at once for a report of 4% or more, or when two reports in a row
+  /// show 2% (one alone can be chance on a 1–2% link); off once no report
+  /// has shown 1% for 10 s — so a clean link carries none and pays
+  /// nothing.  While
+  /// on, the redundancy follows the loss: under 4% → 5, 4–10% → 10,
+  /// 10–15% → 15, 15–20% → 20, above → 25.  The state is on every stats
+  /// tick as `fec_active` / `fec_level_pct`.  A non-zero value pins it
+  /// instead.  `opus.fec = false` turns FEC off: we neither ask the peer
+  /// for it nor send it.
   @ffi.Uint32()
   external int opus_expected_loss_pct;
 
@@ -3229,6 +3427,34 @@ final class echosdk_config_t extends ffi.Struct {
   /// and an unbounded dial is acceptable.
   @ffi.Uint32()
   external int ice_gathering_timeout_ms;
+
+  /// ── ICE servers (append-only ABI) ─────────────────────────────────── */
+  /// /**
+  /// Every STUN/TURN server to gather from, in preference order; the
+  /// array is deep-copied at init.  NULL or 0 entries = fold in the legacy
+  /// stun_server / turn_server fields above (TURN first).  Each server is
+  /// resolved and asked on every gather, including the re-gather of an
+  /// ICE restart, so credentials changed through
+  /// echosdk_account_set_ice_servers() reach the next restart.
+  external ffi.Pointer<echosdk_ice_server_t> ice_servers;
+
+  @ffi.Uint32()
+  external int ice_server_count;
+
+  /// default ALL
+  @ffi.Int32()
+  external int ice_transport_policy;
+
+  /// Gather on every interface the platform can pin a socket to, not only
+  /// the one the call signals from — cellular next to Wi-Fi on a phone, a
+  /// VPN on a desktop (at most two extra; loopback, bridges and container
+  /// interfaces are never used).  A handover then offers candidates that
+  /// already exist instead of waiting on a fresh gather.  On Android the
+  /// extra interface must be known through
+  /// echosdk_network_set_interface_handle(); the Flutter plugin does that
+  /// and turns this on.  Default false.
+  @ffi.Bool()
+  external bool ice_multipath;
 }
 
 typedef echosdk_aec_mode_t = ffi.Uint8;
@@ -3288,7 +3514,9 @@ final class echosdk_account_config_t extends ffi.Struct {
   @ffi.Int32()
   external int media_enc;
 
-  /// false by default
+  /// false by default; set stun_server or
+  /// turn_server too, or calls offer only
+  /// local addresses (logged at create)
   @ffi.Bool()
   external bool ice_enabled;
 
@@ -3371,6 +3599,17 @@ final class echosdk_account_config_t extends ffi.Struct {
   /// default ECHOSDK_DTMF_RFC4733 (0)
   @ffi.Int32()
   external int dtmf_mode;
+
+  /// ── ICE servers (append-only ABI) ─────────────────────────────────── */
+  /// /** Per-account STUN/TURN list and policy; NULL / 0 = inherit the global
+  /// list, then the legacy single-server fields.  See echosdk_config_t.
+  external ffi.Pointer<echosdk_ice_server_t> ice_servers;
+
+  @ffi.Uint32()
+  external int ice_server_count;
+
+  @ffi.Int32()
+  external int ice_transport_policy;
 }
 
 /// Called once per live account by echosdk_account_foreach().

@@ -109,6 +109,9 @@ void bsdk_cfg_deep_copy(echosdk_config_t *dst, const echosdk_config_t *src,
 	ctx->cfg_turn_pass        = bsdk_strdup(src->turn_pass);
 	ctx->cfg_pcap_path        = bsdk_strdup(src->pcap_path);
 	ctx->cfg_tmp_dir          = bsdk_strdup(src->tmp_dir);
+	(void)bsdk_ice_servers_copy(&ctx->cfg_ice_srvv, &ctx->cfg_ice_srv_api,
+	                            &ctx->cfg_ice_srvc, src->ice_servers,
+	                            src->ice_server_count);
 
 	dst->local_ip         = ctx->cfg_local_ip;
 	dst->sip_domain       = ctx->cfg_sip_domain;
@@ -128,10 +131,16 @@ void bsdk_cfg_deep_copy(echosdk_config_t *dst, const echosdk_config_t *src,
 	dst->turn_pass        = ctx->cfg_turn_pass;
 	dst->pcap_path        = ctx->cfg_pcap_path;
 	dst->tmp_dir          = ctx->cfg_tmp_dir;
+	dst->ice_servers      = ctx->cfg_ice_srv_api;
+	dst->ice_server_count = ctx->cfg_ice_srvc;
 }
 
 void bsdk_cfg_deep_free(struct bsdk_ctx *ctx)
 {
+	bsdk_ice_servers_free(&ctx->cfg_ice_srvv, &ctx->cfg_ice_srv_api,
+	                      &ctx->cfg_ice_srvc);
+	ctx->cfg.ice_servers = NULL;
+	ctx->cfg.ice_server_count = 0;
 	mem_deref(ctx->cfg_local_ip);         ctx->cfg_local_ip = NULL;
 	mem_deref(ctx->cfg_sip_domain);       ctx->cfg_sip_domain = NULL;
 	mem_deref(ctx->cfg_server_url);       ctx->cfg_server_url = NULL;

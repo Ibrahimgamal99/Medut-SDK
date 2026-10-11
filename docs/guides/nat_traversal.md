@@ -129,6 +129,36 @@ fingerprint
 .turn_pass    = "turn_secret",
 ```
 
+## Several servers, relay-only, and credentials that expire
+
+`stun_server` / `turn_server` hold one of each. `ice_servers` is the list form
+and what the bindings' `IceServer` / `ice_servers` map to:
+
+```c
+echosdk_ice_server_t servers[] = {
+    { "stun:stun.l.google.com:19302", NULL, NULL },
+    { "stun:stun1.l.google.com:19302", NULL, NULL },
+    { "turn:turn.example.com:3478?transport=udp", "user", "pass" },
+};
+cfg.ice_servers          = servers;
+cfg.ice_server_count     = 3;
+cfg.ice_transport_policy = ECHOSDK_ICE_TRANSPORT_ALL;
+```
+
+Every entry is resolved and asked on every gather — the first offer and the
+re-gather of each ICE restart — and the list is read again at each restart,
+so `echosdk_account_set_ice_servers()` with fresh TURN credentials reaches the
+next handover without touching the call. When both forms are set the list
+wins; when only the legacy fields are set, both of them are used (TURN first)
+rather than TURN shadowing STUN.
+
+`ECHOSDK_ICE_TRANSPORT_RELAY` is the browser's `iceTransportPolicy: "relay"`:
+only relayed candidates are offered or accepted, and a call whose TURN
+allocation fails ends at once with `ECHOSDK_ERR_TIMEOUT` instead of carrying
+on over a direct path the deployment forbids. TURN over TCP/TLS entries are
+accepted in the list and currently skipped at gathering time with a warning;
+UDP is what is used.
+
 ---
 
 ## ICE candidate types

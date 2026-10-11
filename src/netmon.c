@@ -974,6 +974,7 @@ static void start_migration(struct echosdk_call *lc)
 		 * cause is known now, and the handover's clock and budget are
 		 * the right ones for it. */
 		lc->net_mig_stall      = false;
+		lc->net_mig_force_restart = false;
 		lc->net_mig_ntried     = 0;
 		/* Clock the audio outage from the moment the network changed, not
 		 * from the re-INVITE — the gap the user hears starts earlier. */
@@ -1071,9 +1072,14 @@ static void start_migration(struct echosdk_call *lc)
 		 * rotate to another interface still restarts: there the new
 		 * candidates are the entire point, and the old ones really are
 		 * wrong. */
-		lc->net_mig_path_moved = old && !sa_cmp(&laddr, old, SA_ADDR);
+		lc->net_mig_path_moved = lc->net_mig_force_restart ||
+		                         (old && !sa_cmp(&laddr, old, SA_ADDR));
 
-		if (!lc->net_mig_path_moved) {
+		if (lc->net_mig_force_restart) {
+			info("EchoSDK/netmon: ICE reported the path failed —"
+			     " restarting ICE from %j\n", &laddr);
+		}
+		else if (!lc->net_mig_path_moved) {
 			debug("EchoSDK/netmon: media stalled on %j — re-offering"
 			      " without an ICE restart (the address has not"
 			      " moved)\n", &laddr);
@@ -1248,6 +1254,9 @@ static void verify_handler(void *arg)
  * *was* validated, so audio often survives a failed generation, and a call the
  * SDK cannot fix is not automatically a call the SDK should end.
  */
+static bool stall_claim(struct echosdk_call *lc, bool force_restart,
+                        const char *why);
+
 void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 {
 	struct echosdk_call *lc = bc ? bsdk_call_find(bc) : NULL;
@@ -1257,6 +1266,15 @@ void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 
 	netmon_emit(ECHOSDK_NET_CALL_ICE_FAILED, lc, lc->acct, err,
 	            lc->net_mig_tries);
+
+	/* What a browser app does on iceConnectionState "failed": restart
+	 * ICE — new credentials, a fresh gather, a re-INVITE — a bounded
+	 * number of times.  The stall machinery already has the budget
+	 * (BSDK_NET_STALL_ROUNDS rounds, BSDK_NET_STALL_COOLDOWN_MS apart)
+	 * and the verify clock; a generation that fails while a migration is
+	 * in flight is left to that migration. */
+	if (g_nm.reinvite_calls)
+		(void)stall_claim(lc, true, "ICE reported the path failed");
 }
 
 /**
@@ -1285,8 +1303,6 @@ void bsdk_netmon_call_ice_failed(struct call *bc, int err)
  */
 void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 {
-	uint64_t now;
-
 	if (!g_nm.started || !lc || !lc->bc)
 		return;
 
@@ -1338,16 +1354,43 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 		}
 	}
 
+	(void)stall_claim(lc, false, "media stalled on an established call");
+}
+
+/* Claim the call for a repair round: the cooldown and the round cap, then
+ * the same stamps a handover generation gets so start_migration() finds
+ * them set.  `force_restart` routes the repair through an ICE restart
+ * whatever the routing table says about the address. */
+static bool stall_claim(struct echosdk_call *lc, bool force_restart,
+                        const char *why)
+{
+	uint64_t now;
+
+	if (!g_nm.started || !lc || !lc->bc)
+		return false;
+
+	/* A repair (or a handover) is already running for this call. */
+	if (lc->net_mig_gen == g_nm.gen &&
+	    (lc->net_mig_state == BSDK_MIG_STALLED ||
+	     lc->net_mig_state == BSDK_MIG_WAIT_ADDR ||
+	     lc->net_mig_state == BSDK_MIG_DEFERRED ||
+	     lc->net_mig_state == BSDK_MIG_SENT))
+		return false;
+
+	if (lc->state == ECHOSDK_CALL_HELD || lc->local_hold ||
+	    call_is_onhold(lc->bc))
+		return false;
+
 	now = tmr_jiffies();
 
 	if (lc->net_stall_repair_at &&
 	    now - lc->net_stall_repair_at < BSDK_NET_STALL_COOLDOWN_MS)
-		return;
+		return false;
 
 	if (lc->net_stall_rounds >= BSDK_NET_STALL_ROUNDS) {
-		debug("EchoSDK/netmon: media stalled again after %u repairs —"
-		      " leaving it to the app\n", lc->net_stall_rounds);
-		return;
+		debug("EchoSDK/netmon: %s again after %u repairs —"
+		      " leaving it to the app\n", why, lc->net_stall_rounds);
+		return false;
 	}
 
 	lc->net_stall_repair_at = now;
@@ -1365,15 +1408,17 @@ void bsdk_netmon_call_stalled(struct echosdk_call *lc)
 	lc->net_mig_path_moved = false;
 	lc->net_mig_ntried     = 0;
 	lc->net_mig_stall      = true;
+	lc->net_mig_force_restart = force_restart;
 	lc->net_mig_start      = now;
 	lc->net_mig_state      = BSDK_MIG_STALLED;
 	sa_init(&lc->net_mig_laddr, AF_UNSPEC);
 
-	info("EchoSDK/netmon: media stalled on an established call —"
-	     " repairing (round %u/%u)\n",
-	     lc->net_stall_rounds, (unsigned)BSDK_NET_STALL_ROUNDS);
+	info("EchoSDK/netmon: %s — repairing (round %u/%u%s)\n", why,
+	     lc->net_stall_rounds, (unsigned)BSDK_NET_STALL_ROUNDS,
+	     force_restart ? ", ICE restart" : "");
 
 	tmr_start(&g_nm.tmr_verify, 1, verify_handler, NULL);
+	return true;
 }
 
 

@@ -33,6 +33,22 @@ enum MediaEncryption {
       values.firstWhere((v) => v.raw == raw, orElse: () => none);
 }
 
+/// Which candidates a call may use (WebRTC's `iceTransportPolicy`).
+enum IceTransportPolicy {
+  /// Host, server-reflexive and relayed candidates.
+  all(c.echosdk_ice_transport_policy_t.ECHOSDK_ICE_TRANSPORT_ALL),
+
+  /// Relayed only: nothing but TURN candidates is offered or accepted, and a
+  /// call with no usable TURN server fails fast instead of leaking a direct
+  /// path.
+  relay(c.echosdk_ice_transport_policy_t.ECHOSDK_ICE_TRANSPORT_RELAY);
+
+  final int raw;
+  const IceTransportPolicy(this.raw);
+  static IceTransportPolicy fromRaw(int raw) =>
+      values.firstWhere((v) => v.raw == raw, orElse: () => all);
+}
+
 /// Registration lifecycle state.
 enum RegState {
   unregistered(c.echosdk_reg_state_t.ECHOSDK_REG_UNREGISTERED),

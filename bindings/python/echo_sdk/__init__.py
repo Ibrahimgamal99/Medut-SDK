@@ -622,6 +622,10 @@ def create_account(uri: str, password: str,
       ice_enabled   — bool
       stun_server   — "stun:host:port"
       turn_server / turn_user / turn_pass
+      ice_servers   — list of {"url": "stun:…"|"turn:…", "user": …, "pass": …}
+                      (or (url, user, pass) tuples); every entry is used on
+                      every gather, including an ICE restart on handover
+      ice_transport_policy — "all" (default) | "relay" (TURN only)
       display_name, auth_user, server_url, server_host, server_port
       rtcp_mux      — bool
       rel100        — "disabled" | "enabled" | "required"
@@ -649,9 +653,20 @@ def create_account(uri: str, password: str,
     if dtmf_val is not None:
         kwargs["dtmf_mode"] = dtmf_val
     extra_headers = kwargs.pop("extra_headers", {})
+    ice_servers = kwargs.pop("ice_servers", None)
+    policy = kwargs.pop("ice_transport_policy", None)
+    if isinstance(policy, str):
+        kwargs["ice_transport_policy"] = _STR_ICE_POLICY[policy]
+    elif policy is not None:
+        kwargs["ice_transport_policy"] = policy
 
     cfg = ffi.new("echosdk_account_config_t *")
     keepalive = [cfg]
+    if ice_servers:
+        arr, refs = _ice_servers_array(ice_servers)
+        keepalive += [arr] + refs
+        cfg.ice_servers = arr
+        cfg.ice_server_count = len(ice_servers)
     uri_ref  = ffi.new("char[]", uri.encode())
     pass_ref = ffi.new("char[]", password.encode())
     keepalive += [uri_ref, pass_ref]
@@ -906,6 +921,40 @@ def network_set_monitor_interval(seconds: int):
     """Interface poll period in seconds; 0 disables polling entirely."""
     _ensure_init()
     return lib.echosdk_network_set_monitor_interval(int(seconds))
+
+
+_STR_ICE_POLICY = {"all": 0, "relay": 1}
+
+
+def _ice_servers_array(servers):
+    """Build an echosdk_ice_server_t[] from dicts or (url, user, pass) tuples."""
+    arr = ffi.new("echosdk_ice_server_t[]", max(len(servers), 1))
+    refs = []
+    for i, s in enumerate(servers):
+        if isinstance(s, dict):
+            url, user, pw = s.get("url"), s.get("user"), s.get("pass")
+        elif isinstance(s, str):
+            url, user, pw = s, None, None
+        else:
+            url, user, pw = (tuple(s) + (None, None))[:3]
+        for field, val in (("url", url), ("user", user), ("pass", pw)):
+            if val:
+                ref = ffi.new("char[]", val.encode())
+                refs.append(ref)
+                setattr(arr[i], field, ref)
+    return arr, refs
+
+
+def network_set_interface_handle(ifname: str, handle: int):
+    """Android: tell the SDK which platform network an interface belongs to,
+    so ICE can gather on it with sockets pinned to that network."""
+    _ensure_init()
+    return lib.echosdk_network_set_interface_handle(ifname.encode(), handle)
+
+
+def network_clear_interface_handle(ifname: str):
+    _ensure_init()
+    return lib.echosdk_network_clear_interface_handle(ifname.encode())
 
 
 def network_set_handover_policy(reinvite_calls: bool = True,
@@ -1203,6 +1252,18 @@ class Account:
     def retry_now(self):
         lib.echosdk_account_retry_now(self._h)
 
+    def set_ice_servers(self, servers, policy="all"):
+        """Replace this account's STUN/TURN list (see create_account's
+        ice_servers); takes effect on the next gather or ICE restart, which is
+        how short-lived TURN credentials are refreshed.  An empty list clears
+        the per-account list so the global one applies again."""
+        arr, refs = _ice_servers_array(servers or [])
+        pol = _STR_ICE_POLICY[policy] if isinstance(policy, str) else policy
+        rc = lib.echosdk_account_set_ice_servers(self._h, arr if servers else ffi.NULL,
+                                                 len(servers or []), pol)
+        _check(rc, "account_set_ice_servers")
+        return rc
+
     def keepalive_now(self):
         """Send a reachability probe (SIP OPTIONS) for this account now.
 
@@ -1256,6 +1317,7 @@ __all__ = [
     "external_audio_set_voice_path",
     # Network handover
     "network_changed", "network_set_monitor_interval",
+    "network_set_interface_handle", "network_clear_interface_handle",
     "network_set_handover_policy", "network_local_addr", "network_is_up",
     # Classes
     "Account", "Call", "CallStats",

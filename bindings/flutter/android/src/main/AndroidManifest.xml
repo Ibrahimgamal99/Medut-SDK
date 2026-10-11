@@ -8,4 +8,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- ConnectivityManager network-change callbacks (drives handover) -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- requestNetwork(TRANSPORT_CELLULAR): keeps a second path up during a
+         call for ICE multipath (EchoSDKConfig.iceMultipath); normal-level
+         permission, granted at install -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 </manifest>

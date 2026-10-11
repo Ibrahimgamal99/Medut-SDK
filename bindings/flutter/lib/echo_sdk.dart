@@ -38,7 +38,7 @@ import 'src/ffi_bindings.dart';
 import 'src/platform_channel.dart';
 import 'src/sdk.dart' as internal;
 
-export 'src/config.dart' show EchoSDKConfig, AccountConfig, OpusConfig;
+export 'src/config.dart' show EchoSDKConfig, AccountConfig, OpusConfig, IceServer;
 export 'src/enums.dart';
 export 'src/platform_channel.dart'
     show AudioRoute, AudioRouteKind, EchoSDKPlatform;
@@ -808,6 +808,23 @@ class Account {
   int retryNow() =>
       internal.nativeBindings.echosdk_account_retry_now(_handle);
 
+  /// Replace this account's STUN/TURN list and transport policy.
+  ///
+  /// Takes effect on the next gather — a new call, or the re-gather of an
+  /// ICE restart on a live call — which is how short-lived TURN credentials
+  /// are refreshed without re-creating the account.  An empty list clears the
+  /// per-account list so the global one applies again.
+  int setIceServers(List<IceServer> servers,
+      {IceTransportPolicy policy = IceTransportPolicy.all}) {
+    final scope = NativeScope();
+    try {
+      return internal.nativeBindings.echosdk_account_set_ice_servers(
+          _handle, scope.iceServers(servers), servers.length, policy.raw);
+    } finally {
+      scope.free();
+    }
+  }
+
   /// Send a reachability probe (SIP OPTIONS) for this account now.
   ///
   /// Worth calling when the app returns to the foreground or wakes on a push:
@@ -921,6 +938,7 @@ class EchoSDK {
 
   final Map<int, Account> _accounts = {};
   final Map<int, Call> _calls = {};
+  bool _multipath = false;
   final StreamController<EchoSDKEvent> _ctrl =
       StreamController<EchoSDKEvent>.broadcast();
   late final NativeCallable<
@@ -1029,6 +1047,23 @@ class EchoSDK {
       }
       sdk.networkChanged();
     };
+    if (config.iceMultipath) {
+      sdk._multipath = true;
+      EchoSDKPlatform.onInterfaceHandle = (ifname, handle) {
+        if (handle == null) {
+          sdk.networkClearInterfaceHandle(ifname);
+        } else {
+          sdk.networkSetInterfaceHandle(ifname, handle);
+        }
+      };
+      // Held for the SDK's lifetime, not per call: the first ICE generation
+      // of a call is built before any call state is reported, and only a
+      // port that already exists then can be carried into the handover's
+      // restart with its reflexive address. Android keeps the modem
+      // attached while the request is held (some battery and data while
+      // registered); released on dispose/shutdown.
+      unawaited(EchoSDKPlatform.setCellularRequested(true));
+    }
     // Applied after init, not through echosdk_config_t: the device switch is a
     // runtime call, and there is no config field for it.
     if (config.appOwnedAudio) await sdk.useAppOwnedAudio(true);
@@ -1450,6 +1485,30 @@ class EchoSDK {
   /// On Android [EchoSDK.start] wires this to ConnectivityManager already.
   int networkChanged() => internal.nativeBindings.echosdk_network_changed();
 
+  /// Tell the SDK that interface [ifname] belongs to platform network
+  /// [handle] (Android `Network.getNetworkHandle()`), so ICE can gather on it
+  /// with sockets pinned to that network.  Wired automatically on Android
+  /// when [EchoSDKConfig.iceMultipath] is on.
+  int networkSetInterfaceHandle(String ifname, int handle) {
+    final p = ifname.toNativeUtf8().cast<Char>();
+    try {
+      return internal.nativeBindings
+          .echosdk_network_set_interface_handle(p, handle);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// Forget the handle recorded for [ifname].
+  int networkClearInterfaceHandle(String ifname) {
+    final p = ifname.toNativeUtf8().cast<Char>();
+    try {
+      return internal.nativeBindings.echosdk_network_clear_interface_handle(p);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
   /// Interface poll period in seconds; 0 disables polling.
   int networkSetMonitorInterval(int seconds) =>
       internal.nativeBindings.echosdk_network_set_monitor_interval(seconds);
@@ -1497,6 +1556,8 @@ class EchoSDK {
     _accounts.clear();
     _calls.clear();
     EchoSDKPlatform.onNetworkChanged = null;
+    EchoSDKPlatform.onInterfaceHandle = null;
+    if (_multipath) unawaited(EchoSDKPlatform.setCellularRequested(false));
     _audioRoutesController?.close();
     _audioRoutesController = null;
     EchoSDKPlatform.onAudioRoutesChanged = null;
@@ -1524,6 +1585,8 @@ class EchoSDK {
     _accounts.clear();
     _calls.clear();
     EchoSDKPlatform.onNetworkChanged = null;
+    EchoSDKPlatform.onInterfaceHandle = null;
+    if (_multipath) unawaited(EchoSDKPlatform.setCellularRequested(false));
     _audioRoutesController?.close();
     _audioRoutesController = null;
     EchoSDKPlatform.onAudioRoutesChanged = null;

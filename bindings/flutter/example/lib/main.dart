@@ -303,6 +303,11 @@ class _PhonePageState extends State<PhonePage>
       _sdk ??= await EchoSDK.start(
         config: const EchoSDKConfig(
           logLevel: 3,
+          // Experimental: gather on cellular next to Wi-Fi so a handover can
+          // reuse candidates that already exist. Off here — on the Android
+          // device it was tried on, the network-pinned socket never received
+          // replies (see docs/guides/network_handover.md).
+          iceMultipath: false,
           traceSip: true,
           statsIntervalMs: 2000,
           traceSdpDiff: true,

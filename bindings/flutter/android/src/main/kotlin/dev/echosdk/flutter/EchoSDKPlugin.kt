@@ -7,7 +7,10 @@ import android.media.AudioManager
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -36,6 +39,8 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var focusRequest: AudioFocusRequest? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var cellularCallback: ConnectivityManager.NetworkCallback? = null
+    private var cellularIfname: String? = null
 
     // The network that is currently the default, as last reported by the
     // callback below. Identity, not capabilities — see onAvailable/onLost.
@@ -75,6 +80,7 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        setCellularRequested(false)
         unregisterNetworkCallback()
         audioRouter?.stop()
         audioRouter = null
@@ -89,6 +95,10 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getCacheDir" -> result.success(context.cacheDir.absolutePath)
+            "setCellularRequested" -> {
+                setCellularRequested(call.argument<Boolean>("on") ?: false)
+                result.success(null)
+            }
             "configureAudioSession" -> {
                 val active = call.argument<Boolean>("active") ?: false
                 if (active) {
@@ -279,6 +289,71 @@ class EchoSDKPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             // Missing ACCESS_NETWORK_STATE or too many callbacks — the SDK
             // still works, handover just relies on its own detection.
             networkCallback = null
+        }
+    }
+
+    // ── Second path for ICE: keep cellular up next to Wi-Fi during a call ──
+    //
+    // Android tears the cellular data path down while Wi-Fi is the default,
+    // so there is nothing to gather candidates on until the switch has
+    // already happened. requestNetwork(TRANSPORT_CELLULAR) keeps the radio
+    // attached for as long as the request is held; the SDK then binds its
+    // extra sockets to that Network (android_setsocknetwork) through the
+    // handle handed over here. Held only while a call is up — Dart drives it.
+    private fun setCellularRequested(on: Boolean) {
+        val cm = connectivityManager
+            ?: (context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+                .also { connectivityManager = it }
+        if (!on) {
+            val cb = cellularCallback ?: return
+            cellularCallback = null
+            try { cm.unregisterNetworkCallback(cb) } catch (_: Exception) {}
+            cellularIfname?.let { name ->
+                cellularIfname = null
+                mainHandler.post {
+                    channel.invokeMethod("onInterfaceHandle",
+                        mapOf("ifname" to name, "handle" to null))
+                }
+            }
+            return
+        }
+        if (cellularCallback != null) return
+        val req = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private fun report(network: Network, lp: LinkProperties?) {
+                val name = lp?.interfaceName ?: return
+                cellularIfname = name
+                val handle = network.networkHandle
+                mainHandler.post {
+                    channel.invokeMethod("onInterfaceHandle",
+                        mapOf("ifname" to name, "handle" to handle))
+                }
+            }
+            override fun onAvailable(network: Network) {
+                report(network, cm.getLinkProperties(network))
+            }
+            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
+                report(network, lp)
+            }
+            override fun onLost(network: Network) {
+                val name = cellularIfname ?: return
+                cellularIfname = null
+                mainHandler.post {
+                    channel.invokeMethod("onInterfaceHandle",
+                        mapOf("ifname" to name, "handle" to null))
+                }
+            }
+        }
+        cellularCallback = cb
+        try {
+            cm.requestNetwork(req, cb)
+        } catch (e: Exception) {
+            // No CHANGE_NETWORK_STATE / no modem: multipath stays off.
+            Log.w(TAG, "requestNetwork(cellular) failed: $e")
+            cellularCallback = null
         }
     }
 

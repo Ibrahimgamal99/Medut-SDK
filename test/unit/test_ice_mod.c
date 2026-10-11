@@ -110,6 +110,42 @@ bool sdp_media_has_media(const struct sdp_media *m)
 }
 
 static int g_ice_failed_calls;
+int bsdk_ice_servers_for_call(const struct call *bc,
+                              struct bsdk_ice_server_snap *snap)
+{
+	(void)bc;
+	memset(snap, 0, sizeof(*snap));
+	return 0;
+}
+
+void bsdk_ice_server_snap_clear(struct bsdk_ice_server_snap *snap)
+{
+	if (snap) snap->v = mem_deref(snap->v);
+}
+
+int bsdk_net_bind_socket(re_sock_t fd, const char *ifname, int af)
+{
+	(void)fd; (void)ifname; (void)af;
+	return ENOTSUP;
+}
+
+bool bsdk_net_if_pinnable(const char *ifname)
+{
+	(void)ifname;
+	return false;
+}
+
+bool bsdk_net_pin_bind_any(void)
+{
+	return false;
+}
+
+int bsdk_net_if_cost(const char *ifname)
+{
+	(void)ifname;
+	return 0;
+}
+
 void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 {
 	(void)bc; (void)err;

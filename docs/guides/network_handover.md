@@ -341,6 +341,55 @@ case ECHOSDK_NET_CALL_ICE_FAILED:
     break;
 ```
 
+The SDK also acts on it, the way a browser app does on `iceConnectionState ==
+"failed"`: it restarts ICE — new credentials, a fresh gather on the next local
+address, a re-INVITE — under the same budget as a media-stall repair (three
+rounds, ten seconds apart). A path that comes back within that window
+recovers; one that does not is left to the app with the event above.
+
+### Roles on a restart
+
+An ICE restart that the SDK offers makes it the controlling agent for the new
+generation, as libwebrtc and Asterisk do (offerer = controlling); when the
+peer offers the restart, the SDK takes the controlled role. Before this the
+answerer's CONTROLLED role was kept across its own restart offer, so an
+*inbound* call's handover met a peer that had also become controlled, and the
+RFC 8445 §7.3.1.1 role-conflict procedure decided — a coin toss that sometimes
+ended with nobody nominating a pair (measured 2026-10-11: one restart in eight
+on an inbound call stayed CONNECTED for good while outbound calls never
+conflicted). Role conflicts are still handled, correctly now, for peers that
+do not follow the convention.
+
+### A second path before the switch (experimental)
+
+With `ice_multipath` on (Dart: `EchoSDKConfig.iceMultipath`), every ICE
+generation gathers on the interfaces the platform can pin a socket to besides
+the one the call signals from — cellular next to Wi-Fi on a phone — with
+sockets bound to that network (`android_setsocknetwork`, `IP_BOUND_IF`,
+`SO_BINDTODEVICE`). A handover's restart then offers candidates that already
+exist on the new interface instead of host-only after the gather deadline,
+which on LTE is where the 2 s of the 4–5 s audio gap went. Ports on the extra
+interface are carried from one ICE generation to the next with the reflexive
+mapping they learned, and the offer goes out as soon as a port on the
+signalling interface has gathered rather than waiting for every interface. On
+Android the plugin keeps a cellular network requested while the SDK is started
+(the modem stays attached next to Wi-Fi, at some battery and data cost), and
+the host app needs `CHANGE_NETWORK_STATE`, merged in from the plugin manifest.
+
+Status (2026-10-11): verified on Linux (a second interface is gathered on,
+checked, carried across restarts and offered at once). On the one Android
+device it was tried on (Galaxy A54, Android 14, Egyptian LTE) the plumbing
+works end to end — the cellular network is requested, its handle reaches the
+SDK, the socket is pinned with `android_setsocknetwork` before `bind()` as
+libwebrtc does — but checks sent from the pinned socket never get a reply,
+even once LTE is the only network, while the unpinned socket on the same
+interface does. Whether that is the carrier, the device or the mark is not
+settled (the shell cannot read socket marks without root), so the option is
+off by default and the Android path should be treated as experimental until
+it is confirmed on another device. Everything else in this section — the
+primary-port rule, the carry-over, the per-generation foundations — applies
+to any restart and is what the measured results below rely on.
+
 ### Stalls do not restart ICE on an unchanged address
 
 The media-stall repair and the handover repair share machinery but not this

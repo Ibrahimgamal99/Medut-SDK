@@ -15,6 +15,8 @@
  */
 
 #include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
 #include "ice_internal.h"
 
 
@@ -93,8 +95,9 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 {
 	struct icea_port *port;
 	struct udp_sock *us = NULL;
-	struct sa bind_addr;
+	struct sa bind_addr, cand_addr;
 	uint16_t span, start, p;
+	bool pin = gen && gen->conf->pin_fd && ifname && ifname[0];
 	int err = EADDRINUSE;
 
 	if (!gen || !laddr || compid < 1 || compid > gen->ncomp)
@@ -113,7 +116,19 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 	if (ifname)
 		str_ncpy(port->ifname, ifname, sizeof(port->ifname));
 
-	bind_addr = *laddr;
+	cand_addr = *laddr;
+	if (pin && gen->conf->pin_bind_any) {
+		/* Android: the mark picks the network and the kernel the
+		 * source; a socket bound to the interface address on top of
+		 * that never saw a reply (2026-10-11). */
+		sa_init(&bind_addr, sa_af(laddr));
+		bind_addr.len = sa_af(laddr) == AF_INET6
+			      ? sizeof(struct sockaddr_in6)
+			      : sizeof(struct sockaddr_in);
+	}
+	else {
+		bind_addr = *laddr;
+	}
 	span  = (uint16_t)((port_max - port_min) / 2);
 	start = (uint16_t)(port_min + 2 * (rand_u16() % (span ? span : 1)));
 	start &= 0xfffe;
@@ -125,7 +140,44 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 		p &= 0xfffe;
 
 		sa_set_port(&bind_addr, compid == 2 ? p + 1 : p);
-		err = udp_listen(&us, &bind_addr, icea_route_port_recv, port);
+		sa_set_port(&cand_addr, sa_port(&bind_addr));
+
+		if (!pin) {
+			err = udp_listen(&us, &bind_addr, icea_route_port_recv,
+					 port);
+		}
+		else {
+			/* Pin before bind (libwebrtc's order on Android). */
+			re_sock_t fd = socket(sa_af(&bind_addr), SOCK_DGRAM,
+					      IPPROTO_UDP);
+			if (fd == RE_BAD_SOCK) {
+				err = errno ? errno : EIO;
+				break;
+			}
+			err = gen->conf->pin_fd(fd, ifname, sa_af(&bind_addr));
+			if (err) {
+				(void)close(fd);
+				break;
+			}
+			(void)net_sockopt_blocking_set(fd, false);
+			if (bind(fd, &bind_addr.u.sa, bind_addr.len) < 0) {
+				err = errno;
+				(void)close(fd);
+				if (err == EADDRINUSE || err == EACCES)
+					continue;
+				break;
+			}
+			err = udp_alloc_fd(&us, fd, icea_route_port_recv, port);
+			if (err) {
+				(void)close(fd);
+				break;
+			}
+			err = udp_thread_attach(us);
+			if (err) {
+				us = mem_deref(us);
+				break;
+			}
+		}
 		if (!err)
 			break;
 		if (err != EADDRINUSE && err != EACCES)
@@ -137,7 +189,7 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 	}
 
 	port->us    = us;
-	port->laddr = bind_addr;
+	port->laddr = cand_addr;
 	list_append(&gen->portl, &port->le, port);
 
 	ICEA_DEBUG(gen, "ice[gen %u]: port {%u} %J on %s\n", gen->seq, compid,

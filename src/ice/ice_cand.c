@@ -37,7 +37,7 @@ static bool cand_prio_sort(struct le *le1, struct le *le2, void *arg)
 }
 
 
-static void compute_foundation(struct icea_cand *cand)
+static void compute_foundation(struct icea_cand *cand, uint32_t gen_seq)
 {
 	const struct sa *base = cand->base ? &cand->base->addr : &cand->addr;
 	uint32_t v;
@@ -46,6 +46,15 @@ static void compute_foundation(struct icea_cand *cand)
 	v ^= (uint32_t)cand->type << 28;
 	if (cand->type != ICE_CAND_TYPE_HOST)
 		v ^= sa_hash(&cand->addr, SA_ADDR) >> 3;
+
+	/* A new ICE session gets new foundations (RFC 8445 §5.1.1.3 scopes
+	 * them to one session).  It also matters to Asterisk: pjnath compares
+	 * the candidates of a restart offer with the ones in use — foundation
+	 * included — and preserves its old ICE session when they are equal,
+	 * answering every check under the new credentials with 401 for good.
+	 * A restart on an unchanged address (ICE failed, a port carried over
+	 * with its mapping) would otherwise never validate (2026-10-11). */
+	v ^= gen_seq * 0x9e3779b9u;
 
 	(void)re_snprintf(cand->foundation, sizeof(cand->foundation),
 			  "%08x", v);
@@ -127,7 +136,7 @@ struct icea_cand *icea_cand_add_local(struct icea_gen *gen,
 	if (type != ICE_CAND_TYPE_HOST)
 		cand->rel = cand->base->addr;
 
-	compute_foundation(cand);
+	compute_foundation(cand, gen->seq);
 
 	list_insert_sorted(&gen->lcandl, cand_prio_sort, NULL, &cand->le, cand);
 

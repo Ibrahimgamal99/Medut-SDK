@@ -187,6 +187,24 @@ echosdk_account_retry_now(acct);
 // Resets the attempt counter. No-op if not in a retry loop.
 ```
 
+## ICE servers at runtime
+
+```c
+echosdk_ice_server_t srv[] = {
+    { "stun:stun.l.google.com:19302", NULL, NULL },
+    { "turn:turn.example.com:3478?transport=udp", user, short_lived_pass },
+};
+echosdk_account_set_ice_servers(acct, srv, 2, ECHOSDK_ICE_TRANSPORT_ALL);
+```
+
+Replaces the account's STUN/TURN list and transport policy. It takes effect on
+the next gather — a new call, or the re-gather of an ICE restart on a live
+call — which is how TURN REST credentials (RFC 7635 style, valid for minutes)
+are refreshed without re-creating the account: fetch new ones before they
+expire, call this, and the next handover allocates with them. A `count` of 0
+clears the per-account list so the global `ice_servers` apply again. The array
+is copied; the caller keeps ownership of its memory.
+
 ### Retry events
 
 A registration the SDK will retry is reported as `ECHOSDK_REG_RECONNECTING`,

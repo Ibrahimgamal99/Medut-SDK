@@ -134,6 +134,10 @@ void bsdk_acct_cfg_deep_copy(echosdk_account_config_t *dst,
 	acct->cfg_outbound_proxy = bsdk_strdup(src->outbound_proxy);
 	acct->cfg_push_token  = bsdk_strdup(src->push_token);
 	acct->cfg_push_param  = bsdk_strdup(src->push_param);
+	(void)bsdk_ice_servers_copy(&acct->ice_srvv, &acct->ice_srv_api,
+	                            &acct->ice_srvc, src->ice_servers,
+	                            src->ice_server_count);
+	acct->ice_policy = src->ice_transport_policy;
 
 	dst->uri          = acct->cfg_uri;
 	dst->password     = acct->cfg_password;
@@ -149,6 +153,8 @@ void bsdk_acct_cfg_deep_copy(echosdk_account_config_t *dst,
 	dst->outbound_proxy = acct->cfg_outbound_proxy;
 	dst->push_token   = acct->cfg_push_token;
 	dst->push_param   = acct->cfg_push_param;
+	dst->ice_servers      = acct->ice_srv_api;
+	dst->ice_server_count = acct->ice_srvc;
 }
 
 void bsdk_acct_cfg_deep_free(struct echosdk_account *acct)
@@ -167,6 +173,170 @@ void bsdk_acct_cfg_deep_free(struct echosdk_account *acct)
 	mem_deref(acct->cfg_outbound_proxy); acct->cfg_outbound_proxy = NULL;
 	mem_deref(acct->cfg_push_token);   acct->cfg_push_token = NULL;
 	mem_deref(acct->cfg_push_param);   acct->cfg_push_param = NULL;
+	bsdk_ice_servers_free(&acct->ice_srvv, &acct->ice_srv_api, &acct->ice_srvc);
+	acct->cfg.ice_servers = NULL;
+	acct->cfg.ice_server_count = 0;
+}
+
+/* ── ICE server lists ───────────────────────────────────────────────────── */
+
+static void ice_srvv_destructor(void *arg)
+{
+	struct bsdk_ice_server *v = arg;
+
+	/* Arrays are allocated one entry long and zeroed, so the first entry
+	 * without a URL terminates the list (entries are filled front to back). */
+	for (size_t i = 0; v[i].url; i++) {
+		mem_deref(v[i].url);
+		mem_deref(v[i].user);
+		mem_deref(v[i].pass);
+	}
+}
+
+int bsdk_ice_servers_copy(struct bsdk_ice_server **vp,
+                          echosdk_ice_server_t **apip, uint32_t *np,
+                          const echosdk_ice_server_t *src, uint32_t n)
+{
+	struct bsdk_ice_server *v;
+	echosdk_ice_server_t *api;
+	uint32_t kept = 0;
+
+	if (!vp || !apip || !np)
+		return EINVAL;
+
+	bsdk_ice_servers_free(vp, apip, np);
+
+	if (!src || !n)
+		return 0;
+
+	v   = mem_zalloc((n + 1u) * sizeof(*v), ice_srvv_destructor);
+	api = mem_zalloc(n * sizeof(*api), NULL);
+	if (!v || !api) {
+		mem_deref(v);
+		mem_deref(api);
+		return ENOMEM;
+	}
+
+	for (uint32_t i = 0; i < n; i++) {
+		if (!src[i].url || !src[i].url[0])
+			continue;
+		v[kept].url  = bsdk_strdup(src[i].url);
+		v[kept].user = bsdk_strdup(src[i].user);
+		v[kept].pass = bsdk_strdup(src[i].pass);
+		api[kept].url  = v[kept].url;
+		api[kept].user = v[kept].user;
+		api[kept].pass = v[kept].pass;
+		kept++;
+	}
+
+	*vp   = v;
+	*apip = api;
+	*np   = kept;
+	return 0;
+}
+
+void bsdk_ice_servers_free(struct bsdk_ice_server **vp,
+                           echosdk_ice_server_t **apip, uint32_t *np)
+{
+	if (vp)   *vp   = mem_deref(*vp);
+	if (apip) *apip = mem_deref(*apip);
+	if (np)   *np   = 0;
+}
+
+static int snap_add(struct bsdk_ice_server_snap *snap, uint32_t cap,
+                    const char *url, const char *user, const char *pass)
+{
+	struct bsdk_ice_server *e;
+
+	if (!url || !url[0] || snap->n >= cap)
+		return 0;
+	e = &snap->v[snap->n];
+	e->url  = bsdk_strdup(url);
+	e->user = bsdk_strdup(user);
+	e->pass = bsdk_strdup(pass);
+	if (!e->url)
+		return ENOMEM;
+	snap->n++;
+	return 0;
+}
+
+/* Legacy single-server fields, account over global, TURN before STUN —
+ * the same precedence account.c has always applied to baresip's one slot,
+ * except that both servers are now used instead of TURN shadowing STUN. */
+static void snap_add_legacy(struct bsdk_ice_server_snap *snap, uint32_t cap,
+                            const struct echosdk_account *acct)
+{
+	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const char *stun = acct && acct->cfg.stun_server
+	                 ? acct->cfg.stun_server : cfg->stun_server;
+	const char *turn = acct && acct->cfg.turn_server
+	                 ? acct->cfg.turn_server : cfg->turn_server;
+	const char *tu   = acct && acct->cfg.turn_user
+	                 ? acct->cfg.turn_user   : cfg->turn_user;
+	const char *tp   = acct && acct->cfg.turn_pass
+	                 ? acct->cfg.turn_pass   : cfg->turn_pass;
+
+	(void)snap_add(snap, cap, turn, tu, tp);
+	if (!stun || !turn || strcmp(stun, turn))
+		(void)snap_add(snap, cap, stun, NULL, NULL);
+}
+
+int bsdk_ice_servers_for_call(const struct call *bc,
+                              struct bsdk_ice_server_snap *snap)
+{
+	const struct echosdk_account *acct = NULL;
+	const struct bsdk_ice_server *src = NULL;
+	uint32_t n = 0, cap;
+	int err = 0;
+
+	if (!snap)
+		return EINVAL;
+	memset(snap, 0, sizeof(*snap));
+
+	if (bc)
+		acct = bsdk_account_find_by_ua(call_get_ua(bc));
+
+	if (acct && acct->ice_srvc) {
+		src = acct->ice_srvv;
+		n   = acct->ice_srvc;
+		snap->policy = acct->ice_policy;
+	}
+	else if (g_bsdk.cfg_ice_srvc) {
+		src = g_bsdk.cfg_ice_srvv;
+		n   = g_bsdk.cfg_ice_srvc;
+		snap->policy = acct && acct->ice_policy
+		             ? acct->ice_policy : g_bsdk.cfg.ice_transport_policy;
+	}
+	else {
+		snap->policy = acct && acct->ice_policy
+		             ? acct->ice_policy : g_bsdk.cfg.ice_transport_policy;
+	}
+
+	cap = n ? n : 2;
+	snap->v = mem_zalloc((cap + 1u) * sizeof(*snap->v), ice_srvv_destructor);
+	if (!snap->v)
+		return ENOMEM;
+
+	if (src) {
+		for (uint32_t i = 0; i < n && !err; i++)
+			err = snap_add(snap, cap, src[i].url, src[i].user,
+			               src[i].pass);
+	}
+	else {
+		snap_add_legacy(snap, cap, acct);
+	}
+
+	if (err)
+		bsdk_ice_server_snap_clear(snap);
+	return err;
+}
+
+void bsdk_ice_server_snap_clear(struct bsdk_ice_server_snap *snap)
+{
+	if (!snap)
+		return;
+	snap->v = mem_deref(snap->v);
+	snap->n = 0;
 }
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
@@ -469,7 +639,8 @@ static int configure_baresip_account(struct echosdk_account *acct)
 		 * (apply-candidate-acl), finds none left and answers 488 —
 		 * measured on 2026-10-07 against FreeSWITCH 1.11. */
 		if ((acct->cfg.ice_enabled || cfg->ice_enabled) &&
-		    !(stun && stun[0]) && !(turn && turn[0])) {
+		    !(stun && stun[0]) && !(turn && turn[0]) &&
+		    !acct->ice_srvc && !g_bsdk.cfg_ice_srvc) {
 			warning("EchoSDK/account: %s has ICE on but no STUN or "
 			        "TURN server: its calls offer only local "
 			        "addresses, which a peer across NAT cannot "
@@ -1736,6 +1907,52 @@ int echosdk_account_retry_now(echosdk_account_handle_t acct)
 {
 	if (!acct) return ECHOSDK_ERR_INVAL;
 	return bsdk_dispatch_sync(retry_now_fn, acct);
+}
+
+/* ── ICE server runtime update ──────────────────────────────────────────── */
+
+typedef struct {
+	echosdk_account_handle_t        acct;
+	const echosdk_ice_server_t     *servers;   /* caller-owned; copied under
+	                                              bsdk_dispatch_sync */
+	uint32_t                        count;
+	echosdk_ice_transport_policy_t  policy;
+	int                             err;
+} set_ice_servers_ctx_t;
+
+static void set_ice_servers_fn(void *arg)
+{
+	set_ice_servers_ctx_t *ctx = arg;
+	struct echosdk_account *acct = ctx->acct;
+
+	ctx->err = bsdk_ice_servers_copy(&acct->ice_srvv, &acct->ice_srv_api,
+	                                 &acct->ice_srvc, ctx->servers,
+	                                 ctx->count);
+	acct->cfg.ice_servers      = acct->ice_srv_api;
+	acct->cfg.ice_server_count = acct->ice_srvc;
+	acct->ice_policy           = ctx->policy;
+	acct->cfg.ice_transport_policy = ctx->policy;
+
+	info("EchoSDK/account: %s: ICE servers replaced (%u entr%s, policy %s)"
+	     " — applies to the next gather or restart\n",
+	     acct->cfg.uri ? acct->cfg.uri : "?", acct->ice_srvc,
+	     acct->ice_srvc == 1 ? "y" : "ies",
+	     ctx->policy == ECHOSDK_ICE_TRANSPORT_RELAY ? "relay" : "all");
+}
+
+int echosdk_account_set_ice_servers(echosdk_account_handle_t acct,
+                                    const echosdk_ice_server_t *servers,
+                                    uint32_t count,
+                                    echosdk_ice_transport_policy_t policy)
+{
+	set_ice_servers_ctx_t ctx = { .acct = acct, .servers = servers,
+	                              .count = servers ? count : 0,
+	                              .policy = policy };
+	int err;
+
+	if (!acct) return ECHOSDK_ERR_INVAL;
+	err = bsdk_dispatch_sync(set_ice_servers_fn, &ctx);
+	return err ? err : ctx.err;
 }
 
 /* ── Push token runtime update ──────────────────────────────────────────── */

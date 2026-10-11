@@ -67,9 +67,30 @@ int icea_server_alloc(struct icea_server **srvp, bool turn, int proto,
 }
 
 
+/* A port on the interface the call signals from has concluded.  That is
+ * enough to offer: an extra interface still waiting on its STUN answer
+ * (cellular is slow to answer right after an attach) must not hold the
+ * primary path's offer back, and a carried-over port that already knows
+ * its mapping makes the offer immediate on the interface the call just
+ * moved to. */
+static bool primary_done(const struct icea_gen *gen)
+{
+	struct le *le;
+
+	LIST_FOREACH(&gen->portl, le) {
+		const struct icea_port *port = le->data;
+		if (port->primary && port->gathered && !port->turnc)
+			return true;
+	}
+	return false;
+}
+
+
 static void gather_complete_maybe(struct icea_gen *gen)
 {
-	if (gen->gather_pending || gen->gathered)
+	if (gen->gathered)
+		return;
+	if (gen->gather_pending && !primary_done(gen))
 		return;
 
 	gen->gathered = true;
@@ -117,6 +138,8 @@ static void srflx_resp_handler(int err, uint16_t scode, const char *reason,
 	host = icea_lcand_on_port(gen, port->compid, port);
 	if (!host)
 		goto out;
+
+	port->srflx = attr->v.sa;
 
 	/* Same address as the host: no NAT on this path — add_local dedupes
 	 * by address and returns the host, which is what we want. */
@@ -264,23 +287,31 @@ int icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 	if (gen->state == ICEA_STATE_NEW)
 		icea_gen_set_state(gen, ICEA_STATE_GATHERING);
 
-	/* Host candidates for every port that is not a relay port. */
+	/* Host candidates for every port that is not a relay port.  A port
+	 * carried over from the previous generation with its mapping known
+	 * offers that reflexive address at once and is not asked again. */
 	LIST_FOREACH(&gen->portl, ple) {
 		struct icea_port *port = ple->data;
+		struct icea_cand *host;
 
 		if (port->turnc)
 			continue;
 		nports++;
-		(void)icea_cand_add_local(gen, ICE_CAND_TYPE_HOST, port->compid,
-					  port, NULL, &port->laddr,
-					  icea_cand_lpref(port));
+		host = icea_cand_add_local(gen, ICE_CAND_TYPE_HOST, port->compid,
+					   port, NULL, &port->laddr,
+					   icea_cand_lpref(port));
+		if (port->gathered && host && sa_isset(&port->srflx, SA_ADDR))
+			(void)icea_cand_add_local(gen, ICE_CAND_TYPE_SRFLX,
+						  port->compid, port, host,
+						  &port->srflx,
+						  icea_cand_lpref(port));
 	}
 
 	/* Reflexive and relayed, per (port × server). */
 	LIST_FOREACH(&gen->portl, ple) {
 		struct icea_port *port = ple->data;
 
-		if (port->turnc || !serverl)
+		if (port->turnc || !serverl || port->gathered)
 			continue;
 
 		LIST_FOREACH(serverl, sle) {
@@ -313,4 +344,11 @@ int icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 bool icea_gather_done(const struct icea_gen *gen)
 {
 	return gen && gen->gathered;
+}
+
+
+void icea_gather_port_concluded(struct icea_gen *gen)
+{
+	if (gen)
+		gather_complete_maybe(gen);
 }

@@ -141,7 +141,16 @@ void icea_stund_recv(struct icea_gen *gen, struct icea_port *port,
 
 	/* §7.3.1.1: both sides in the same role. */
 	if (rrole != ICE_ROLE_UNKNOWN && rrole == gen->role) {
-		if (gen->tiebrk >= tiebrk) {
+		/* Controlling: ours >= theirs -> 487 and keep the role, else
+		 * switch.  Controlled: ours >= theirs -> switch to controlling,
+		 * else 487.  The two cases are mirror images; applying the
+		 * controlled rule to both left two controlling agents with
+		 * the wrong one switching. */
+		bool switch_role = gen->role == ICE_ROLE_CONTROLLING
+				 ? gen->tiebrk <  tiebrk
+				 : gen->tiebrk >= tiebrk;
+
+		if (switch_role) {
 			gen->role = gen->role == ICE_ROLE_CONTROLLING
 				  ? ICE_ROLE_CONTROLLED : ICE_ROLE_CONTROLLING;
 			gen->role_switch_pending = true;
@@ -190,8 +199,22 @@ void icea_stund_recv(struct icea_gen *gen, struct icea_port *port,
 					already = true;
 			}
 			if (!already || gen->renomination) {
-				if (p->valid)
-					p->remote_nominated = true;
+				/* The valid pair for a check that arrives on a
+				 * NAT'd host port is the peer-reflexive one
+				 * (§7.2.5.3.2), which already exists once our own
+				 * check to this peer has succeeded. */
+				struct icea_pair *vp = p->valid ? p : NULL;
+				struct le *ple;
+
+				for (ple = gen->pairl.head; !vp && ple;
+				     ple = ple->next) {
+					struct icea_pair *q = ple->data;
+					if (q->valid && q->rc == p->rc &&
+					    q->lc->port == port)
+						vp = q;
+				}
+				if (vp)
+					vp->remote_nominated = true;
 				else
 					p->use_cand_pending = true;
 			}
