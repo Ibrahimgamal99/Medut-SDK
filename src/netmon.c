@@ -739,6 +739,22 @@ static void arm_verify(void)
 		tmr_start(&g_nm.tmr_verify, tick, verify_handler, NULL);
 }
 
+/* Is there a media path for a DTLS handshake to be running on?  A call
+ * whose ICE never connected (or whose generation failed) has no pair the
+ * handshake could complete over, so holding the repair for it only delays
+ * the re-INVITE that would create one — 12 s of silence for nothing in the
+ * 2026-10-11 19:01 call.  A call without ICE always has its signalled
+ * address. */
+static bool ice_path_exists(const struct echosdk_call *lc)
+{
+	int st;
+
+	if (!lc->bc || !bsdk_ice_call_active(lc->bc))
+		return true;
+	st = bsdk_ice_call_state(lc->bc);
+	return st == ECHOSDK_ICE_CONNECTED || st == ECHOSDK_ICE_COMPLETED;
+}
+
 /* Send (or re-send) the re-INVITE that moves this call's media. */
 static void send_migration(struct echosdk_call *lc)
 {
@@ -794,7 +810,7 @@ static void send_migration(struct echosdk_call *lc)
 	 * gathered candidates) that a handshake failing because the path moved
 	 * needs in order to succeed.  Holding it forever guarantees the silence
 	 * it was trying to prevent. */
-	if (bsdk_media_setup_pending(lc)) {
+	if (bsdk_media_setup_pending(lc) && ice_path_exists(lc)) {
 		uint64_t now = tmr_jiffies();
 
 		if (!lc->net_mig_hs_since)
@@ -1273,8 +1289,29 @@ void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 	 * (BSDK_NET_STALL_ROUNDS rounds, BSDK_NET_STALL_COOLDOWN_MS apart)
 	 * and the verify clock; a generation that fails while a migration is
 	 * in flight is left to that migration. */
-	if (g_nm.reinvite_calls)
-		(void)stall_claim(lc, true, "ICE reported the path failed");
+	if (!g_nm.reinvite_calls)
+		return;
+	if (stall_claim(lc, true, "ICE reported the path failed"))
+		return;
+
+	/* A repair or handover is already running for this call and did not
+	 * restart ICE (a plain re-offer on an unchanged address, or a WS
+	 * refresh).  The agent has just said the path it is re-offering is
+	 * dead, so the next attempt of that round restarts instead — without
+	 * this the verdict was simply dropped (2026-10-11 19:01 call: ICE
+	 * failed under a re-offer repair, no restart was ever tried). */
+	if (lc->net_mig_gen == g_nm.gen && !lc->net_ice_restarted &&
+	    (lc->net_mig_state == BSDK_MIG_SENT ||
+	     lc->net_mig_state == BSDK_MIG_DEFERRED ||
+	     lc->net_mig_state == BSDK_MIG_STALLED ||
+	     lc->net_mig_state == BSDK_MIG_WAIT_ADDR)) {
+		lc->net_mig_force_restart = true;
+		lc->net_mig_path_moved    = true;
+		lc->net_mig_due           = 0;
+		info("EchoSDK/netmon: ICE failed under a repair that did not"
+		     " restart it — the next attempt restarts ICE\n");
+		tmr_start(&g_nm.tmr_verify, 1, verify_handler, NULL);
+	}
 }
 
 /**

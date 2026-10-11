@@ -155,9 +155,13 @@ rather than TURN shadowing STUN.
 `ECHOSDK_ICE_TRANSPORT_RELAY` is the browser's `iceTransportPolicy: "relay"`:
 only relayed candidates are offered or accepted, and a call whose TURN
 allocation fails ends at once with `ECHOSDK_ERR_TIMEOUT` instead of carrying
-on over a direct path the deployment forbids. TURN over TCP/TLS entries are
-accepted in the list and currently skipped at gathering time with a warning;
-UDP is what is used.
+on over a direct path the deployment forbids.
+
+TURN over UDP, TCP and TLS are all gathered from. Put the TCP/TLS entry on
+port 443 (`turn:turn.example.com:443?transport=tcp`, `turns:turn.example.com:443`):
+it is the only path that still carries audio on networks that block or shape
+UDP, and it costs nothing on networks that do not, because a UDP relay or a
+direct pair outranks it. STUN over TCP/TLS is not used for gathering.
 
 ---
 

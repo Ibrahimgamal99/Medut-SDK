@@ -79,7 +79,8 @@ static bool primary_done(const struct icea_gen *gen)
 
 	LIST_FOREACH(&gen->portl, le) {
 		const struct icea_port *port = le->data;
-		if (port->primary && port->gathered && !port->turnc)
+		if (port->primary && port->gathered && !port->turnc &&
+		    !port->is_virtual)
 			return true;
 	}
 	return false;
@@ -207,6 +208,10 @@ static void turnc_handler(int err, uint16_t scode, const char *reason,
 			   " (%m %u %s)\n", gen->seq, &port->laddr, err, scode,
 			   reason ? reason : "");
 		port->turnc = mem_deref(port->turnc);
+		if (port->is_virtual) {
+			port->tlsc = mem_deref(port->tlsc);
+			port->tc   = mem_deref(port->tc);
+		}
 		goto out;
 	}
 
@@ -231,6 +236,202 @@ static void turnc_handler(int err, uint16_t scode, const char *reason,
 }
 
 
+/* ── Relay over TCP / TLS ──────────────────────────────────────────────────
+ *
+ * The TURN client talks to the server over a byte stream; what the peer
+ * sends us arrives as Data indications or ChannelData frames on that
+ * stream and is handed to the port's normal receive path, and what we
+ * send on the port goes back out through turnc_send().  This is the relay
+ * that still works where UDP is blocked or shaped, which is the case for
+ * a TURN server on tcp/443 and most hostile networks. */
+
+static void relay_tcp_concluded(struct icea_port *port)
+{
+	struct icea_gen *gen = port->gen;
+
+	if (port->gathered)
+		return;
+	port->gathered = true;
+	if (gen->gather_pending)
+		gen->gather_pending--;
+	gather_complete_maybe(gen);
+}
+
+
+static int relay_tcp_send_h(const struct sa *dst, struct mbuf *mb,
+			    void *arg)
+{
+	struct icea_port *port = arg;
+
+	return port->turnc ? turnc_send(port->turnc, dst, mb) : ENOTCONN;
+}
+
+
+static void relay_tcp_estab_h(void *arg)
+{
+	struct icea_port *port = arg;
+	struct icea_gen *gen = port->gen;
+	struct stun_conf conf = {
+		.rto = gen->conf->stun_rto_ms, .rc = gen->conf->stun_rc,
+		.rm = STUN_DEFAULT_RM, .ti = STUN_DEFAULT_TI, .tos = 0,
+	};
+	int err;
+
+	ICEA_DEBUG(gen, "ice[gen %u]: %s to TURN server %J established\n",
+		   gen->seq, port->srv_tls ? "TLS" : "TCP", &port->srv_addr);
+
+	err = turnc_alloc(&port->turnc, &conf, IPPROTO_TCP, port->tc, 0,
+			  &port->srv_addr, port->srv_user, port->srv_pass,
+			  TURN_DEFAULT_LIFETIME, turnc_handler, port);
+	if (err) {
+		ICEA_DEBUG(gen, "ice[gen %u]: TURN client over TCP failed"
+			   " (%m)\n", gen->seq, err);
+		relay_tcp_concluded(port);
+	}
+}
+
+
+static void relay_tcp_close_h(int err, void *arg)
+{
+	struct icea_port *port = arg;
+	struct icea_gen *gen = port->gen;
+
+	ICEA_DEBUG(gen, "ice[gen %u]: %s to TURN server %J closed (%m)\n",
+		   gen->seq, port->srv_tls ? "TLS" : "TCP", &port->srv_addr,
+		   err);
+	port->turnc = mem_deref(port->turnc);
+	relay_tcp_concluded(port);
+}
+
+
+/* RFC 5766 §11.5: STUN messages and ChannelData frames back to back on
+ * the stream, ChannelData padded to four bytes. */
+static void relay_tcp_recv_h(struct mbuf *mb_pkt, void *arg)
+{
+	struct icea_port *port = arg;
+	struct icea_gen *gen = port->gen;
+	int err = 0;
+
+	if (port->tcp_mb) {
+		size_t pos = port->tcp_mb->pos;
+
+		port->tcp_mb->pos = port->tcp_mb->end;
+		err = mbuf_write_mem(port->tcp_mb, mbuf_buf(mb_pkt),
+				     mbuf_get_left(mb_pkt));
+		port->tcp_mb->pos = pos;
+		if (err)
+			goto out;
+	}
+	else {
+		port->tcp_mb = mem_ref(mb_pkt);
+	}
+
+	for (;;) {
+		struct mbuf *mb = port->tcp_mb;
+		size_t len, pos, end;
+		struct sa src;
+		uint16_t typ;
+
+		if (mbuf_get_left(mb) < 4)
+			break;
+
+		typ = ntohs(mbuf_read_u16(mb));
+		len = ntohs(mbuf_read_u16(mb));
+		if (typ < 0x4000)
+			len += STUN_HEADER_SIZE;
+		else if (typ < 0x8000)
+			len += 4;
+		else {
+			err = EBADMSG;
+			goto out;
+		}
+		mb->pos -= 4;
+
+		if (mbuf_get_left(mb) < len)
+			break;
+
+		pos = mb->pos;
+		end = mb->end;
+		mb->end = pos + len;
+
+		sa_init(&src, AF_UNSPEC);
+		if (port->turnc)
+			err = turnc_recv(port->turnc, &src, mb);
+		if (err)
+			goto out;
+
+		/* what the peer sent through the relay */
+		if (mbuf_get_left(mb) && sa_isset(&src, SA_ADDR))
+			udp_recv_packet(port->us, &src, mb);
+
+		while (len & 0x03)
+			++len;
+		mb->pos = pos + len;
+		mb->end = end;
+
+		if (mb->pos >= mb->end) {
+			port->tcp_mb = mem_deref(port->tcp_mb);
+			break;
+		}
+	}
+
+ out:
+	if (err) {
+		ICEA_DEBUG(gen, "ice[gen %u]: TURN stream from %J: %m\n",
+			   gen->seq, &port->srv_addr, err);
+		port->tcp_mb = mem_deref(port->tcp_mb);
+		port->turnc = mem_deref(port->turnc);
+		relay_tcp_concluded(port);
+	}
+}
+
+
+static int gather_relay_tcp(struct icea_gen *gen, struct icea_port *base_port,
+			    const struct icea_server *srv)
+{
+	struct icea_port *port = NULL;
+	int err;
+
+	err = icea_port_alloc_virtual(gen, base_port->compid, &base_port->laddr,
+				      base_port->ifname, base_port->cost,
+				      relay_tcp_send_h, &port);
+	if (err)
+		return err;
+
+	port->srv_addr = srv->addr;
+	port->srv_tls  = srv->tls;
+	if (srv->user) err |= str_dup(&port->srv_user, srv->user);
+	if (srv->pass) err |= str_dup(&port->srv_pass, srv->pass);
+	if (err)
+		goto fail;
+
+	err = tcp_connect(&port->tc, &srv->addr, relay_tcp_estab_h,
+			  relay_tcp_recv_h, relay_tcp_close_h, port);
+	if (err)
+		goto fail;
+
+	if (srv->tls) {
+		if (!gen->tls) {
+			err = tls_alloc(&gen->tls, TLS_METHOD_TLS, NULL, NULL);
+			if (err)
+				goto fail;
+		}
+		err = tls_start_tcp(&port->tlsc, gen->tls, port->tc, 0);
+		if (err)
+			goto fail;
+	}
+
+	gen->gather_pending++;
+	ICEA_DEBUG(gen, "ice[gen %u]: TURN over %s to %J for {%u}\n", gen->seq,
+		   srv->tls ? "TLS" : "TCP", &srv->addr, base_port->compid);
+	return 0;
+
+ fail:
+	mem_deref(port);
+	return err;
+}
+
+
 static int gather_relay(struct icea_gen *gen, struct icea_port *base_port,
 			const struct icea_server *srv,
 			uint16_t port_min, uint16_t port_max)
@@ -242,11 +443,8 @@ static int gather_relay(struct icea_gen *gen, struct icea_port *base_port,
 	};
 	int err;
 
-	if (srv->proto != IPPROTO_UDP) {
-		/* TURN over TCP/TLS: PR4 (needs a tcp_conn / tls_conn
-		 * transport under turnc, as baresip's turn module does). */
-		return ENOTSUP;
-	}
+	if (srv->proto != IPPROTO_UDP)
+		return gather_relay_tcp(gen, base_port, srv);
 
 	/* A socket of its own on the same interface (see the file header). */
 	err = icea_port_alloc(gen, base_port->compid, &base_port->laddr,
@@ -294,7 +492,7 @@ int icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 		struct icea_port *port = ple->data;
 		struct icea_cand *host;
 
-		if (port->turnc)
+		if (port->turnc || port->is_virtual)
 			continue;
 		nports++;
 		host = icea_cand_add_local(gen, ICE_CAND_TYPE_HOST, port->compid,
@@ -311,7 +509,7 @@ int icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 	LIST_FOREACH(&gen->portl, ple) {
 		struct icea_port *port = ple->data;
 
-		if (port->turnc || !serverl || port->gathered)
+		if (port->turnc || port->is_virtual || !serverl || port->gathered)
 			continue;
 
 		LIST_FOREACH(serverl, sle) {

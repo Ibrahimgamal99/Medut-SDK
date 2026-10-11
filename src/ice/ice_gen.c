@@ -27,6 +27,7 @@ static void gen_destructor(void *arg)
 	list_flush(&gen->lcandl);
 	list_flush(&gen->portl);   /* port destructors drop ct_gath first */
 	mem_deref(gen->stun);
+	mem_deref(gen->tls);
 
 	mem_deref(gen->rufrag);
 	mem_deref(gen->rpwd);

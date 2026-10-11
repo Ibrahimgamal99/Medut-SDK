@@ -42,12 +42,30 @@ All notable changes to EchoSDK are documented here.
   Ports on the extra interface carry over into the next ICE generation with
   the reflexive mapping they learned, and the offer is released as soon as a
   port on the signalling interface has gathered.
+- **TURN over TCP and TLS.**  `turn:host:443?transport=tcp` and
+  `turns:host:443` entries are now gathered from (RFC 5766 stream framing
+  over libre's TCP/TLS, the relay port is a sockless socket whose sends go
+  through the TURN client), and relayed pairs install a TURN permission
+  before their first check.  This is the relay that survives networks which
+  block or shape UDP; it needs a TURN server reachable on tcp/443.
+- **`EchoSDKConfig.netSettleMs`** (Dart) exposes `net_settle_ms`, the
+  debounce before a reported network change is acted on; lowering it from
+  the 1500 ms default shortens both the handover gap and the time spent
+  reconnecting on every return to the app.
 - **Automatic ICE restart on `failed`.**  A generation whose every pair timed
   out now restarts ICE under the media-stall budget (three rounds, ten seconds
   apart) before the app is left with `ECHOSDK_NET_CALL_ICE_FAILED` alone —
   what a browser app does on `iceConnectionState == "failed"`.
 
 ### Fixed
+
+- **A migration no longer waits 12 s for a DTLS handshake that has no path
+  to run on.**  The hold that protects a handshake in progress now applies
+  only when ICE has a connected pair; a call whose ICE never connected or
+  failed is re-offered at once.
+- **ICE failing under a running repair now escalates that repair to an ICE
+  restart** instead of being dropped because a repair was already in
+  progress.
 
 - **Use-after-free in the ICE check handler.**  Crediting a check response
   freed the answered ping and then kept reading its send time while walking

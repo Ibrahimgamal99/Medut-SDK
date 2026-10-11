@@ -371,6 +371,14 @@ class EchoSDKConfig {
   /// [EchoSDK.networkChanged] from the OS connectivity callback instead.
   final int netMonitorIntervalSeconds;
 
+  /// Debounce before a reported network change is acted on, in ms: how
+  /// long the address set must stay stable before the handover runs
+  /// (transport flush, re-REGISTER, re-INVITE per call).  The SDK default
+  /// is 1500; a lower value shortens both the handover gap and the time
+  /// spent "reconnecting" on every return to the app, at the risk of acting
+  /// on an interface that is still coming up.  -1 keeps the SDK default.
+  final int netSettleMs;
+
   const EchoSDKConfig({
     this.transport = Transport.udp,
     this.localIp,
@@ -449,9 +457,11 @@ class EchoSDKConfig {
     this.pcapPath,
     this.logLevel = 1,
     this.netMonitorIntervalSeconds = 10,
+    this.netSettleMs = -1,
   });
 
-  EchoSDKConfig copyWith({String? tmpDir, int? netMonitorIntervalSeconds}) {
+  EchoSDKConfig copyWith(
+      {String? tmpDir, int? netMonitorIntervalSeconds, int? netSettleMs}) {
     return EchoSDKConfig(
       transport: transport,
       localIp: localIp,
@@ -531,6 +541,7 @@ class EchoSDKConfig {
       logLevel: logLevel,
       netMonitorIntervalSeconds:
           netMonitorIntervalSeconds ?? this.netMonitorIntervalSeconds,
+      netSettleMs: netSettleMs ?? this.netSettleMs,
     );
   }
 }
@@ -795,6 +806,7 @@ NativeScope fillNativeConfig(
   r.pcap_path = scope.str(conf.pcapPath);
   r.log_level = conf.logLevel;
   r.net_monitor_interval_s = conf.netMonitorIntervalSeconds;
+  if (conf.netSettleMs >= 0) r.net_settle_ms = conf.netSettleMs;
 
   return scope;
 }

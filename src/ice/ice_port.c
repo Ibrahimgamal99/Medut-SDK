@@ -31,9 +31,49 @@ static void port_destructor(void *arg)
 	 * would otherwise try to send retransmits on. */
 	mem_deref(port->ct_gath);
 	mem_deref(port->ska);
-	mem_deref(port->turnc);
+	mem_deref(port->turnc);  /* before the stream it writes to           */
+	mem_deref(port->tlsc);
+	mem_deref(port->tc);
+	mem_deref(port->tcp_mb);
+	mem_deref(port->srv_user);
+	mem_deref(port->srv_pass);
 	mem_deref(port->uh);     /* helper before socket: it locks us->lock */
 	mem_deref(port->us);
+}
+
+
+int icea_port_alloc_virtual(struct icea_gen *gen, unsigned compid,
+			    const struct sa *laddr, const char *ifname,
+			    int cost, udp_send_h *sendh,
+			    struct icea_port **portp)
+{
+	struct icea_port *port;
+	int err;
+
+	if (!gen || !laddr || !sendh || compid < 1 || compid > gen->ncomp)
+		return EINVAL;
+
+	port = mem_zalloc(sizeof(*port), port_destructor);
+	if (!port)
+		return ENOMEM;
+	port->gen        = gen;
+	port->compid     = compid;
+	port->cost       = cost;
+	port->laddr      = *laddr;
+	port->is_virtual = true;
+	if (ifname)
+		str_ncpy(port->ifname, ifname, sizeof(port->ifname));
+
+	err = udp_alloc_sockless(&port->us, sendh, icea_route_port_recv, port);
+	if (err) {
+		mem_deref(port);
+		return err;
+	}
+
+	list_append(&gen->portl, &port->le, port);
+	if (portp)
+		*portp = port;
+	return 0;
 }
 
 

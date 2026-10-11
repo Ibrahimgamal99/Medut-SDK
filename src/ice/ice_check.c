@@ -102,6 +102,16 @@ static int send_ping(struct icea_gen *gen, struct icea_pair *p, bool use_cand)
 	if (!gen->rufrag || !gen->rpwd)
 		return EPROTO;
 
+	/* A relayed local candidate: the server forwards nothing to a peer
+	 * without a permission (RFC 5766 §9), so install one for this remote
+	 * before the first check.  The client dedupes and refreshes it. */
+	if (p->lc->type == ICE_CAND_TYPE_RELAY && !p->relay_perm &&
+	    p->lc->port && p->lc->port->turnc) {
+		p->relay_perm = true;
+		(void)turnc_add_perm(p->lc->port->turnc, &p->rc->addr, NULL,
+				     NULL);
+	}
+
 	/* Only the controlling agent nominates (RFC 8445 §7.2.5.3.4). */
 	if (gen->role != ICE_ROLE_CONTROLLING)
 		use_cand = false;

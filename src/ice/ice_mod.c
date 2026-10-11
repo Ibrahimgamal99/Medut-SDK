@@ -887,7 +887,7 @@ static void gen_carry_ports(struct icea_media *m, struct icea_gen *gen,
 		struct if_present_ctx ctx = { .addr = &port->laddr,
 					      .ifname = port->ifname };
 
-		if (port->is_stream_sock || port->turnc)
+		if (port->is_stream_sock || port->turnc || port->is_virtual)
 			continue;
 
 		(void)net_if_apply(if_present_h, &ctx);
@@ -1383,12 +1383,11 @@ static void srv_dns_h(int err, const struct sa *srv, void *arg)
 			" — skipped\n", lk->turn ? "TURN" : "STUN", lk->host,
 			err);
 	}
-	else if (lk->proto != IPPROTO_UDP) {
+	else if (lk->proto != IPPROTO_UDP && !lk->turn) {
 		if (!s->srv_tcp_warned) {
 			s->srv_tcp_warned = true;
-			warning("EchoSDK/ice: %s server %s is TCP/TLS, which this"
-				" build does not gather from yet — skipped\n",
-				lk->turn ? "TURN" : "STUN", lk->host);
+			warning("EchoSDK/ice: STUN over TCP/TLS (%s) is not used"
+				" for gathering — skipped\n", lk->host);
 		}
 	}
 	else if (0 == icea_server_alloc(&server, lk->turn, lk->proto, lk->tls,

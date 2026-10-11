@@ -213,6 +213,16 @@ struct icea_port {
 	struct udp_helper *bypass_uh;/* borrowed; stream sockets: the media's ICE
 	                                helper, so STUN leaves below DTLS/SRTP  */
 	struct turnc *turnc;         /* owned; relay ports only                 */
+	/* TURN over TCP/TLS: the port is a sockless UDP socket whose sends go
+	 * into the TURN client over this stream and whose receives are the
+	 * frames parsed off it (RFC 5766 §11 framing). */
+	bool is_virtual;             /* no socket of its own; no host candidate */
+	struct tcp_conn *tc;         /* owned                                   */
+	struct tls_conn *tlsc;       /* owned                                   */
+	struct mbuf *tcp_mb;         /* owned; stream reassembly                */
+	struct sa srv_addr;          /* the TURN server this port talks to      */
+	char *srv_user, *srv_pass;   /* owned copies                            */
+	bool srv_tls;
 	struct stun_ctrans *ct_gath; /* owned; outstanding srflx request        */
 	struct stun_keepalive *ska;  /* owned; mapping refresh (PR3)            */
 	bool gathered;               /* srflx/relay attempt concluded           */
@@ -257,6 +267,7 @@ struct icea_pair {
 	uint64_t prio;               /* RFC 8445 §6.1.2.3                       */
 	enum ice_candpair_state state;
 	bool valid, nominated, remote_nominated, triggered, use_cand_pending;
+	bool relay_perm;             /* TURN permission requested for rc      */
 	uint64_t created;
 	uint64_t last_ping_sent, last_ping_recv, last_resp_recv;
 	uint64_t last_data_recv, last_consent_ok, next_allowed_ping;
@@ -316,6 +327,7 @@ struct icea_gen {
 	bool early_checks;              /* checks go to a peer that cannot
 	                                   answer yet (see icea_gen_set_early) */
 	struct stun *stun;              /* owned; gathering transactions only   */
+	struct tls *tls;                /* owned; TURN over TLS, allocated lazily */
 	unsigned gather_pending;
 	struct tmr tmr_tick;            /* the scheduler                        */
 	uint64_t checks_started;        /* first icea_gen_start_checks()        */
@@ -419,6 +431,12 @@ int  icea_port_alloc(struct icea_gen *gen, unsigned compid,
 		     const struct sa *laddr, const char *ifname, int cost,
 		     uint16_t port_min, uint16_t port_max,
 		     struct icea_port **portp);
+/* A port without a socket: sends go to `sendh`, receives are injected with
+ * udp_recv_packet() (TURN over TCP/TLS). */
+int  icea_port_alloc_virtual(struct icea_gen *gen, unsigned compid,
+			     const struct sa *laddr, const char *ifname,
+			     int cost, udp_send_h *sendh,
+			     struct icea_port **portp);
 struct icea_port *icea_port_find(const struct icea_gen *gen,
 				 const struct udp_sock *us);
 
