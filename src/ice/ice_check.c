@@ -313,10 +313,13 @@ static void handle_success(struct icea_gen *gen, struct icea_pair *p,
 	/* Credit this response and every older ping on the same pair:
 	 * they were not lost, the answers just crossed (libwebrtc's
 	 * ReceivedPingResponse semantics). */
-	LIST_FOREACH_SAFE(&gen->pingl, le, tmp) {
-		struct icea_ping *q = le->data;
-		if (q->pair == p && q->sent <= ping->sent)
-			mem_deref(q);
+	{
+		const uint64_t sent = ping->sent;
+		LIST_FOREACH_SAFE(&gen->pingl, le, tmp) {
+			struct icea_ping *q = le->data;
+			if (q->pair == p && q->sent <= sent)
+				mem_deref(q);
+		}
 	}
 	ping = NULL;
 	p->unanswered = count_unanswered(gen, p);

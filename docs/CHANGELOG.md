@@ -49,6 +49,12 @@ All notable changes to EchoSDK are documented here.
 
 ### Fixed
 
+- **Use-after-free in the ICE check handler.**  Crediting a check response
+  freed the answered ping and then kept reading its send time while walking
+  the rest of the ping table (present since the agent landed in September;
+  the agent's own test caught it under AddressSanitizer).  The send time is
+  read once before the loop.
+
 - **Inbound calls broke on network handover; outbound were fine.**  The ICE
   agent kept the answerer's CONTROLLED role across its own restart offer, so
   an inbound call's handover met Asterisk also CONTROLLED and depended on the
