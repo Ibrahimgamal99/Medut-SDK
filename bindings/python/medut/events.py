@@ -419,6 +419,7 @@ class CallStats:
         self.ice_generation = 0
         self.ice_local_addr = "";     self.ice_remote_addr = ""
         self.fec_active = False;      self.fec_level_pct = 0
+        self.fec_recovered = 0;       self.plc_concealed = 0
 
     def _update(self, ev: "MediaStatsEvent") -> None:
         with self._lock:
@@ -477,6 +478,8 @@ class CallStats:
             self.ice_remote_addr        = ev.ice_remote_addr
             self.fec_active             = ev.fec_active
             self.fec_level_pct          = ev.fec_level_pct
+            self.fec_recovered          = ev.fec_recovered
+            self.plc_concealed          = ev.plc_concealed
 
     def print(self) -> None:
         """Print a formatted stats block to stdout."""

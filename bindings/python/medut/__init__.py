@@ -147,6 +147,12 @@ def _ensure_init():
         _init_done = True
 
 
+# Indexed by medut_ice_state_t / medut_ice_cand_type_t.
+_ICE_STATE = ("new", "gathering", "checking", "connected", "completed",
+              "disconnected", "failed", "closed")
+_ICE_CAND = ("host", "srflx", "prflx", "relay", "none")
+
+
 def _raw_stats_to_event(s) -> MediaStatsEvent:
     return MediaStatsEvent(
         call=None,
@@ -1034,7 +1040,7 @@ class Call:
         return bool(lib.medut_call_is_held(self._h))
 
     def send_dtmf(self, digit: str):
-        lib.medut_call_send_dtmf(self._h, ord(digit))
+        _check(lib.medut_call_send_dtmf(self._h, digit.encode()), "send_dtmf")
 
     def transfer(self, uri: str):
         _check(lib.medut_call_transfer(self._h, uri.encode()), "transfer")
