@@ -64,7 +64,7 @@ static void event_handler(const medut_event_t *ev, void *ud)
 		 * harness has one shot, so it reports and stops either way. */
 		case MEDUT_REG_RECONNECTING:
 		case MEDUT_REG_FAILED:
-			fprintf(stderr, "[REG] %s: %s\n",
+			fprintf(stdout, "[REG] %s: %s\n",
 			        ev->u.reg.state == MEDUT_REG_RECONNECTING
 			                ? "Reconnecting" : "Failed",
 			        ev->u.reg.error_str ? ev->u.reg.error_str : "?");
@@ -88,7 +88,7 @@ static void event_handler(const medut_event_t *ev, void *ud)
 			atomic_store(&g_ended, 1);
 			break;
 		case MEDUT_CALL_FAILED:
-			fprintf(stderr, "[CALL] Failed: %s\n",
+			fprintf(stdout, "[CALL] Failed: %s\n",
 			        ev->u.call_state.reason ? ev->u.call_state.reason : "?");
 			atomic_store(&g_failed, 1);
 			break;
@@ -117,7 +117,7 @@ static void event_handler(const medut_event_t *ev, void *ud)
 
 static void usage(const char *prog)
 {
-	fprintf(stderr,
+	fprintf(stdout,
 	        "Usage: %s --server <url> --user <aor> --pass <password>"
 	        " [--call <uri>] [--timeout <sec>]\n", prog);
 	exit(1);
@@ -162,25 +162,34 @@ int main(int argc, char *argv[])
 
 	int err = medut_init(&cfg);
 	if (err) {
-		fprintf(stderr, "[ERR] medut_init: %d\n", err);
+		fprintf(stdout, "[ERR] medut_init: %d\n", err);
 		return 1;
 	}
 
 	/* Create account */
 	medut_account_config_t acfg = {
-		.uri      = user,
-		.password = pass,
+		.uri        = user,
+		.password   = pass,
+		.server_url = server,
 	};
+	/* A WebSocket endpoint is a WebRTC one on the PBX side (Asterisk
+	 * webrtc=yes), which answers plain RTP with 488. */
+	if (!strncmp(server, "ws://", 5) || !strncmp(server, "wss://", 6)) {
+		acfg.media_enc    = MEDUT_MEDIA_ENC_DTLS_SRTP;
+		acfg.ice_enabled  = true;
+		acfg.rtcp_mux     = true;
+		acfg.rtcp_mux_set = true;
+	}
 	err = medut_account_create(&acfg, &g_acct);
 	if (err) {
-		fprintf(stderr, "[ERR] account_create: %d\n", err);
+		fprintf(stdout, "[ERR] account_create: %d\n", err);
 		medut_shutdown();
 		return 1;
 	}
 
 	err = medut_account_register(g_acct);
 	if (err) {
-		fprintf(stderr, "[ERR] account_register: %d\n", err);
+		fprintf(stdout, "[ERR] account_register: %d\n", err);
 		medut_shutdown();
 		return 1;
 	}
@@ -189,7 +198,7 @@ int main(int argc, char *argv[])
 	time_t deadline = time(NULL) + timeout_s;
 	while (time(NULL) < deadline) {
 		if (atomic_load(&g_failed)) {
-			fprintf(stderr, "[FAIL] Operation failed\n");
+			fprintf(stdout, "[FAIL] Operation failed\n");
 			medut_shutdown();
 			return 1;
 		}
@@ -200,7 +209,7 @@ int main(int argc, char *argv[])
 
 	int result = 0;
 	if (!atomic_load(&g_ended)) {
-		fprintf(stderr, "[FAIL] Timed out after %d seconds\n", timeout_s);
+		fprintf(stdout, "[FAIL] Timed out after %d seconds\n", timeout_s);
 		result = 1;
 	} else {
 		printf("[OK] Test passed\n");
