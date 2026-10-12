@@ -50,7 +50,7 @@ server_url = "wss://pbx.example.com:8089/ws"
 | `ca_cert_path` | `const char *` | NULL | CA bundle path. NULL = platform trust store ([see below](../guides/tls_wss.md#certificate-trust-store)). |
 | `client_cert` | `const char *` | NULL | Client certificate PEM path. |
 | `client_key` | `const char *` | NULL | Client private key PEM path. |
-| `verify_server` | `bool` | true | Verify server certificate. |
+| `verify_server` | `bool` | true | Verify server certificate (SIP/WSS over TLS and `turns:` TURN servers). |
 | `sni_hostname` | `const char *` | NULL | SNI override (for reverse proxy). NULL = derive from URL. |
 | `user_agent` | `const char *` | NULL | `User-Agent` header value. |
 

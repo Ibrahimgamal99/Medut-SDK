@@ -48,6 +48,11 @@ All notable changes to EchoSDK are documented here.
   through the TURN client), and relayed pairs install a TURN permission
   before their first check.  This is the relay that survives networks which
   block or shape UDP; it needs a TURN server reachable on tcp/443.
+  A `turns:` connection verifies the server's certificate against the same
+  CA bundle SIP over TLS uses (`ca_cert_path`, platform bundle when unset)
+  and against the host from the URL, and sends that host as SNI; a server
+  that fails the check is skipped like any other unreachable relay.
+  `verify_server = false` turns the check off here too.
 - **`EchoSDKConfig.netSettleMs`** (Dart) exposes `net_settle_ms`, the
   debounce before a reported network change is acted on; lowering it from
   the 1500 ms default shortens both the handover gap and the time spent

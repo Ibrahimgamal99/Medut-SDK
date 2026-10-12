@@ -1286,10 +1286,10 @@ static void test_gather_srflx_via_sim_stun(void)
 	ns->stun_server = true;
 	list_init(&servers);
 	CHECK(0 == icea_server_alloc(&s1, false, IPPROTO_UDP, false, &ns->priv,
-				     NULL, NULL));
+				     NULL, NULL, NULL));
 	sa_set_str(&dead, "198.51.100.11", 3478);      /* nobody there */
 	CHECK(0 == icea_server_alloc(&s2, false, IPPROTO_UDP, false, &dead,
-				     NULL, NULL));
+				     NULL, NULL, NULL));
 	list_append(&servers, &s1->le, s1);
 	list_append(&servers, &s2->le, s2);
 

@@ -12,7 +12,7 @@ SYSROOT ?= ../../build/linux-x86_64/sysroot
 ifneq ($(wildcard $(SYSROOT)/include/re/re.h),)
 TESTS += test_ws_pin test_audio_external test_fmtp_bitrate \
          test_dispatch_starve test_ice_sdp test_ice_pair test_ice_agent \
-         test_ice_mod test_audio_processing
+         test_ice_mod test_ice_turn_stream test_audio_processing
 # The WebRTC run needs the library's headers to build; it SKIPs at runtime
 # when the library itself cannot be loaded.
 ifeq ($(shell pkg-config --exists webrtc-audio-processing-1 && echo y),y)
@@ -114,6 +114,12 @@ test_ice_sdp: test_ice_sdp.c $(ICE_ENGINE_SRCS)
 	  $(LDFLAGS)
 
 test_ice_pair: test_ice_pair.c $(ICE_ENGINE_SRCS)
+	$(CC) $(CFLAGS) -Wno-unused-parameter \
+	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
+	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
+	  $(LDFLAGS)
+
+test_ice_turn_stream: test_ice_turn_stream.c $(ICE_ENGINE_SRCS)
 	$(CC) $(CFLAGS) -Wno-unused-parameter \
 	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include \
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \

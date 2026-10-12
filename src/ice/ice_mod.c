@@ -1391,7 +1391,7 @@ static void srv_dns_h(int err, const struct sa *srv, void *arg)
 		}
 	}
 	else if (0 == icea_server_alloc(&server, lk->turn, lk->proto, lk->tls,
-					srv, lk->user, lk->pass)) {
+					srv, lk->host, lk->user, lk->pass)) {
 		list_append(&s->serverl, &server->le, server);
 		info("EchoSDK/ice: %s server %J (%s)\n",
 		     lk->turn ? "TURN" : "STUN", srv, lk->host);
@@ -1491,6 +1491,11 @@ static void conf_from_sdk(struct icea_conf *c)
 	c->debug_h = sdk_debug_h;
 	c->pin_fd  = bsdk_net_bind_socket;
 	c->pin_bind_any = bsdk_net_pin_bind_any();
+	/* turns: gets the same trust anchors as SIP over TLS — core.c has
+	 * already fallen back to the platform bundle when the app named
+	 * none — and the same opt-out.  Borrowed: both outlive the call. */
+	c->tls_ca_file       = g_bsdk.cfg.ca_cert_path;
+	c->tls_verify_server = g_bsdk.cfg.verify_server;
 	/* transport policy and server arrays arrive with the PR4 config */
 }
 

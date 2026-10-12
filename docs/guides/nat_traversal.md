@@ -163,6 +163,16 @@ it is the only path that still carries audio on networks that block or shape
 UDP, and it costs nothing on networks that do not, because a UDP relay or a
 direct pair outranks it. STUN over TCP/TLS is not used for gathering.
 
+A `turns:` entry is verified like any other TLS connection: the chain against
+`ca_cert_path` (the platform's CA bundle when that is unset — the same one SIP
+over TLS uses) and the name against the host in the URL, which is also sent as
+SNI, so a TURN server behind a TLS load balancer gets the name it needs to pick
+a certificate. Name the host in the URL rather than an address: a `turns:` URL
+with an address literal can only have its chain checked, not its identity. A
+server whose certificate does not check out is skipped, and gathering carries
+on with the rest of the list. Setting `verify_server = false` disables the
+check for TURN as well as for SIP.
+
 ---
 
 ## ICE candidate types

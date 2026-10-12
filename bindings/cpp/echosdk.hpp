@@ -912,6 +912,8 @@ typedef struct {
 	const char  *ca_cert_path;
 	const char  *client_cert;
 	const char  *client_key;
+	/** Verify the server's certificate: SIP/WSS over TLS, and the
+	 *  TURN servers given as `turns:` URLs. */
 	bool         verify_server;
 	/**
 	 * SNI hostname — NULL derives from server_url host.

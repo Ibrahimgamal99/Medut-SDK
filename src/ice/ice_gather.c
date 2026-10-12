@@ -31,14 +31,15 @@ static void server_destructor(void *arg)
 	struct icea_server *srv = arg;
 
 	list_unlink(&srv->le);
+	mem_deref(srv->host);
 	mem_deref(srv->user);
 	mem_deref(srv->pass);
 }
 
 
 int icea_server_alloc(struct icea_server **srvp, bool turn, int proto,
-		      bool tls, const struct sa *addr, const char *user,
-		      const char *pass)
+		      bool tls, const struct sa *addr, const char *host,
+		      const char *user, const char *pass)
 {
 	struct icea_server *srv;
 	int err = 0;
@@ -54,6 +55,8 @@ int icea_server_alloc(struct icea_server **srvp, bool turn, int proto,
 	srv->proto = proto ? proto : IPPROTO_UDP;
 	srv->tls   = tls;
 	srv->addr  = *addr;
+	if (host)
+		err |= str_dup(&srv->host, host);
 	if (user)
 		err |= str_dup(&srv->user, user);
 	if (pass)
@@ -306,30 +309,32 @@ static void relay_tcp_close_h(int err, void *arg)
 
 /* RFC 5766 §11.5: STUN messages and ChannelData frames back to back on
  * the stream, ChannelData padded to four bytes. */
-static void relay_tcp_recv_h(struct mbuf *mb_pkt, void *arg)
+int icea_turn_stream_frames(struct mbuf **carryp, struct mbuf *mb_pkt,
+			    icea_turn_frame_h *frameh, void *arg)
 {
-	struct icea_port *port = arg;
-	struct icea_gen *gen = port->gen;
-	int err = 0;
+	int err;
 
-	if (port->tcp_mb) {
-		size_t pos = port->tcp_mb->pos;
+	if (!carryp || !mb_pkt || !frameh)
+		return EINVAL;
 
-		port->tcp_mb->pos = port->tcp_mb->end;
-		err = mbuf_write_mem(port->tcp_mb, mbuf_buf(mb_pkt),
+	if (*carryp) {
+		struct mbuf *carry = *carryp;
+		size_t pos = carry->pos;
+
+		carry->pos = carry->end;
+		err = mbuf_write_mem(carry, mbuf_buf(mb_pkt),
 				     mbuf_get_left(mb_pkt));
-		port->tcp_mb->pos = pos;
+		carry->pos = pos;
 		if (err)
-			goto out;
+			return err;
 	}
 	else {
-		port->tcp_mb = mem_ref(mb_pkt);
+		*carryp = mem_ref(mb_pkt);
 	}
 
 	for (;;) {
-		struct mbuf *mb = port->tcp_mb;
-		size_t len, pos, end;
-		struct sa src;
+		struct mbuf *mb = *carryp;
+		size_t len, framelen, pos, end;
 		uint16_t typ;
 
 		if (mbuf_get_left(mb) < 4)
@@ -337,45 +342,81 @@ static void relay_tcp_recv_h(struct mbuf *mb_pkt, void *arg)
 
 		typ = ntohs(mbuf_read_u16(mb));
 		len = ntohs(mbuf_read_u16(mb));
-		if (typ < 0x4000)
-			len += STUN_HEADER_SIZE;
-		else if (typ < 0x8000)
-			len += 4;
-		else {
-			err = EBADMSG;
-			goto out;
-		}
 		mb->pos -= 4;
 
-		if (mbuf_get_left(mb) < len)
+		if (typ < 0x4000) {
+			/* STUN: the header length excludes the header and is
+			 * always a multiple of four, so nothing is padded. */
+			len += STUN_HEADER_SIZE;
+			framelen = len;
+		}
+		else if (typ < 0x8000) {
+			len += 4;
+			/* The padding that rounds ChannelData up to four bytes
+			 * is part of the frame on a stream, so the frame is
+			 * not here until the padding is.  Consuming it early
+			 * would resume the next read on those bytes — every
+			 * later frame misparsed, and the relay closed. */
+			framelen = (len + 3) & ~(size_t)3;
+		}
+		else {
+			return EBADMSG;
+		}
+
+		if (mbuf_get_left(mb) < framelen)
 			break;
 
 		pos = mb->pos;
 		end = mb->end;
-		mb->end = pos + len;
+		mb->end = pos + len;    /* the frame, without its padding */
 
-		sa_init(&src, AF_UNSPEC);
-		if (port->turnc)
-			err = turnc_recv(port->turnc, &src, mb);
-		if (err)
-			goto out;
+		err = frameh(mb, arg);
 
-		/* what the peer sent through the relay */
-		if (mbuf_get_left(mb) && sa_isset(&src, SA_ADDR))
-			udp_recv_packet(port->us, &src, mb);
-
-		while (len & 0x03)
-			++len;
-		mb->pos = pos + len;
+		mb->pos = pos + framelen;
 		mb->end = end;
+		if (err)
+			return err;
 
 		if (mb->pos >= mb->end) {
-			port->tcp_mb = mem_deref(port->tcp_mb);
+			*carryp = mem_deref(*carryp);
 			break;
 		}
 	}
 
- out:
+	return 0;
+}
+
+
+static int relay_tcp_frame_h(struct mbuf *mb, void *arg)
+{
+	struct icea_port *port = arg;
+	struct sa src;
+	int err;
+
+	if (!port->turnc)
+		return 0;
+
+	sa_init(&src, AF_UNSPEC);
+	err = turnc_recv(port->turnc, &src, mb);
+	if (err)
+		return err;
+
+	/* what the peer sent through the relay */
+	if (mbuf_get_left(mb) && sa_isset(&src, SA_ADDR))
+		udp_recv_packet(port->us, &src, mb);
+
+	return 0;
+}
+
+
+static void relay_tcp_recv_h(struct mbuf *mb_pkt, void *arg)
+{
+	struct icea_port *port = arg;
+	struct icea_gen *gen = port->gen;
+	int err;
+
+	err = icea_turn_stream_frames(&port->tcp_mb, mb_pkt,
+				      relay_tcp_frame_h, port);
 	if (err) {
 		ICEA_DEBUG(gen, "ice[gen %u]: TURN stream from %J: %m\n",
 			   gen->seq, &port->srv_addr, err);
@@ -383,6 +424,34 @@ static void relay_tcp_recv_h(struct mbuf *mb_pkt, void *arg)
 		port->turnc = mem_deref(port->turnc);
 		relay_tcp_concluded(port);
 	}
+}
+
+
+/* The TLS context the generation's TURN connections share.  libre never
+ * calls SSL_CTX_set_default_verify_paths(), so an empty store would make
+ * every certificate unverifiable; conf.tls_ca_file is the same bundle SIP
+ * is given (ice_mod.c), platform-resolved when the app named none. */
+static int relay_tls_ctx(struct icea_gen *gen)
+{
+	struct tls *tls = NULL;
+	int err;
+
+	err = tls_alloc(&tls, TLS_METHOD_TLS, NULL, NULL);
+	if (err)
+		return err;
+
+	if (!gen->conf->tls_verify_server)
+		tls_disable_verify_server(tls);
+	else if (!gen->conf->tls_ca_file)
+		err = ENOENT;
+	else
+		err = tls_add_ca(tls, gen->conf->tls_ca_file);
+
+	if (err)
+		mem_deref(tls);
+	else
+		gen->tls = tls;
+	return err;
 }
 
 
@@ -411,12 +480,38 @@ static int gather_relay_tcp(struct icea_gen *gen, struct icea_port *base_port,
 		goto fail;
 
 	if (srv->tls) {
+		char addrbuf[64];
+		const char *host = srv->host;
+
+		/* The name checked is the one from the URI (srv->host).
+		 * Falling back to the address verifies the chain but not the
+		 * name: libre skips SNI and the name check for an IP
+		 * literal. */
+		if (!host) {
+			(void)re_snprintf(addrbuf, sizeof(addrbuf), "%j",
+					  &srv->addr);
+			host = addrbuf;
+		}
+
 		if (!gen->tls) {
-			err = tls_alloc(&gen->tls, TLS_METHOD_TLS, NULL, NULL);
-			if (err)
+			err = relay_tls_ctx(gen);
+			if (err) {
+				ICEA_DEBUG(gen, "ice[gen %u]: TURN over TLS to"
+					   " %s: no usable CA bundle (%m)\n",
+					   gen->seq, host, err);
 				goto fail;
+			}
 		}
 		err = tls_start_tcp(&port->tlsc, gen->tls, port->tc, 0);
+		if (err)
+			goto fail;
+
+		/* Without this the handshake checks nothing: libre arms
+		 * SSL_VERIFY_PEER here, not in the context, and this is also
+		 * what sends SNI — a TURN server behind a TLS load balancer
+		 * needs the name to pick a certificate at all.  A failure
+		 * fails this relay; the other servers still gather. */
+		err = tls_set_verify_server(port->tlsc, host);
 		if (err)
 			goto fail;
 	}

@@ -84,6 +84,7 @@ desktop.ini
 /test/unit/test_ice_agent
 /test/unit/test_ice_mod
 /test/unit/test_ice_pair
+/test/unit/test_ice_turn_stream
 /test/unit/test_ice_sdp
 /test/unit/test_dispatch_starve
 /test/unit/test_sip_status

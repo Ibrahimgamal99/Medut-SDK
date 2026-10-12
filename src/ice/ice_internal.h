@@ -169,6 +169,13 @@ struct icea_conf {
 	int    (*pin_fd)(re_sock_t fd, const char *ifname, int af);
 	bool   pin_bind_any;        /* pinned ports bind the any-address (Android)
 	                               rather than the interface address        */
+	/* TURN over TLS (turns:).  libre never calls
+	 * SSL_CTX_set_default_verify_paths(), so without a bundle here the
+	 * X509 store is empty and the handshake has nothing to check the
+	 * server against.  Borrowed: must outlive the session (ice_mod.c
+	 * passes g_bsdk.cfg.ca_cert_path, which lives until shutdown). */
+	const char *tls_ca_file;
+	bool   tls_verify_server;   /* false = accept any certificate          */
 };
 
 #define ICEA_CONF_DEFAULT { \
@@ -189,7 +196,8 @@ struct icea_conf {
 	.stun_rto_ms = STUN_DEFAULT_RTO, .stun_rc = STUN_DEFAULT_RC, \
 	.nomination_delay_ms = ICEA_NOMINATION_DELAY_MS, \
 	.nomination = ICEA_NOMINATE_REGULAR, .policy = ICEA_TRANSPORT_ALL, \
-	.drop_unknown_src = false, .family_filter = true, .debug = false }
+	.drop_unknown_src = false, .family_filter = true, .debug = false, \
+	.tls_verify_server = true }
 
 /* ── Objects ─────────────────────────────────────────────────────────────── */
 
@@ -447,11 +455,26 @@ struct icea_server {
 	int proto;                   /* IPPROTO_UDP / IPPROTO_TCP (+tls flag)   */
 	bool tls;
 	struct sa addr;              /* resolved by the owner                   */
+	/* The host from the URI, kept for the TLS certificate check: the
+	 * identity to verify is that host — not the SRV target the lookup
+	 * landed on (RFC 5928 carries the URI host through resolution for
+	 * exactly this), and not the address.  Owned; NULL falls back to the
+	 * address, which verifies the chain but not the name. */
+	char *host;
 	char *user, *pass;
 };
 int  icea_server_alloc(struct icea_server **srvp, bool turn, int proto,
-		       bool tls, const struct sa *addr, const char *user,
-		       const char *pass);
+		       bool tls, const struct sa *addr, const char *host,
+		       const char *user, const char *pass);
+/* RFC 5766 §11.5 stream framing: pull whole STUN messages and ChannelData
+ * frames off a TURN connection.  *carryp (owned by the caller, NULL when
+ * nothing is held) carries a partial frame to the next call; `mb_pkt` is
+ * what the stream just delivered.  `frameh` sees one frame per call, its
+ * mbuf windowed to that frame with any ChannelData padding excluded, and
+ * stops the loop by returning non-zero.  Exposed for test_ice_turn_stream. */
+typedef int (icea_turn_frame_h)(struct mbuf *mb, void *arg);
+int  icea_turn_stream_frames(struct mbuf **carryp, struct mbuf *mb_pkt,
+			     icea_turn_frame_h *frameh, void *arg);
 int  icea_gather_start(struct icea_gen *gen, const struct list *serverl,
 		       uint16_t port_min, uint16_t port_max);
 bool icea_gather_done(const struct icea_gen *gen);
