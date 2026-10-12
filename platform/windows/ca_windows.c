@@ -15,7 +15,7 @@
  * Note this exports what the store holds now; Windows also fetches roots on
  * demand from Windows Update, and a root that has never been needed on this
  * machine will not be present.  A deployment relying on one has to pass its
- * own bundle as echosdk_config_t.ca_cert_path.
+ * own bundle as medut_config_t.ca_cert_path.
  */
 
 #include <stdio.h>
@@ -25,7 +25,7 @@
 #include <windows.h>
 #include <wincrypt.h>
 #include <re.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 const char *bsdk_platform_ca_bundle(const char *dir)
 {
@@ -40,7 +40,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	store = CertOpenSystemStoreA(0, "ROOT");
 	if (!store) {
-		warning("EchoSDK: cannot open the Windows ROOT certificate "
+		warning("Medut: cannot open the Windows ROOT certificate "
 		        "store; TLS server verification will fail unless "
 		        "ca_cert_path is set\n");
 		return NULL;
@@ -89,7 +89,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	if (!written) {
 		(void)remove(path);
-		warning("EchoSDK: the Windows ROOT store held no usable "
+		warning("Medut: the Windows ROOT store held no usable "
 		        "certificates; TLS server verification will fail "
 		        "unless ca_cert_path is set\n");
 		return NULL;

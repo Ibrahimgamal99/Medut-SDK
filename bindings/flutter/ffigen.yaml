@@ -1,47 +1,47 @@
-# ffigen configuration for EchoSDK
+# ffigen configuration for Medut
 # Run: dart run ffigen --config ffigen.yaml
 # Output: lib/src/ffi_bindings.dart
 
-name: EchoSDKBindings
-description: 'Auto-generated Dart FFI bindings for EchoSDK.'
+name: MedutBindings
+description: 'Auto-generated Dart FFI bindings for Medut.'
 output: 'lib/src/ffi_bindings.dart'
 
 headers:
   entry-points:
-    - '../../include/echosdk.h'
+    - '../../include/medut.h'
 
 compiler-opts:
   - '-I../../include'
   # ffigen ignores __attribute__((packed)) on enums and would widen
-  # echosdk_aec_mode_t to 4 bytes, shifting every later config field.
-  - '-DECHOSDK_NO_PACKED_ENUM=1'
+  # medut_aec_mode_t to 4 bytes, shifting every later config field.
+  - '-DMEDUT_NO_PACKED_ENUM=1'
   # Adjust to the local clang resource dir (ls /usr/lib/clang/).
   - '-isystem/usr/lib/clang/21/include'
 
 # Symbol filtering
 functions:
   include:
-    - 'echosdk_.*'
+    - 'medut_.*'
 
 globals:
   include:
-    - 'ECHOSDK_.*'
+    - 'MEDUT_.*'
 
 macros:
   include:
-    - 'ECHOSDK_.*'
+    - 'MEDUT_.*'
 
 enums:
   include:
-    - 'echosdk_.*'
+    - 'medut_.*'
 
 structs:
   include:
-    - 'echosdk_.*'
+    - 'medut_.*'
 
 typedefs:
   include:
-    - 'echosdk_.*'
+    - 'medut_.*'
 
 comments:
   style: any

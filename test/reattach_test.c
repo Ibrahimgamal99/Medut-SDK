@@ -5,9 +5,9 @@
  * (and the SIP stack) stays up depends on — an Android headless Flutter engine
  * destroying the Dart isolate between push wakeups is the motivating case:
  *
- *   1. echosdk_init() on a live stack still returns ECHOSDK_ERR_ALREADY, and
- *      the recovery path works: echosdk_is_initialized() reports the stack is
- *      up, echosdk_set_event_handler() re-points delivery at the new consumer
+ *   1. medut_init() on a live stack still returns MEDUT_ERR_ALREADY, and
+ *      the recovery path works: medut_is_initialized() reports the stack is
+ *      up, medut_set_event_handler() re-points delivery at the new consumer
  *      (the old callback goes quiet), and account/call enumeration hands the
  *      new consumer back the handles the dead one held.
  *   2. cfg.audio_codec_names[] — the global string codec list — actually
@@ -19,7 +19,7 @@
  * Build (from repo root, after scripts/build-linux.sh):
  *   gcc -fsanitize=address -g -O1 -std=gnu11 \
  *       -Iinclude -Idist/linux/x86_64/include test/reattach_test.c \
- *       -Wl,--whole-archive dist/linux/x86_64/echosdk.a -Wl,--no-whole-archive \
+ *       -Wl,--whole-archive dist/linux/x86_64/medut.a -Wl,--no-whole-archive \
  *       -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl -lstdc++ -lpulse \
  *       -o test/reattach_test && ./test/reattach_test
  *
@@ -31,7 +31,7 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 /* baresip/re headers — used to read back what the SDK told baresip about
  * codecs. White-box on purpose: the alternative is a live peer to negotiate
@@ -59,30 +59,30 @@ static atomic_int g_a_count = 0;
 static atomic_int g_b_count = 0;
 static void      *g_b_userdata_seen = NULL;
 
-static void handler_a(const echosdk_event_t *ev, void *ud)
+static void handler_a(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 	atomic_fetch_add(&g_a_count, 1);
-	echosdk_event_release(ev);   /* owned mode */
+	medut_event_release(ev);   /* owned mode */
 }
 
-static void handler_b(const echosdk_event_t *ev, void *ud)
+static void handler_b(const medut_event_t *ev, void *ud)
 {
 	atomic_fetch_add(&g_b_count, 1);
 	g_b_userdata_seen = ud;
-	echosdk_event_release(ev);
+	medut_event_release(ev);
 }
 
 /* Deliberately over the 10 ms callback budget, to be caught mid-delivery. */
 static atomic_bool g_slow_in_cb = false;
 
-static void handler_slow(const echosdk_event_t *ev, void *ud)
+static void handler_slow(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 	atomic_store(&g_slow_in_cb, true);
 	usleep(300000);
 	atomic_store(&g_slow_in_cb, false);
-	echosdk_event_release(ev);
+	medut_event_release(ev);
 }
 
 /* ── Enumeration collectors ──────────────────────────────────────────────── */
@@ -90,11 +90,11 @@ static void handler_slow(const echosdk_event_t *ev, void *ud)
 #define MAX_FOUND 8
 
 typedef struct {
-	echosdk_account_handle_t accts[MAX_FOUND];
+	medut_account_handle_t accts[MAX_FOUND];
 	int                      count;
 } acct_scan_t;
 
-static void collect_acct(echosdk_account_handle_t acct, void *arg)
+static void collect_acct(medut_account_handle_t acct, void *arg)
 {
 	acct_scan_t *scan = arg;
 	if (scan->count < MAX_FOUND)
@@ -106,7 +106,7 @@ typedef struct {
 	int count;
 } call_scan_t;
 
-static void collect_call(echosdk_call_handle_t call, void *arg)
+static void collect_call(medut_call_handle_t call, void *arg)
 {
 	call_scan_t *scan = arg;
 	(void)call;
@@ -116,11 +116,11 @@ static void collect_call(echosdk_call_handle_t call, void *arg)
 /* Produce event traffic on demand: an UNREGISTER/REGISTER pair is two
  * reg-state transitions, so it fires REG_STATE events without waiting on a
  * black-hole REGISTER to time out. */
-static void poke_events(echosdk_account_handle_t acct)
+static void poke_events(medut_account_handle_t acct)
 {
-	echosdk_account_unregister(acct);
+	medut_account_unregister(acct);
 	usleep(300000);
-	echosdk_account_register(acct);
+	medut_account_register(acct);
 	usleep(700000);
 }
 
@@ -152,10 +152,10 @@ static void configured_codecs(char *buf, size_t sz)
 
 int main(void)
 {
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 
-	cfg.transport            = ECHOSDK_TRANSPORT_UDP;
+	cfg.transport            = MEDUT_TRANSPORT_UDP;
 	cfg.log_level            = 0;
 	cfg.event_cb             = handler_a;
 	cfg.deliver_owned_events = true;
@@ -171,39 +171,39 @@ int main(void)
 	strcpy(cfg.audio_codec_names[1], "opus");
 	cfg.audio_codec_name_count = 2;
 
-	CHECK(!echosdk_is_initialized(),
+	CHECK(!medut_is_initialized(),
 	      "is_initialized() true before init\n");
-	CHECK(echosdk_set_event_handler(handler_b, NULL, true) ==
-	              ECHOSDK_ERR_STATE,
+	CHECK(medut_set_event_handler(handler_b, NULL, true) ==
+	              MEDUT_ERR_STATE,
 	      "set_event_handler() before init did not report ERR_STATE\n");
 
-	int err = echosdk_init(&cfg);
+	int err = medut_init(&cfg);
 	if (err) {
-		fprintf(stderr, "echosdk_init: %d\n", err);
+		fprintf(stderr, "medut_init: %d\n", err);
 		return 1;
 	}
 
-	CHECK(echosdk_is_initialized(),
+	CHECK(medut_is_initialized(),
 	      "is_initialized() false on a live stack\n");
 
 	/* A second init must still be refused — reattach is opt-in, never an
 	 * implicit re-configure of a running stack. */
-	CHECK(echosdk_init(&cfg) == ECHOSDK_ERR_ALREADY,
-	      "second echosdk_init() did not return ERR_ALREADY\n");
+	CHECK(medut_init(&cfg) == MEDUT_ERR_ALREADY,
+	      "second medut_init() did not return ERR_ALREADY\n");
 
-	echosdk_account_handle_t acct = NULL;
-	echosdk_account_config_t acfg;
+	medut_account_handle_t acct = NULL;
+	medut_account_config_t acfg;
 	memset(&acfg, 0, sizeof(acfg));
 	acfg.uri       = "alice@192.0.2.1";
 	acfg.password  = "secret";
-	acfg.transport = ECHOSDK_TRANSPORT_UDP;
+	acfg.transport = MEDUT_TRANSPORT_UDP;
 
-	err = echosdk_account_create(&acfg, &acct);
+	err = medut_account_create(&acfg, &acct);
 	if (err) {
 		fprintf(stderr, "account_create: %d\n", err);
 		return 1;
 	}
-	echosdk_account_register(acct);
+	medut_account_register(acct);
 
 	/* ── 2. Global codec names reached baresip, in order ─────────────── */
 	char codecs[256];
@@ -219,49 +219,49 @@ int main(void)
 
 	/* ── 1. Reattach: the isolate died, a new one takes over ─────────── */
 	int dummy_ud = 42;
-	CHECK(echosdk_set_event_handler(handler_b, &dummy_ud, true) ==
-	              ECHOSDK_OK,
+	CHECK(medut_set_event_handler(handler_b, &dummy_ud, true) ==
+	              MEDUT_OK,
 	      "set_event_handler() on a live stack failed\n");
 
 	/* Enumeration hands the new consumer the handles the dead one had. */
 	acct_scan_t ascan = { .count = 0 };
-	echosdk_account_foreach(collect_acct, &ascan);
+	medut_account_foreach(collect_acct, &ascan);
 	CHECK(ascan.count == 1, "account_foreach found %d accounts, want 1\n",
 	      ascan.count);
 	CHECK(ascan.count == 1 && ascan.accts[0] == acct,
 	      "account_foreach returned a handle that is not the live account\n");
 
 	char aor[256] = "";
-	CHECK(echosdk_account_get_aor(acct, aor, sizeof(aor)) == ECHOSDK_OK,
+	CHECK(medut_account_get_aor(acct, aor, sizeof(aor)) == MEDUT_OK,
 	      "account_get_aor failed\n");
 	CHECK(strcmp(aor, AOR) == 0,
 	      "account_get_aor = \"%s\", want \"%s\"\n", aor, AOR);
 
 	char tiny[4] = "xx";
-	CHECK(echosdk_account_get_aor(acct, tiny, sizeof(tiny)) ==
-	              ECHOSDK_ERR_NOMEM,
+	CHECK(medut_account_get_aor(acct, tiny, sizeof(tiny)) ==
+	              MEDUT_ERR_NOMEM,
 	      "account_get_aor into a too-small buffer did not report NOMEM\n");
 	CHECK(tiny[0] == '\0',
 	      "account_get_aor left a truncated string in a too-small buffer\n");
-	CHECK(echosdk_account_get_aor(NULL, aor, sizeof(aor)) ==
-	              ECHOSDK_ERR_INVAL,
+	CHECK(medut_account_get_aor(NULL, aor, sizeof(aor)) ==
+	              MEDUT_ERR_INVAL,
 	      "account_get_aor(NULL) did not report ERR_INVAL\n");
 
-	echosdk_reg_state_t rs = echosdk_account_get_reg_state(acct);
-	CHECK(rs == ECHOSDK_REG_REGISTERING || rs == ECHOSDK_REG_FAILED ||
-	      rs == ECHOSDK_REG_RECONNECTING,
+	medut_reg_state_t rs = medut_account_get_reg_state(acct);
+	CHECK(rs == MEDUT_REG_REGISTERING || rs == MEDUT_REG_FAILED ||
+	      rs == MEDUT_REG_RECONNECTING,
 	      "reg_state = %d, want REGISTERING, RECONNECTING or FAILED for a "
 	      "black-hole server\n", (int)rs);
 
 	/* No calls, but the call side of the reattach path must still answer
 	 * sanely rather than trip over an empty list. */
 	call_scan_t cscan = { .count = 0 };
-	echosdk_call_foreach(collect_call, &cscan);
+	medut_call_foreach(collect_call, &cscan);
 	CHECK(cscan.count == 0, "call_foreach found %d calls, want 0\n",
 	      cscan.count);
-	CHECK(echosdk_call_get_account(NULL) == NULL,
+	CHECK(medut_call_get_account(NULL) == NULL,
 	      "call_get_account(NULL) not NULL\n");
-	CHECK(echosdk_call_get_state(NULL) == ECHOSDK_CALL_ENDED,
+	CHECK(medut_call_get_state(NULL) == MEDUT_CALL_ENDED,
 	      "call_get_state(NULL) not ENDED\n");
 
 	/* B now gets the traffic; A must be quiet from here on.  A black-hole
@@ -280,37 +280,37 @@ int main(void)
 	/* ── The swap waits out a delivery already inside the old handler ─
 	 * Consumers free the old callback as soon as this returns, so a swap
 	 * that races an in-flight delivery is a use-after-free. */
-	CHECK(echosdk_set_event_handler(handler_slow, NULL, true) == ECHOSDK_OK,
+	CHECK(medut_set_event_handler(handler_slow, NULL, true) == MEDUT_OK,
 	      "set_event_handler(handler_slow) failed\n");
-	echosdk_account_unregister(acct);
-	echosdk_account_register(acct);
+	medut_account_unregister(acct);
+	medut_account_register(acct);
 	for (int i = 0; i < 3000 && !atomic_load(&g_slow_in_cb); i++)
 		usleep(1000);
 	CHECK(atomic_load(&g_slow_in_cb),
 	      "never caught the event thread inside the handler\n");
 
-	CHECK(echosdk_set_event_handler(handler_b, &dummy_ud, true) ==
-	              ECHOSDK_OK,
+	CHECK(medut_set_event_handler(handler_b, &dummy_ud, true) ==
+	              MEDUT_OK,
 	      "set_event_handler() during a delivery failed\n");
 	CHECK(!atomic_load(&g_slow_in_cb),
 	      "set_event_handler() returned while the old handler was still "
 	      "running — freeing it here would be a use-after-free\n");
 
 	/* ── Parked delivery: NULL handler drops events, leaks nothing ───── */
-	CHECK(echosdk_set_event_handler(NULL, NULL, false) == ECHOSDK_OK,
+	CHECK(medut_set_event_handler(NULL, NULL, false) == MEDUT_OK,
 	      "set_event_handler(NULL) failed\n");
 	atomic_store(&g_b_count, 0);
 	poke_events(acct);
 	CHECK(atomic_load(&g_b_count) == 0,
 	      "handler B still received events after being parked\n");
 
-	echosdk_account_destroy(acct);
-	echosdk_shutdown();
+	medut_account_destroy(acct);
+	medut_shutdown();
 
-	CHECK(!echosdk_is_initialized(),
+	CHECK(!medut_is_initialized(),
 	      "is_initialized() true after shutdown\n");
-	CHECK(echosdk_set_event_handler(handler_a, NULL, true) ==
-	              ECHOSDK_ERR_STATE,
+	CHECK(medut_set_event_handler(handler_a, NULL, true) ==
+	              MEDUT_ERR_STATE,
 	      "set_event_handler() after shutdown did not report ERR_STATE\n");
 
 	printf("\n%d passed, %d failed\n", g_pass, g_fail);

@@ -12,8 +12,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root      = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $DistDir   = Join-Path $Root "dist\windows\x64"
-$DllSrc    = Join-Path $DistDir "echosdk.dll"
-$DllDst    = Join-Path $ScriptDir "EchoSDK\echosdk.dll"
+$DllSrc    = Join-Path $DistDir "medut.dll"
+$DllDst    = Join-Path $ScriptDir "Medut\medut.dll"
 
 # ── 1. Build the SDK if the DLL is missing ───────────────────────────────────
 if (-not (Test-Path $DllSrc)) {
@@ -22,14 +22,14 @@ if (-not (Test-Path $DllSrc)) {
 }
 
 # ── 2. Copy DLL into the package directory ───────────────────────────────────
-Write-Host "==> Copying echosdk.dll into package..."
+Write-Host "==> Copying medut.dll into package..."
 Copy-Item $DllSrc $DllDst -Force
-Remove-Item -Force "$ScriptDir\echo_sdk\echosdk.so" -ErrorAction SilentlyContinue
-Remove-Item -Force "$ScriptDir\echo_sdk\echosdk.dylib" -ErrorAction SilentlyContinue
+Remove-Item -Force "$ScriptDir\medut\medut.so" -ErrorAction SilentlyContinue
+Remove-Item -Force "$ScriptDir\medut\medut.dylib" -ErrorAction SilentlyContinue
 
 # ── 3. Uninstall existing package, then install fresh ────────────────────────
 Write-Host "==> Uninstalling existing package..."
-pip uninstall -y echo-sdk 2>$null
+pip uninstall -y medut 2>$null
 Write-Host "==> Installing Python package..."
 pip install -e $ScriptDir
 
@@ -39,14 +39,14 @@ pip install --quiet setuptools wheel
 Push-Location $ScriptDir
 Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force dist | Out-Null
-Remove-Item -Force dist\echo_sdk-*-win_amd64.whl -ErrorAction SilentlyContinue
+Remove-Item -Force dist\medut-*-win_amd64.whl -ErrorAction SilentlyContinue
 python setup.py bdist_wheel --quiet
 
 Write-Host "==> Retagging wheel to win_amd64..."
-python -m wheel tags --platform-tag win_amd64 dist\echo_sdk-*-win_amd64.whl --remove
+python -m wheel tags --platform-tag win_amd64 dist\medut-*-win_amd64.whl --remove
 Pop-Location
 
-$Whl = Get-ChildItem "$ScriptDir\dist\echo_sdk-*-win_amd64.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+$Whl = Get-ChildItem "$ScriptDir\dist\medut-*-win_amd64.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $Whl) {
     Write-Error "Wheel build failed -- no .whl found in $ScriptDir\dist"
     exit 1

@@ -31,7 +31,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 #include <rem_au.h>
 #include <rem_aulevel.h>
 #include <rem_auframe.h>
@@ -242,7 +242,7 @@ static void rx_frame(struct tcall *c, size_t n, float dbfs)
 	tcall_rx(c, buf, n, SR, 1);
 }
 
-static void init(bool ns, bool agc, echosdk_aec_mode_t mode)
+static void init(bool ns, bool agc, medut_aec_mode_t mode)
 {
 	g_has_aec  = false;
 	g_external = false;
@@ -261,7 +261,7 @@ static void test_ns_timing(unsigned ptime)
 	unsigned t;
 	double att;
 
-	init(true, false, ECHOSDK_AEC_OFF);
+	init(true, false, MEDUT_AEC_OFF);
 	tcall_open(&c, AU(0));
 
 	/* Start of call: noise only.  The floor used to start at 0 and climb
@@ -329,7 +329,7 @@ static void test_ns_follows_rising_noise(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(true, false, ECHOSDK_AEC_OFF);
+	init(true, false, MEDUT_AEC_OFF);
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 2000; t += 20)
 		tx_frame(&c, n, -60.0f);
@@ -350,7 +350,7 @@ static void test_ns_live_toggle(void)
 	int16_t buf[960], ref[960];
 	double att = 0;
 
-	init(true, false, ECHOSDK_AEC_OFF);
+	init(true, false, MEDUT_AEC_OFF);
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 2000; t += 20)
 		att = tx_frame(&c, n, -50.0f);
@@ -387,7 +387,7 @@ static void test_voice_path_veto(void)
 	size_t n = SR / 1000 * 20;
 	int16_t buf[960], ref[960];
 
-	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	init(true, true, MEDUT_AEC_SUPPRESSOR);
 	g_has_aec = true;
 
 	bsdk_ap_effective(&e);
@@ -428,7 +428,7 @@ static void test_suppressor_rules(void)
 {
 	struct bsdk_ap_effective e;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 
 	bsdk_ap_effective(&e);
 	CHECK(e.suppressor, "desktop: suppressor off");
@@ -509,7 +509,7 @@ static void test_voice_path_matrix(void)
 	for (int ext = 0; ext < 2; ext++)
 	for (int vp = 0; vp < 2; vp++)
 	for (int req = 0; req < 2; req++) {
-		init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+		init(true, true, MEDUT_AEC_SUPPRESSOR);
 		g_external = ext;
 		g_has_aec  = !ext && vp;
 		bsdk_ap_external_changed(ext);
@@ -535,7 +535,7 @@ static void test_voice_path_matrix(void)
  * VPIO engine running — the line a field report is read from. */
 static void test_tx_chain_log_app_voice_path(void)
 {
-	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	init(true, true, MEDUT_AEC_SUPPRESSOR);
 	g_has_aec  = true;           /* audiounit was the SDK's own driver */
 	g_external = true;
 	bsdk_ap_external_changed(true);
@@ -565,7 +565,7 @@ static void test_voice_path_reset(void)
 {
 	struct bsdk_ap_effective e;
 
-	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	init(true, true, MEDUT_AEC_SUPPRESSOR);
 	g_external = true;
 	bsdk_ap_external_changed(true);
 	bsdk_ap_external_voice_path(true);
@@ -585,7 +585,7 @@ static void test_voice_path_reset(void)
 	/* ...and a re-init forgets it. */
 	bsdk_ap_external_voice_path(true);
 	bsdk_audio_processing_close();
-	init(true, true, ECHOSDK_AEC_SUPPRESSOR);
+	init(true, true, MEDUT_AEC_SUPPRESSOR);
 	g_external = true;
 	bsdk_ap_effective(&e);
 	CHECK(e.ns && e.agc, "voice path survived re-init: ns=%d agc=%d",
@@ -607,7 +607,7 @@ static void test_suppressor_across_calls(void)
 	size_t n = SR / 1000 * 20;
 	double att_a = 0, att_b = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&a, AU(0));
 	tcall_open(&b, AU(1));
 
@@ -656,7 +656,7 @@ static void test_suppressor_slots_full(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	for (int i = 0; i < NCALLS; i++)
 		tcall_open(&c[i], (const struct audio *)&ids[i]);
 
@@ -690,7 +690,7 @@ static void test_suppressor_age_race(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 300; t += 20) {
 		g_now_ms += 20;
@@ -718,7 +718,7 @@ static void test_suppressor_release(unsigned ptime)
 	double worst_held = -1000, worst_late = 0;   /* least / most attenuation */
 	unsigned t;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&c, AU(0));
 
 	for (t = 0; t < 500; t += ptime) {
@@ -752,7 +752,7 @@ static void test_suppressor_settles_on_far_noise(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 500; t += 20) {
 		g_now_ms += 20;
@@ -779,7 +779,7 @@ static void test_hold_resume_pairing(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&c, AU(2));
 
 	tcall_close_tx(&c);   /* stop_tx: only tx->filtl is flushed */
@@ -802,7 +802,7 @@ static void test_suppression_level_zero(void)
 	size_t n = SR / 1000 * 20;
 	double att = 0;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	bsdk_aec_floor_store(1.0f);   /* aec_suppression_level = 0 */
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 300; t += 20) {
@@ -832,7 +832,7 @@ static void test_suppression_level_clamped_at_init(void)
 
 		g_has_aec  = false;
 		g_external = false;
-		bsdk_audio_processing_init(false, false, ECHOSDK_AEC_SUPPRESSOR,
+		bsdk_audio_processing_init(false, false, MEDUT_AEC_SUPPRESSOR,
 		                           cases[k].lvl, 0.0f, 0.0f);
 		tcall_open(&c, AU(0));
 		for (int t = 0; t < 300; t += 20) {
@@ -857,7 +857,7 @@ static void test_agc_rate(unsigned ptime)
 	size_t n = SR / 1000 * ptime;
 	double att = 0;
 
-	init(false, true, ECHOSDK_AEC_OFF);
+	init(false, true, MEDUT_AEC_OFF);
 	tcall_open(&c, AU(0));
 	for (unsigned t = 0; t < 1020; t += ptime)
 		att = tx_frame(&c, n, -35.0f);
@@ -877,7 +877,7 @@ static void test_registry_entry_dies_with_call(void)
 	struct tcall c;
 	size_t n = SR / 1000 * 20;
 
-	init(false, false, ECHOSDK_AEC_SUPPRESSOR);
+	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	tcall_open(&c, AU(0));
 	for (int t = 0; t < 300; t += 20) {
 		g_now_ms += 20;
@@ -953,7 +953,7 @@ static void test_webrtc(void)
 		return;
 	}
 
-	init(false, false, ECHOSDK_AEC_WEBRTC);
+	init(false, false, MEDUT_AEC_WEBRTC);
 	bsdk_ap_effective(&e);
 	CHECK(e.webrtc && e.webrtc_aec && !e.webrtc_ns && !e.suppressor,
 	      "WEBRTC mode: webrtc=%d aec=%d ns=%d supp=%d",

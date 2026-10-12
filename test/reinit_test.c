@@ -1,18 +1,18 @@
 /**
- * @file reinit_test.c  Gate test: echosdk_shutdown() → echosdk_init() in one
+ * @file reinit_test.c  Gate test: medut_shutdown() → medut_init() in one
  *                      process must come back with a working stack
  *
  * What went wrong: libre_close() never unloads the module registry (re's
  * mod.c `modl` survives it) while baresip_close() frees the codec /
  * media-encryption / media-NAT lists those modules registered into.  On the
- * next echosdk_init(), module_load() found every module via mod_find(),
+ * next medut_init(), module_load() found every module via mod_find(),
  * answered EALREADY, and never re-ran their init() — so the second stack had
- * zero codecs, no dtls_srtp and no ice, and echosdk_account_create() still
+ * zero codecs, no dtls_srtp and no ice, and medut_account_create() still
  * returned 0.  Hit in practice by two Flutter engines each treating the SDK
  * as their own: one engine's shutdown crippled the other's next init.
  *
- * echosdk_shutdown() now calls mod_close() (core.c), and
- * echosdk_account_create() refuses an account whose media encryption / ICE /
+ * medut_shutdown() now calls mod_close() (core.c), and
+ * medut_account_create() refuses an account whose media encryption / ICE /
  * codecs are not registered (account.c) instead of handing back one that
  * would offer plain RTP.
  *
@@ -23,7 +23,7 @@
  *   gcc -fsanitize=address -g -O1 -std=gnu11 \
  *       -Iinclude -Ibuild/linux-x86_64/sysroot/include \
  *       -Ibuild/linux-x86_64/sysroot/include/re test/reinit_test.c \
- *       -Wl,--whole-archive dist/linux/x86_64/echosdk.a -Wl,--no-whole-archive \
+ *       -Wl,--whole-archive dist/linux/x86_64/medut.a -Wl,--no-whole-archive \
  *       -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl -lstdc++ -lpulse \
  *       -o test/reinit_test && ./test/reinit_test
  */
@@ -32,7 +32,7 @@
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
-#include "echosdk.h"
+#include "medut.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -43,22 +43,22 @@ static int g_fail = 0;
 	       printf(__VA_ARGS__); fflush(stdout); } \
 } while (0)
 
-static void on_event(const echosdk_event_t *ev, void *ud)
+static void on_event(const medut_event_t *ev, void *ud)
 {
 	(void)ev; (void)ud;
 }
 
-static int stack_up_with(echosdk_config_t *cfg)
+static int stack_up_with(medut_config_t *cfg)
 {
 	cfg->log_level = 0;
 	cfg->event_cb  = on_event;
-	return echosdk_init(cfg);
+	return medut_init(cfg);
 }
 
 static int stack_up(void)
 {
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 	return stack_up_with(&cfg);
 }
 
@@ -80,12 +80,12 @@ static bool account_has_opus(const char *aor)
 /* One init → probe → create → shutdown cycle. */
 static void cycle(int n)
 {
-	echosdk_account_config_t ac;
-	echosdk_account_handle_t h = NULL;
+	medut_account_config_t ac;
+	medut_account_handle_t h = NULL;
 	int err;
 
 	err = stack_up();
-	CHECK(err == 0, "cycle %d: echosdk_init returned %d\n", n, err);
+	CHECK(err == 0, "cycle %d: medut_init returned %d\n", n, err);
 	if (err)
 		return;
 
@@ -105,10 +105,10 @@ static void cycle(int n)
 	memset(&ac, 0, sizeof(ac));
 	ac.uri         = "100@192.0.2.1";
 	ac.password    = "secret";
-	ac.transport   = ECHOSDK_TRANSPORT_UDP;
-	ac.media_enc   = ECHOSDK_MEDIA_ENC_DTLS_SRTP;
+	ac.transport   = MEDUT_TRANSPORT_UDP;
+	ac.media_enc   = MEDUT_MEDIA_ENC_DTLS_SRTP;
 	ac.ice_enabled = true;
-	err = echosdk_account_create(&ac, &h);
+	err = medut_account_create(&ac, &h);
 	CHECK(err == 0 && h != NULL,
 	      "cycle %d: account_create with dtls_srtp+ice returned %d\n",
 	      n, err);
@@ -118,9 +118,9 @@ static void cycle(int n)
 	CHECK(account_has_opus("sip:100@192.0.2.1"),
 	      "cycle %d: the account resolved no Opus\n", n);
 	if (h)
-		echosdk_account_destroy(h);
+		medut_account_destroy(h);
 
-	echosdk_shutdown();
+	medut_shutdown();
 }
 
 /* The opus module reads its settings into globals once per init, and used to
@@ -146,15 +146,15 @@ static void test_opus_settings_per_init(void)
 	};
 
 	for (size_t i = 0; i < sizeof(inits) / sizeof(inits[0]); i++) {
-		echosdk_config_t cfg;
+		medut_config_t cfg;
 		const struct aucodec *opus;
 
-		echosdk_config_init(&cfg);
+		medut_config_init(&cfg);
 		cfg.opus.stereo             = inits[i].stereo;
 		cfg.opus.complexity         = inits[i].complexity;
 		cfg.opus_expected_loss_pct  = inits[i].pinned_loss;
 		if (stack_up_with(&cfg)) {
-			CHECK(false, "opus init %zu: echosdk_init failed\n", i);
+			CHECK(false, "opus init %zu: medut_init failed\n", i);
 			continue;
 		}
 		opus = aucodec_find(baresip_aucodecl(), "opus", 48000, 0);
@@ -167,7 +167,7 @@ static void test_opus_settings_per_init(void)
 		CHECK(opus_packet_loss == inits[i].want_loss,
 		      "opus init %zu: expected loss %d, want %d\n", i,
 		      opus_packet_loss, inits[i].want_loss);
-		echosdk_shutdown();
+		medut_shutdown();
 	}
 }
 
@@ -175,8 +175,8 @@ static void test_opus_settings_per_init(void)
  * account_create must refuse rather than return 0. */
 static void test_create_refuses_on_empty_registry(void)
 {
-	echosdk_account_config_t ac;
-	echosdk_account_handle_t h = NULL;
+	medut_account_config_t ac;
+	medut_account_handle_t h = NULL;
 	struct menc *dtls;
 	int err;
 
@@ -193,20 +193,20 @@ static void test_create_refuses_on_empty_registry(void)
 	memset(&ac, 0, sizeof(ac));
 	ac.uri       = "100@192.0.2.1";
 	ac.password  = "secret";
-	ac.transport = ECHOSDK_TRANSPORT_UDP;
-	ac.media_enc = ECHOSDK_MEDIA_ENC_DTLS_SRTP;
-	err = echosdk_account_create(&ac, &h);
-	CHECK(err == ECHOSDK_ERR_STATE && h == NULL,
+	ac.transport = MEDUT_TRANSPORT_UDP;
+	ac.media_enc = MEDUT_MEDIA_ENC_DTLS_SRTP;
+	err = medut_account_create(&ac, &h);
+	CHECK(err == MEDUT_ERR_STATE && h == NULL,
 	      "account_create with an unregistered mediaenc returned %d "
-	      "(expected ECHOSDK_ERR_STATE)\n", err);
+	      "(expected MEDUT_ERR_STATE)\n", err);
 	if (h)
-		echosdk_account_destroy(h);
+		medut_account_destroy(h);
 
 	/* Put it back so shutdown's module close finds what it expects. */
 	if (dtls)
 		list_append(baresip_mencl(), &dtls->le, dtls);
 
-	echosdk_shutdown();
+	medut_shutdown();
 }
 
 int main(void)

@@ -9,7 +9,7 @@
  * internal format, the frame is skipped (this is logged as a warning once).
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 #include <rem_au.h>
 #include <rem_aulevel.h>
 #include <rem_auframe.h>
@@ -21,17 +21,17 @@
 struct tap_enc_st {
 	struct aufilt_enc_st  base;
 	const struct audio   *au;
-	struct echosdk_call  *lc;
+	struct medut_call  *lc;
 };
 
 struct tap_dec_st {
 	struct aufilt_dec_st  base;
 	const struct audio   *au;
-	struct echosdk_call  *lc;
+	struct medut_call  *lc;
 };
 
 /* ── Forward declaration ─────────────────────────────────────────────────── */
-static struct echosdk_call *tap_find_call(const struct audio *au);
+static struct medut_call *tap_find_call(const struct audio *au);
 
 /* Compute dBov level from a PCM frame in any supported format.
  * Returns -127.0f for silence/empty/unsupported. */
@@ -119,9 +119,9 @@ static int tap_decupd(struct aufilt_dec_st **stp, void **ctx,
 	return 0;
 }
 
-struct tap_find_ctx { const struct audio *au; struct echosdk_call *found; };
+struct tap_find_ctx { const struct audio *au; struct medut_call *found; };
 
-static void tap_find_fn(struct echosdk_call *lc, void *arg)
+static void tap_find_fn(struct medut_call *lc, void *arg)
 {
 	struct tap_find_ctx *ctx = arg;
 	struct audio *got = lc->bc ? call_audio(lc->bc) : NULL;
@@ -129,7 +129,7 @@ static void tap_find_fn(struct echosdk_call *lc, void *arg)
 		ctx->found = lc;
 }
 
-static struct echosdk_call *tap_find_call(const struct audio *au)
+static struct medut_call *tap_find_call(const struct audio *au)
 {
 	struct tap_find_ctx ctx = {.au = au, .found = NULL};
 	bsdk_call_foreach(tap_find_fn, &ctx);
@@ -142,7 +142,7 @@ static int tap_encode(struct aufilt_enc_st *st, struct auframe *af)
 
 	if (!ts->lc)
 		ts->lc = tap_find_call(ts->au);
-	struct echosdk_call *lc = ts->lc;
+	struct medut_call *lc = ts->lc;
 	if (!lc)
 		return 0;
 
@@ -154,17 +154,17 @@ static int tap_encode(struct aufilt_enc_st *st, struct auframe *af)
 	if (af->fmt != AUFMT_S16LE) return 0;
 
 	mtx_lock(&lc->tap_lock);
-	echosdk_media_tap_cb_t cb = lc->tap_cb;
+	medut_media_tap_cb_t cb = lc->tap_cb;
 	void *ud = lc->tap_userdata;
 	mtx_unlock(&lc->tap_lock);
 
 	if (cb) {
-		cb(lc, ECHOSDK_MEDIA_DIR_TX,
+		cb(lc, MEDUT_MEDIA_DIR_TX,
 		   (const int16_t *)af->sampv,
 		   af->sampc, af->srate, af->ch,
 		   af->timestamp, ud);
 	}
-	bsdk_record_write_frame(lc, ECHOSDK_MEDIA_DIR_TX,
+	bsdk_record_write_frame(lc, MEDUT_MEDIA_DIR_TX,
 	                        (const int16_t *)af->sampv,
 	                        af->sampc, af->srate, af->ch);
 	return 0;
@@ -176,7 +176,7 @@ static int tap_decode(struct aufilt_dec_st *st, struct auframe *af)
 
 	if (!ts->lc)
 		ts->lc = tap_find_call(ts->au);
-	struct echosdk_call *lc = ts->lc;
+	struct medut_call *lc = ts->lc;
 	if (!lc) return 0;
 
 	float dbov = tap_compute_dbov(af->sampv, af->sampc, af->fmt);
@@ -190,16 +190,16 @@ static int tap_decode(struct aufilt_dec_st *st, struct auframe *af)
 	size_t n = af->sampc;
 
 	mtx_lock(&lc->tap_lock);
-	echosdk_media_tap_cb_t cb = lc->tap_cb;
+	medut_media_tap_cb_t cb = lc->tap_cb;
 	void *ud = lc->tap_userdata;
 	mtx_unlock(&lc->tap_lock);
 
 	if (cb) {
-		cb(lc, ECHOSDK_MEDIA_DIR_RX,
+		cb(lc, MEDUT_MEDIA_DIR_RX,
 		   samples, n, af->srate, af->ch,
 		   af->timestamp, ud);
 	}
-	bsdk_record_write_frame(lc, ECHOSDK_MEDIA_DIR_RX,
+	bsdk_record_write_frame(lc, MEDUT_MEDIA_DIR_RX,
 	                        samples, n, af->srate, af->ch);
 	return 0;
 }
@@ -207,7 +207,7 @@ static int tap_decode(struct aufilt_dec_st *st, struct auframe *af)
 /* ── Filter registration ─────────────────────────────────────────────────── */
 
 static struct aufilt s_tap_filter = {
-	.name     = "echosdk_tap",
+	.name     = "medut_tap",
 	.encupdh  = tap_encupd,
 	.ench     = tap_encode,
 	.decupdh  = tap_decupd,
@@ -239,8 +239,8 @@ void bsdk_tap_global_reset(void)
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call    *lc;
-	echosdk_media_tap_cb_t  cb;
+	struct medut_call    *lc;
+	medut_media_tap_cb_t  cb;
 	void                   *userdata;
 } set_tap_ctx_t;
 
@@ -255,11 +255,11 @@ static void set_tap_fn(void *arg)
 	mtx_unlock(&ctx->lc->tap_lock);
 }
 
-int echosdk_call_set_media_tap(echosdk_call_handle_t call,
-                                echosdk_media_tap_cb_t cb,
+int medut_call_set_media_tap(medut_call_handle_t call,
+                                medut_media_tap_cb_t cb,
                                 void *userdata)
 {
-	if (!call) return ECHOSDK_ERR_INVAL;
+	if (!call) return MEDUT_ERR_INVAL;
 	set_tap_ctx_t ctx = {.lc = call, .cb = cb, .userdata = userdata};
 	return bsdk_dispatch_sync(set_tap_fn, &ctx);
 }

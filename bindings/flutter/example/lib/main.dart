@@ -1,4 +1,4 @@
-/// EchoSDK example softphone.
+/// Medut example softphone.
 ///
 /// Three tabs:
 ///  1. Account  — registration over UDP/TCP/TLS/WS/WSS, codec preference,
@@ -10,7 +10,7 @@ library;
 
 import 'dart:async';
 
-import 'package:echo_sdk/echo_sdk.dart';
+import 'package:medut/medut.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -18,16 +18,16 @@ import 'account_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const EchoSDKExampleApp());
+  runApp(const MedutExampleApp());
 }
 
-class EchoSDKExampleApp extends StatelessWidget {
-  const EchoSDKExampleApp({super.key});
+class MedutExampleApp extends StatelessWidget {
+  const MedutExampleApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'EchoSDK example',
+      title: 'Medut example',
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       home: const PhonePage(),
     );
@@ -45,10 +45,10 @@ class _PhonePageState extends State<PhonePage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 3, vsync: this);
 
-  EchoSDK? _sdk;
+  Medut? _sdk;
   Account? _account;
   Call? _call;
-  StreamSubscription<EchoSDKEvent>? _sub;
+  StreamSubscription<MedutEvent>? _sub;
 
   // ── form state ─────────────────────────────────────────────────────────
   final _user = TextEditingController(text: 'alice@pbx.example.com');
@@ -300,8 +300,8 @@ class _PhonePageState extends State<PhonePage>
     }
 
     try {
-      _sdk ??= await EchoSDK.start(
-        config: const EchoSDKConfig(
+      _sdk ??= await Medut.start(
+        config: const MedutConfig(
           logLevel: 3,
           // Experimental: gather on cellular next to Wi-Fi so a handover can
           // reuse candidates that already exist. Off here — on the Android
@@ -379,7 +379,7 @@ class _PhonePageState extends State<PhonePage>
 
   // ── event handling ─────────────────────────────────────────────────────
 
-  void _onEvent(EchoSDKEvent ev) {
+  void _onEvent(MedutEvent ev) {
     if (!mounted) return;
     switch (ev) {
       case RegStateEvent e:
@@ -543,7 +543,7 @@ class _PhonePageState extends State<PhonePage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('EchoSDK'),
+        title: const Text('Medut'),
         bottom: TabBar(controller: _tabs, tabs: const [
           Tab(icon: Icon(Icons.account_circle), text: 'Account'),
           Tab(icon: Icon(Icons.call), text: 'Call'),

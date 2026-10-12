@@ -1,8 +1,8 @@
 /**
- * @file log.c  baresip log + re dbg → ECHOSDK_EV_LOG bridge
+ * @file log.c  baresip log + re dbg → MEDUT_EV_LOG bridge
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 #include <re_dbg.h>
 #include <stdio.h>
 
@@ -15,7 +15,7 @@
  */
 static void queue_log_event(const char *msg, size_t len)
 {
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
@@ -23,7 +23,7 @@ static void queue_log_event(const char *msg, size_t len)
 		memcpy(qev->buf, msg, len);
 	else
 		str_ncpy(qev->buf, msg, sizeof(qev->buf));
-	qev->ev.type = ECHOSDK_EV_LOG;
+	qev->ev.type = MEDUT_EV_LOG;
 	qev->ev.u.log.message = qev->buf;
 
 	/* Deliberately not bsdk_event_post_qev(): that warns on a full queue,

@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* ── WAV header (44 bytes, PCM S16LE) ───────────────────────────────────── */
 
@@ -53,7 +53,7 @@ static void mix_s16(int16_t *dst, const int16_t *src, size_t count)
 
 /* ── Internal frame writer (called from audio thread via media tap) ──────── */
 
-void bsdk_record_write_frame(struct echosdk_call *lc, echosdk_media_dir_t dir,
+void bsdk_record_write_frame(struct medut_call *lc, medut_media_dir_t dir,
                               const int16_t *pcm, size_t samples,
                               uint32_t srate, uint8_t ch)
 {
@@ -76,7 +76,7 @@ void bsdk_record_write_frame(struct echosdk_call *lc, echosdk_media_dir_t dir,
 		return;
 	}
 
-	if (dir == ECHOSDK_MEDIA_DIR_TX) {
+	if (dir == MEDUT_MEDIA_DIR_TX) {
 		/* Store TX frame so the next RX write can mix it in */
 		size_t cap = sizeof(lc->rec_tx_buf) / sizeof(lc->rec_tx_buf[0]);
 		lc->rec_tx_count = samples < cap ? samples : cap;
@@ -110,7 +110,7 @@ void bsdk_record_write_frame(struct echosdk_call *lc, echosdk_media_dir_t dir,
 /* ── record_start ────────────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call *lc;
+	struct medut_call *lc;
 	char                 path[512];
 	int                  result;
 } rec_start_ctx_t;
@@ -118,7 +118,7 @@ typedef struct {
 static void record_start_fn(void *arg)
 {
 	rec_start_ctx_t *ctx = arg;
-	struct echosdk_call *lc = ctx->lc;
+	struct medut_call *lc = ctx->lc;
 
 	mtx_lock(&lc->rec_lock);
 
@@ -146,9 +146,9 @@ static void record_start_fn(void *arg)
 	ctx->result = 0;
 }
 
-int echosdk_call_record_start(echosdk_call_handle_t call, const char *path)
+int medut_call_record_start(medut_call_handle_t call, const char *path)
 {
-	if (!call || !path) return ECHOSDK_ERR_INVAL;
+	if (!call || !path) return MEDUT_ERR_INVAL;
 
 	rec_start_ctx_t ctx = {.lc = call, .result = 0};
 	str_ncpy(ctx.path, path, sizeof(ctx.path));
@@ -160,7 +160,7 @@ int echosdk_call_record_start(echosdk_call_handle_t call, const char *path)
 
 static void record_stop_fn(void *arg)
 {
-	struct echosdk_call *lc = arg;
+	struct medut_call *lc = arg;
 
 	mtx_lock(&lc->rec_lock);
 	lc->rec_active     = false;
@@ -181,8 +181,8 @@ static void record_stop_fn(void *arg)
 	}
 }
 
-int echosdk_call_record_stop(echosdk_call_handle_t call)
+int medut_call_record_stop(medut_call_handle_t call)
 {
-	if (!call) return ECHOSDK_ERR_INVAL;
+	if (!call) return MEDUT_ERR_INVAL;
 	return bsdk_dispatch_sync(record_stop_fn, call);
 }

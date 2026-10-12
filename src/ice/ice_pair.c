@@ -1,5 +1,5 @@
 /**
- * @file ice_pair.c  echo-ice: candidate pairs and the check list
+ * @file ice_pair.c  medut-ice: candidate pairs and the check list
  *
  * RFC 8445 §6.1.2: pair every local candidate with every remote candidate
  * of the same component and address family, compute pair priorities from

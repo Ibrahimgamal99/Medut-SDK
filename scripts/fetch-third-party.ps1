@@ -13,7 +13,7 @@ $Deps = @(
     @{ Name = "baresip"; Url = "https://github.com/baresip/baresip.git"; Rev = "d5ed26ccff4c884f27061cdf022f18332cda4c9c" }
     @{ Name = "opus";    Url = "https://github.com/xiph/opus.git";       Rev = "503d81b138d76621aae4b12786e90de48aa8db3a" }
 )
-if ($env:ECHOSDK_TLS -eq "mbedtls") {
+if ($env:MEDUT_TLS -eq "mbedtls") {
     $Deps += @{ Name = "mbedtls"; Url = "https://github.com/Mbed-TLS/mbedtls.git"; Rev = "2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9" }
 }
 
@@ -22,7 +22,7 @@ foreach ($dep in $Deps) {
 
     # CMake gates on CMakeLists.txt, so that marks an already-usable tree —
     # which must also be at the pinned revision.  Moving it uses checkout -f,
-    # which drops the EchoSDK patches the build applied (it re-applies them:
+    # which drops the Medut patches the build applied (it re-applies them:
     # the patch steps depend on .git/HEAD) and any hand edits under
     # third_party\.
     if (Test-Path (Join-Path $dir "CMakeLists.txt")) {

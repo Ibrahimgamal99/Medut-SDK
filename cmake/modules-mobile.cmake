@@ -10,7 +10,7 @@
 
 # account/contact/menu are NOT compiled: modules_init.c never loads them
 # (they read ~/.baresip/* from disk / drive a CLI — see its header comment).
-set(ECHOSDK_MOBILE_MODULES_BASE
+set(MEDUT_MOBILE_MODULES_BASE
   "opus"
   "g711"
   "srtp"
@@ -21,4 +21,4 @@ set(ECHOSDK_MOBILE_MODULES_BASE
   "mwi"
   "presence"
 )
-list(JOIN ECHOSDK_MOBILE_MODULES_BASE ";" ECHOSDK_MOBILE_MODULES_BASE)
+list(JOIN MEDUT_MOBILE_MODULES_BASE ";" MEDUT_MOBILE_MODULES_BASE)

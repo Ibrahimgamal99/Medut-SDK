@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the C++ examples for EchoSDK.
+# Build the C++ examples for Medut.
 # Builds the SDK first if it hasn't been built yet.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ DIST_DIR="${ROOT}/dist/linux/x86_64"
 BUILD_DIR="${SCRIPT_DIR}/build"
 
 # ── 1. Build the SDK if needed ────────────────────────────────────────────────
-if [[ ! -f "${DIST_DIR}/echosdk.so" ]]; then
+if [[ ! -f "${DIST_DIR}/medut.so" ]]; then
   echo "==> SDK not found — building it first..."
   bash "${ROOT}/scripts/build-linux.sh"
 fi
@@ -18,7 +18,7 @@ fi
 echo "==> Configuring C++ examples..."
 cmake -S "${SCRIPT_DIR}" -B "${BUILD_DIR}" -GNinja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DECHOSDK_DIST_DIR="${DIST_DIR}"
+  -DMEDUT_DIST_DIR="${DIST_DIR}"
 
 echo "==> Building..."
 cmake --build "${BUILD_DIR}" -j"$(nproc)"

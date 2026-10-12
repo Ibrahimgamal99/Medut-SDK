@@ -1,4 +1,4 @@
-/// Typed Dart enums mirroring the EchoSDK C enums.
+/// Typed Dart enums mirroring the Medut C enums.
 ///
 /// Every enum carries its C integer as [raw] and can be decoded with
 /// `fromRaw()`. Unknown raw values map to a defined fallback rather than
@@ -9,11 +9,11 @@ import 'ffi_bindings.dart' as c;
 
 /// SIP transport protocol.
 enum Transport {
-  udp(c.echosdk_transport_t.ECHOSDK_TRANSPORT_UDP),
-  tcp(c.echosdk_transport_t.ECHOSDK_TRANSPORT_TCP),
-  tls(c.echosdk_transport_t.ECHOSDK_TRANSPORT_TLS),
-  ws(c.echosdk_transport_t.ECHOSDK_TRANSPORT_WS),
-  wss(c.echosdk_transport_t.ECHOSDK_TRANSPORT_WSS);
+  udp(c.medut_transport_t.MEDUT_TRANSPORT_UDP),
+  tcp(c.medut_transport_t.MEDUT_TRANSPORT_TCP),
+  tls(c.medut_transport_t.MEDUT_TRANSPORT_TLS),
+  ws(c.medut_transport_t.MEDUT_TRANSPORT_WS),
+  wss(c.medut_transport_t.MEDUT_TRANSPORT_WSS);
 
   final int raw;
   const Transport(this.raw);
@@ -23,9 +23,9 @@ enum Transport {
 
 /// Media (SRTP) encryption mode.
 enum MediaEncryption {
-  none(c.echosdk_media_enc_t.ECHOSDK_MEDIA_ENC_NONE),
-  sdes(c.echosdk_media_enc_t.ECHOSDK_MEDIA_ENC_SDES),
-  dtlsSrtp(c.echosdk_media_enc_t.ECHOSDK_MEDIA_ENC_DTLS_SRTP);
+  none(c.medut_media_enc_t.MEDUT_MEDIA_ENC_NONE),
+  sdes(c.medut_media_enc_t.MEDUT_MEDIA_ENC_SDES),
+  dtlsSrtp(c.medut_media_enc_t.MEDUT_MEDIA_ENC_DTLS_SRTP);
 
   final int raw;
   const MediaEncryption(this.raw);
@@ -36,12 +36,12 @@ enum MediaEncryption {
 /// Which candidates a call may use (WebRTC's `iceTransportPolicy`).
 enum IceTransportPolicy {
   /// Host, server-reflexive and relayed candidates.
-  all(c.echosdk_ice_transport_policy_t.ECHOSDK_ICE_TRANSPORT_ALL),
+  all(c.medut_ice_transport_policy_t.MEDUT_ICE_TRANSPORT_ALL),
 
   /// Relayed only: nothing but TURN candidates is offered or accepted, and a
   /// call with no usable TURN server fails fast instead of leaking a direct
   /// path.
-  relay(c.echosdk_ice_transport_policy_t.ECHOSDK_ICE_TRANSPORT_RELAY);
+  relay(c.medut_ice_transport_policy_t.MEDUT_ICE_TRANSPORT_RELAY);
 
   final int raw;
   const IceTransportPolicy(this.raw);
@@ -51,15 +51,15 @@ enum IceTransportPolicy {
 
 /// Registration lifecycle state.
 enum RegState {
-  unregistered(c.echosdk_reg_state_t.ECHOSDK_REG_UNREGISTERED),
-  registering(c.echosdk_reg_state_t.ECHOSDK_REG_REGISTERING),
-  registered(c.echosdk_reg_state_t.ECHOSDK_REG_REGISTERED),
+  unregistered(c.medut_reg_state_t.MEDUT_REG_UNREGISTERED),
+  registering(c.medut_reg_state_t.MEDUT_REG_REGISTERING),
+  registered(c.medut_reg_state_t.MEDUT_REG_REGISTERED),
 
   /// Terminal: the SDK has stopped trying — wrong credentials, the retry
   /// budget ran out, or the app cancelled the retry.  Needs the app or the
   /// user: [Account.retryNow], or new credentials.
-  failed(c.echosdk_reg_state_t.ECHOSDK_REG_FAILED),
-  unregistering(c.echosdk_reg_state_t.ECHOSDK_REG_UNREGISTERING),
+  failed(c.medut_reg_state_t.MEDUT_REG_FAILED),
+  unregistering(c.medut_reg_state_t.MEDUT_REG_UNREGISTERING),
 
   /// Transient: the registration is down and the SDK is getting it back on
   /// its own — a retry armed after a timeout or 5xx, a keepalive probe the
@@ -72,7 +72,7 @@ enum RegState {
   /// for as long as the outage lasts and [RegStateEvent.retryDelayMs] is the
   /// backoff armed for the next one, so the latest event always renders a
   /// complete status line.
-  reconnecting(c.echosdk_reg_state_t.ECHOSDK_REG_RECONNECTING);
+  reconnecting(c.medut_reg_state_t.MEDUT_REG_RECONNECTING);
 
   final int raw;
   const RegState(this.raw);
@@ -82,13 +82,13 @@ enum RegState {
 
 /// Call lifecycle state.
 enum CallState {
-  calling(c.echosdk_call_state_t.ECHOSDK_CALL_CALLING),
-  ringing(c.echosdk_call_state_t.ECHOSDK_CALL_RINGING),
-  established(c.echosdk_call_state_t.ECHOSDK_CALL_ESTABLISHED),
-  held(c.echosdk_call_state_t.ECHOSDK_CALL_HELD),
-  ended(c.echosdk_call_state_t.ECHOSDK_CALL_ENDED),
-  cancelled(c.echosdk_call_state_t.ECHOSDK_CALL_CANCELLED),
-  failed(c.echosdk_call_state_t.ECHOSDK_CALL_FAILED);
+  calling(c.medut_call_state_t.MEDUT_CALL_CALLING),
+  ringing(c.medut_call_state_t.MEDUT_CALL_RINGING),
+  established(c.medut_call_state_t.MEDUT_CALL_ESTABLISHED),
+  held(c.medut_call_state_t.MEDUT_CALL_HELD),
+  ended(c.medut_call_state_t.MEDUT_CALL_ENDED),
+  cancelled(c.medut_call_state_t.MEDUT_CALL_CANCELLED),
+  failed(c.medut_call_state_t.MEDUT_CALL_FAILED);
 
   final int raw;
   const CallState(this.raw);
@@ -102,10 +102,10 @@ enum CallState {
 
 /// Buddy presence status.
 enum PresenceStatus {
-  unknown(c.echosdk_presence_status_t.ECHOSDK_PRESENCE_UNKNOWN),
-  open(c.echosdk_presence_status_t.ECHOSDK_PRESENCE_OPEN),
-  closed(c.echosdk_presence_status_t.ECHOSDK_PRESENCE_CLOSED),
-  busy(c.echosdk_presence_status_t.ECHOSDK_PRESENCE_BUSY);
+  unknown(c.medut_presence_status_t.MEDUT_PRESENCE_UNKNOWN),
+  open(c.medut_presence_status_t.MEDUT_PRESENCE_OPEN),
+  closed(c.medut_presence_status_t.MEDUT_PRESENCE_CLOSED),
+  busy(c.medut_presence_status_t.MEDUT_PRESENCE_BUSY);
 
   final int raw;
   const PresenceStatus(this.raw);
@@ -115,9 +115,9 @@ enum PresenceStatus {
 
 /// DTMF signalling mode.
 enum DtmfMode {
-  rfc4733(c.echosdk_dtmf_mode_t.ECHOSDK_DTMF_RFC4733),
-  sipInfo(c.echosdk_dtmf_mode_t.ECHOSDK_DTMF_SIP_INFO),
-  auto(c.echosdk_dtmf_mode_t.ECHOSDK_DTMF_AUTO);
+  rfc4733(c.medut_dtmf_mode_t.MEDUT_DTMF_RFC4733),
+  sipInfo(c.medut_dtmf_mode_t.MEDUT_DTMF_SIP_INFO),
+  auto(c.medut_dtmf_mode_t.MEDUT_DTMF_AUTO);
 
   final int raw;
   const DtmfMode(this.raw);
@@ -147,14 +147,14 @@ enum AecMode {
 /// the pre-handover candidates and are marked [NetworkStage.callIceStale].
 enum IceHandover {
   /// Send the re-INVITE and let media verification decide (default).
-  bestEffort(c.echosdk_ice_handover_t.ECHOSDK_ICE_HANDOVER_BEST_EFFORT),
+  bestEffort(c.medut_ice_handover_t.MEDUT_ICE_HANDOVER_BEST_EFFORT),
 
   /// Try once, then report `callMigrationFailed`.  Preferred when calls are
   /// ICE+TURN over cellular: repeating an offer built from the wrong
   /// candidates only lengthens the silence before the app can redial.
   ///
   /// A call whose ICE was restarted keeps the full retry budget regardless.
-  failFast(c.echosdk_ice_handover_t.ECHOSDK_ICE_HANDOVER_FAIL_FAST);
+  failFast(c.medut_ice_handover_t.MEDUT_ICE_HANDOVER_FAIL_FAST);
 
   final int raw;
   const IceHandover(this.raw);
@@ -164,8 +164,8 @@ enum IceHandover {
 
 /// Jitter buffer type.
 enum JitterBufferType {
-  adaptive(c.echosdk_jbuf_type_t.ECHOSDK_JBUF_ADAPTIVE),
-  fixed(c.echosdk_jbuf_type_t.ECHOSDK_JBUF_FIXED);
+  adaptive(c.medut_jbuf_type_t.MEDUT_JBUF_ADAPTIVE),
+  fixed(c.medut_jbuf_type_t.MEDUT_JBUF_FIXED);
 
   final int raw;
   const JitterBufferType(this.raw);
@@ -173,10 +173,10 @@ enum JitterBufferType {
 
 /// Push notification provider (RFC 8599 pn-provider).
 enum PushProvider {
-  none(c.echosdk_push_provider_t.ECHOSDK_PUSH_PROVIDER_NONE),
-  apns(c.echosdk_push_provider_t.ECHOSDK_PUSH_PROVIDER_APNS),
-  apnsSandbox(c.echosdk_push_provider_t.ECHOSDK_PUSH_PROVIDER_APNS_SANDBOX),
-  fcm(c.echosdk_push_provider_t.ECHOSDK_PUSH_PROVIDER_FCM);
+  none(c.medut_push_provider_t.MEDUT_PUSH_PROVIDER_NONE),
+  apns(c.medut_push_provider_t.MEDUT_PUSH_PROVIDER_APNS),
+  apnsSandbox(c.medut_push_provider_t.MEDUT_PUSH_PROVIDER_APNS_SANDBOX),
+  fcm(c.medut_push_provider_t.MEDUT_PUSH_PROVIDER_FCM);
 
   final int raw;
   const PushProvider(this.raw);
@@ -184,17 +184,17 @@ enum PushProvider {
 
 /// Which metric crossed its threshold in a [QualityAlertEvent].
 enum QualityIssue {
-  mos(c.echosdk_quality_issue_t.ECHOSDK_QUALITY_MOS),
-  loss(c.echosdk_quality_issue_t.ECHOSDK_QUALITY_LOSS),
-  jitter(c.echosdk_quality_issue_t.ECHOSDK_QUALITY_JITTER),
-  rtt(c.echosdk_quality_issue_t.ECHOSDK_QUALITY_RTT),
+  mos(c.medut_quality_issue_t.MEDUT_QUALITY_MOS),
+  loss(c.medut_quality_issue_t.MEDUT_QUALITY_LOSS),
+  jitter(c.medut_quality_issue_t.MEDUT_QUALITY_JITTER),
+  rtt(c.medut_quality_issue_t.MEDUT_QUALITY_RTT),
 
-  /// No inbound RTP for `EchoSDKConfig.mediaStallMs` while the call is not on
+  /// No inbound RTP for `MedutConfig.mediaStallMs` while the call is not on
   /// hold — the link is up and the dialog is healthy, but no audio is
   /// arriving.  `value` is the stall duration in ms.  Non-fatal: it fires
   /// again with `recovering = true` when packets resume.  Use
-  /// `EchoSDKConfig.rtpTimeoutSeconds` to end such a call instead.
-  mediaStall(c.echosdk_quality_issue_t.ECHOSDK_QUALITY_MEDIA_STALL);
+  /// `MedutConfig.rtpTimeoutSeconds` to end such a call instead.
+  mediaStall(c.medut_quality_issue_t.MEDUT_QUALITY_MEDIA_STALL);
 
   final int raw;
   const QualityIssue(this.raw);
@@ -207,20 +207,20 @@ enum QualityIssue {
 /// the browser's `RTCIceConnectionState`.  Delivered as [IceStateEvent] and
 /// readable via `Call.iceState`.
 enum IceState {
-  newState(c.echosdk_ice_state_t.ECHOSDK_ICE_NEW),
-  gathering(c.echosdk_ice_state_t.ECHOSDK_ICE_GATHERING),
-  checking(c.echosdk_ice_state_t.ECHOSDK_ICE_CHECKING),
+  newState(c.medut_ice_state_t.MEDUT_ICE_NEW),
+  gathering(c.medut_ice_state_t.MEDUT_ICE_GATHERING),
+  checking(c.medut_ice_state_t.MEDUT_ICE_CHECKING),
   /// A candidate pair is writable.
-  connected(c.echosdk_ice_state_t.ECHOSDK_ICE_CONNECTED),
+  connected(c.medut_ice_state_t.MEDUT_ICE_CONNECTED),
   /// The writable pair is also nominated — media path settled.
-  completed(c.echosdk_ice_state_t.ECHOSDK_ICE_COMPLETED),
+  completed(c.medut_ice_state_t.MEDUT_ICE_COMPLETED),
   /// The selected pair stopped answering or receiving; checks continue and
   /// the path may recover on its own.
-  disconnected(c.echosdk_ice_state_t.ECHOSDK_ICE_DISCONNECTED),
+  disconnected(c.medut_ice_state_t.MEDUT_ICE_DISCONNECTED),
   /// Every pair timed out and nothing is left to gather.  The SDK does not
   /// end the call — redialling is the app's decision.
-  failed(c.echosdk_ice_state_t.ECHOSDK_ICE_FAILED),
-  closed(c.echosdk_ice_state_t.ECHOSDK_ICE_CLOSED);
+  failed(c.medut_ice_state_t.MEDUT_ICE_FAILED),
+  closed(c.medut_ice_state_t.MEDUT_ICE_CLOSED);
 
   final int raw;
   const IceState(this.raw);
@@ -230,11 +230,11 @@ enum IceState {
 
 /// Candidate type of one side of the selected ICE pair.
 enum IceCandType {
-  host(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_HOST),
-  srflx(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_SRFLX),
-  prflx(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_PRFLX),
-  relay(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_RELAY),
-  none(c.echosdk_ice_cand_type_t.ECHOSDK_ICE_CAND_NONE);
+  host(c.medut_ice_cand_type_t.MEDUT_ICE_CAND_HOST),
+  srflx(c.medut_ice_cand_type_t.MEDUT_ICE_CAND_SRFLX),
+  prflx(c.medut_ice_cand_type_t.MEDUT_ICE_CAND_PRFLX),
+  relay(c.medut_ice_cand_type_t.MEDUT_ICE_CAND_RELAY),
+  none(c.medut_ice_cand_type_t.MEDUT_ICE_CAND_NONE);
 
   final int raw;
   const IceCandType(this.raw);
@@ -244,8 +244,8 @@ enum IceCandType {
 
 /// Media direction for SIP trace / media tap.
 enum MediaDirection {
-  rx(c.echosdk_media_dir_t.ECHOSDK_MEDIA_DIR_RX),
-  tx(c.echosdk_media_dir_t.ECHOSDK_MEDIA_DIR_TX);
+  rx(c.medut_media_dir_t.MEDUT_MEDIA_DIR_RX),
+  tx(c.medut_media_dir_t.MEDUT_MEDIA_DIR_TX);
 
   final int raw;
   const MediaDirection(this.raw);
@@ -258,25 +258,25 @@ enum MediaDirection {
 /// [changeDetected] -> [transportReset] -> [reregistering]
 /// -> [callMigrating] -> [callMigrated].
 enum NetworkStage {
-  changeDetected(c.echosdk_net_event_t.ECHOSDK_NET_CHANGE_DETECTED),
-  down(c.echosdk_net_event_t.ECHOSDK_NET_DOWN),
-  up(c.echosdk_net_event_t.ECHOSDK_NET_UP),
-  transportReset(c.echosdk_net_event_t.ECHOSDK_NET_TRANSPORT_RESET),
-  reregistering(c.echosdk_net_event_t.ECHOSDK_NET_REREGISTERING),
-  callMigrating(c.echosdk_net_event_t.ECHOSDK_NET_CALL_MIGRATING),
-  callMigrateAccepted(c.echosdk_net_event_t.ECHOSDK_NET_CALL_MIGRATE_ACCEPTED),
-  callMigrated(c.echosdk_net_event_t.ECHOSDK_NET_CALL_MIGRATED),
-  callMigrationFailed(c.echosdk_net_event_t.ECHOSDK_NET_CALL_MIGRATION_FAILED),
-  callDeferred(c.echosdk_net_event_t.ECHOSDK_NET_CALL_DEFERRED),
-  handoverFailed(c.echosdk_net_event_t.ECHOSDK_NET_HANDOVER_FAILED),
+  changeDetected(c.medut_net_event_t.MEDUT_NET_CHANGE_DETECTED),
+  down(c.medut_net_event_t.MEDUT_NET_DOWN),
+  up(c.medut_net_event_t.MEDUT_NET_UP),
+  transportReset(c.medut_net_event_t.MEDUT_NET_TRANSPORT_RESET),
+  reregistering(c.medut_net_event_t.MEDUT_NET_REREGISTERING),
+  callMigrating(c.medut_net_event_t.MEDUT_NET_CALL_MIGRATING),
+  callMigrateAccepted(c.medut_net_event_t.MEDUT_NET_CALL_MIGRATE_ACCEPTED),
+  callMigrated(c.medut_net_event_t.MEDUT_NET_CALL_MIGRATED),
+  callMigrationFailed(c.medut_net_event_t.MEDUT_NET_CALL_MIGRATION_FAILED),
+  callDeferred(c.medut_net_event_t.MEDUT_NET_CALL_DEFERRED),
+  handoverFailed(c.medut_net_event_t.MEDUT_NET_HANDOVER_FAILED),
 
   /// This call has ICE that could not be re-gathered — the ICE restart the
   /// SDK normally performs on handover was not possible for it — so the
   /// re-INVITE carries the pre-handover candidates.  That recovers a direct or
   /// still-valid TURN-relayed path; if media does not resume, the remedy is to
-  /// re-place the call.  `EchoSDKConfig.netIceHandover` decides whether to keep
+  /// re-place the call.  `MedutConfig.netIceHandover` decides whether to keep
   /// retrying.  An ICE call that was restarted does not emit this.
-  callIceStale(c.echosdk_net_event_t.ECHOSDK_NET_CALL_ICE_STALE),
+  callIceStale(c.medut_net_event_t.MEDUT_NET_CALL_ICE_STALE),
 
   /// ICE finished its connectivity checks with no usable candidate pair, so
   /// nothing was nominated and the media path was never validated.
@@ -289,7 +289,7 @@ enum NetworkStage {
   /// The call is left up: where a pair had been validated earlier the stream is
   /// held on it and audio usually survives. If it does not, the remedy is to
   /// re-place the call.
-  callIceFailed(c.echosdk_net_event_t.ECHOSDK_NET_CALL_ICE_FAILED);
+  callIceFailed(c.medut_net_event_t.MEDUT_NET_CALL_ICE_FAILED);
 
   final int raw;
   const NetworkStage(this.raw);
@@ -297,26 +297,26 @@ enum NetworkStage {
       values.firstWhere((v) => v.raw == raw, orElse: () => changeDetected);
 }
 
-/// EchoSDK error codes (negative ints from the C API).
-enum EchoSDKError {
-  ok(c.echosdk_error_t.ECHOSDK_OK),
-  invalidArgument(c.echosdk_error_t.ECHOSDK_ERR_INVAL),
-  outOfMemory(c.echosdk_error_t.ECHOSDK_ERR_NOMEM),
-  wrongState(c.echosdk_error_t.ECHOSDK_ERR_STATE),
-  dns(c.echosdk_error_t.ECHOSDK_ERR_DNS),
-  transport(c.echosdk_error_t.ECHOSDK_ERR_TRANSPORT),
-  auth(c.echosdk_error_t.ECHOSDK_ERR_AUTH),
-  server5xx(c.echosdk_error_t.ECHOSDK_ERR_SERVER_5XX),
-  wsProtocolRejected(c.echosdk_error_t.ECHOSDK_ERR_WS_PROTOCOL_REJECTED),
-  timeout(c.echosdk_error_t.ECHOSDK_ERR_TIMEOUT),
-  already(c.echosdk_error_t.ECHOSDK_ERR_ALREADY),
+/// Medut error codes (negative ints from the C API).
+enum MedutError {
+  ok(c.medut_error_t.MEDUT_OK),
+  invalidArgument(c.medut_error_t.MEDUT_ERR_INVAL),
+  outOfMemory(c.medut_error_t.MEDUT_ERR_NOMEM),
+  wrongState(c.medut_error_t.MEDUT_ERR_STATE),
+  dns(c.medut_error_t.MEDUT_ERR_DNS),
+  transport(c.medut_error_t.MEDUT_ERR_TRANSPORT),
+  auth(c.medut_error_t.MEDUT_ERR_AUTH),
+  server5xx(c.medut_error_t.MEDUT_ERR_SERVER_5XX),
+  wsProtocolRejected(c.medut_error_t.MEDUT_ERR_WS_PROTOCOL_REJECTED),
+  timeout(c.medut_error_t.MEDUT_ERR_TIMEOUT),
+  already(c.medut_error_t.MEDUT_ERR_ALREADY),
 
   /// 403 Forbidden — the server refused this request, not the credentials.
   /// On a call: a dialplan or policy refusal ("you may not dial that").
-  forbidden(c.echosdk_error_t.ECHOSDK_ERR_FORBIDDEN);
+  forbidden(c.medut_error_t.MEDUT_ERR_FORBIDDEN);
 
   final int raw;
-  const EchoSDKError(this.raw);
-  static EchoSDKError fromRaw(int raw) =>
+  const MedutError(this.raw);
+  static MedutError fromRaw(int raw) =>
       values.firstWhere((v) => v.raw == raw, orElse: () => invalidArgument);
 }

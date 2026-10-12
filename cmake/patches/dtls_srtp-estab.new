@@ -1,4 +1,4 @@
 	comp->negotiated = true;
 
-	/* EchoSDK-patched: the handshake landed — stand the watchdog down. */
+	/* Medut-patched: the handshake landed — stand the watchdog down. */
 	tmr_cancel(&((struct dtls_srtp *)ds)->tmr_hs);

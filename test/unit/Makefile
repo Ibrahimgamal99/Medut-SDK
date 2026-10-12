@@ -21,11 +21,11 @@ endif
 # Needs the baresip tree a build has patched, at the patch version the test
 # was written for (cmake/patch-baresip-sources.cmake, job 6).
 BARESIP_SRC ?= ../../third_party/baresip
-ifneq ($(shell grep -l "echosdk-patch aurecv-plc v2" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
+ifneq ($(shell grep -l "medut-patch aurecv-plc v2" $(BARESIP_SRC)/src/aureceiver.c 2>/dev/null),)
 TESTS += test_aurecv_plc
 endif
 # Same for the jitter buffer's adaptive sizing (job 8).
-ifneq ($(shell grep -l "echosdk-patch jbuf-adapt v1" $(BARESIP_SRC)/src/jbuf.c 2>/dev/null),)
+ifneq ($(shell grep -l "medut-patch jbuf-adapt v1" $(BARESIP_SRC)/src/jbuf.c 2>/dev/null),)
 TESTS += test_jbuf_adapt
 endif
 endif
@@ -98,7 +98,7 @@ test_dispatch_starve: test_dispatch_starve.c ../../src/dispatch.c ../../src/re_l
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
 
-# echo-ice engine files link against libre alone: they include no baresip
+# medut-ice engine files link against libre alone: they include no baresip
 # header by design (see src/ice/ice_internal.h), so the agent's candidate,
 # pairing and check logic is testable without a baresip_init().
 ICE_ENGINE_SRCS := ../../src/ice/ice_gen.c ../../src/ice/ice_port.c \
@@ -165,8 +165,8 @@ webrtc_apm_test.o: ../../src/webrtc_apm.cpp ../../src/webrtc_apm.h
 test_audio_processing_webrtc: test_audio_processing.c ../../src/audio_processing.c \
                               ../../src/webrtc_shim.c webrtc_apm_test.o
 	$(CC) $(CFLAGS) $(AP_FLAGS) -DBSDK_TEST_WEBRTC \
-	  -DECHOSDK_PROFILE_DESKTOP=1 -DECHOSDK_HAS_WEBRTC_AEC=1 \
-	  -DECHOSDK_WEBRTC_SONAME=\"$(WEBRTC_SONAME)\" \
+	  -DMEDUT_PROFILE_DESKTOP=1 -DMEDUT_HAS_WEBRTC_AEC=1 \
+	  -DMEDUT_WEBRTC_SONAME=\"$(WEBRTC_SONAME)\" \
 	  -o $@ $^ $(AP_LIBS) -ldl
 
 # Compiles the patched aureceiver.c itself, against libre only: the test

@@ -35,7 +35,7 @@ _deps/
 *.slo
 
 # Python bindings
-# Depth-independent so they also catch bindings/python/echo_sdk/... — the
+# Depth-independent so they also catch bindings/python/medut/... — the
 # previous anchored forms missed the inner package directory.
 __pycache__/
 *.pyc
@@ -44,9 +44,9 @@ __pycache__/
 bindings/python/build/
 bindings/python/dist/
 # Copied here by bindings/python/build.sh from dist/<platform>/
-bindings/python/echo_sdk/echosdk.so
-bindings/python/echo_sdk/echosdk.pyd
-bindings/python/echo_sdk/echosdk.dylib
+bindings/python/medut/medut.so
+bindings/python/medut/medut.pyd
+bindings/python/medut/medut.dylib
 
 # C++ bindings build artifacts
 bindings/cpp/build/

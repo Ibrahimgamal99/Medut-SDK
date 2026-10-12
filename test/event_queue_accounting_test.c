@@ -30,14 +30,14 @@
  *
  * Note the MESSAGE cannot be sent to 127.0.0.1: baresip's interface filter
  * drops loopback, so the stack never binds it.  The destination comes from
- * echosdk_network_local_addr() instead, which is the address it did bind.
+ * medut_network_local_addr() instead, which is the address it did bind.
  * Only the user part of the Request-URI is matched (uag_find_msg against the
  * UA's contact user), so the URI host stays the unroutable AoR host.
  *
  * Build:
  *   gcc -g -O1 -std=gnu11 \
  *       -Iinclude test/event_queue_accounting_test.c \
- *       dist/linux/x86_64/echosdk.so \
+ *       dist/linux/x86_64/medut.so \
  *       -Wl,-rpath,'$ORIGIN/../dist/linux/x86_64' \
  *       -o test/event_queue_accounting_test && ./test/event_queue_accounting_test
  *
@@ -54,7 +54,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 #define SIP_PORT   45678
 #define AOR_USER   "alice"
@@ -65,11 +65,11 @@ static atomic_int g_msg_seen;      /* the MESSAGE landed                     */
 static atomic_int g_events_after;  /* any event at all after the MESSAGE     */
 static atomic_int g_reg_after;     /* a REG_STATE event after the MESSAGE    */
 
-static void event_handler(const echosdk_event_t *ev, void *ud)
+static void event_handler(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 
-	if (ev->type == ECHOSDK_EV_MESSAGE) {
+	if (ev->type == MEDUT_EV_MESSAGE) {
 		printf("  [event] MESSAGE from %s: %s\n",
 		       ev->u.msg.from_uri ? ev->u.msg.from_uri : "(none)",
 		       ev->u.msg.body ? ev->u.msg.body : "(empty)");
@@ -85,7 +85,7 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 
 	atomic_fetch_add(&g_events_after, 1);
 
-	if (ev->type == ECHOSDK_EV_REG_STATE) {
+	if (ev->type == MEDUT_EV_REG_STATE) {
 		printf("  [event] REG_STATE=%d after MESSAGE\n",
 		       (int)ev->u.reg.state);
 		fflush(stdout);
@@ -157,18 +157,18 @@ static int send_sip_message(const char *host)
 
 int main(void)
 {
-	echosdk_config_t         cfg;
-	echosdk_account_config_t acfg;
-	echosdk_account_handle_t acct = NULL;
+	medut_config_t         cfg;
+	medut_account_config_t acfg;
+	medut_account_handle_t acct = NULL;
 	char                     laddr[64] = {0};
 	int                      rc, i;
 
 	mtx_init(&g_lock, mtx_plain);
 
-	echosdk_config_init(&cfg);
+	medut_config_init(&cfg);
 	cfg.event_cb   = event_handler;
 	cfg.log_level  = 1;                 /* warnings — keep the output small */
-	cfg.transport  = ECHOSDK_TRANSPORT_UDP;
+	cfg.transport  = MEDUT_TRANSPORT_UDP;
 	cfg.local_port = SIP_PORT;          /* pinned so we can post to it      */
 
 	/* Keep the registration churning so there is a steady supply of events
@@ -186,30 +186,30 @@ int main(void)
 	cfg.net_monitor_interval_s = 0;
 	cfg.stats_interval_ms      = 0;
 
-	rc = echosdk_init(&cfg);
-	CHECK(rc == ECHOSDK_OK, "echosdk_init returned %d (%s)\n",
-	      rc, echosdk_strerror(rc));
+	rc = medut_init(&cfg);
+	CHECK(rc == MEDUT_OK, "medut_init returned %d (%s)\n",
+	      rc, medut_strerror(rc));
 
 	memset(&acfg, 0, sizeof(acfg));
 	acfg.uri         = "sip:" AOR_USER "@" AOR_HOST;
 	acfg.password    = "secret";
 	acfg.server_host = AOR_HOST;
-	acfg.transport   = ECHOSDK_TRANSPORT_UDP;
+	acfg.transport   = MEDUT_TRANSPORT_UDP;
 
-	rc = echosdk_account_create(&acfg, &acct);
-	CHECK(rc == ECHOSDK_OK, "echosdk_account_create returned %d (%s)\n",
-	      rc, echosdk_strerror(rc));
+	rc = medut_account_create(&acfg, &acct);
+	CHECK(rc == MEDUT_OK, "medut_account_create returned %d (%s)\n",
+	      rc, medut_strerror(rc));
 
-	rc = echosdk_account_register(acct);
-	CHECK(rc == ECHOSDK_OK, "echosdk_account_register returned %d (%s)\n",
-	      rc, echosdk_strerror(rc));
+	rc = medut_account_register(acct);
+	CHECK(rc == MEDUT_OK, "medut_account_register returned %d (%s)\n",
+	      rc, medut_strerror(rc));
 
 	/* Let the stack finish binding its transports before posting to them. */
 	sleep(1);
 
-	CHECK(echosdk_network_local_addr(laddr, sizeof(laddr)) == ECHOSDK_OK &&
+	CHECK(medut_network_local_addr(laddr, sizeof(laddr)) == MEDUT_OK &&
 	      laddr[0],
-	      "echosdk_network_local_addr() gave no address — this host has no "
+	      "medut_network_local_addr() gave no address — this host has no "
 	      "usable non-loopback interface, so the SDK bound nothing to send "
 	      "to.\n");
 
@@ -225,7 +225,7 @@ int main(void)
 	/* Not a pass. If the MESSAGE never arrived, the code path this test
 	 * exists to cover was never executed, and a "pass" would be a lie. */
 	CHECK(atomic_load(&g_msg_seen),
-	      "no ECHOSDK_EV_MESSAGE arrived — the enqueue path under test was "
+	      "no MEDUT_EV_MESSAGE arrived — the enqueue path under test was "
 	      "never exercised, so this run proves nothing. Check that the SDK "
 	      "bound UDP %d on %s and that the request matched the account "
 	      "AoR.\n", SIP_PORT, laddr);
@@ -252,8 +252,8 @@ int main(void)
 	printf("==> %d events delivered after the MESSAGE\n",
 	       atomic_load(&g_events_after));
 
-	echosdk_account_destroy(acct);
-	echosdk_shutdown();
+	medut_account_destroy(acct);
+	medut_shutdown();
 	mtx_destroy(&g_lock);
 
 	printf("PASS\n");

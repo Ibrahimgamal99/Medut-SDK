@@ -1,5 +1,5 @@
 /**
- * @file ice_select.c  echo-ice: pair states, selection, nomination, liveness
+ * @file ice_select.c  medut-ice: pair states, selection, nomination, liveness
  *
  * Runs from the scheduler tick.  Pair write/receive states follow
  * libwebrtc's Connection: writable while responses keep coming,

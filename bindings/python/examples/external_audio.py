@@ -38,7 +38,7 @@ import time
 import wave
 from typing import Optional
 
-import echo_sdk as sdk
+import medut as sdk
 
 TONE_HZ = float(os.environ.get("TONE_HZ", "440"))
 OUT_WAV = os.environ.get("OUT_WAV", "far-end-audio.wav")

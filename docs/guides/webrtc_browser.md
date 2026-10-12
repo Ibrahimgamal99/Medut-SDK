@@ -2,7 +2,7 @@
 
 ## Overview
 
-EchoSDK can act as the SIP side of a WebRTC call, bridging browser-based WebRTC clients to the SIP network. This requires:
+Medut can act as the SIP side of a WebRTC call, bridging browser-based WebRTC clients to the SIP network. This requires:
 
 1. **WSS transport** — WebSocket over TLS (browsers require secure origins).
 2. **DTLS-SRTP** — media encryption mandated by WebRTC.
@@ -13,7 +13,7 @@ EchoSDK can act as the SIP side of a WebRTC call, bridging browser-based WebRTC 
 ## Architecture
 
 ```
-Browser (WebRTC)                EchoSDK (SIP)
+Browser (WebRTC)                Medut (SIP)
      │                              │
      │  WSS + SIP over WebSocket    │
      │◄────────────────────────────►│
@@ -27,14 +27,14 @@ The SIP server (Asterisk, Kamailio, OpenSIPS) terminates the WebSocket on the WS
 
 ---
 
-## EchoSDK configuration
+## Medut configuration
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri          = "alice@pbx.example.com",
     .password     = "secret",
     .server_url   = "wss://pbx.example.com:443/ws",
-    .media_enc    = ECHOSDK_MEDIA_ENC_DTLS_SRTP,
+    .media_enc    = MEDUT_MEDIA_ENC_DTLS_SRTP,
     .ice_enabled  = true,
     .stun_server  = "stun:stun.l.google.com:19302",
     .turn_server  = "turn:turn.example.com:3478",
@@ -48,7 +48,7 @@ echosdk_account_config_t cfg = {
 | Field | Value | Why |
 |---|---|---|
 | `server_url` | `wss://...` | Browsers cannot use raw UDP/TCP SIP |
-| `media_enc` | `ECHOSDK_MEDIA_ENC_DTLS_SRTP` | WebRTC mandates SRTP with DTLS key exchange |
+| `media_enc` | `MEDUT_MEDIA_ENC_DTLS_SRTP` | WebRTC mandates SRTP with DTLS key exchange |
 | `ice_enabled` | `true` | WebRTC uses ICE for NAT traversal |
 | `stun_server` | STUN URI | Needed for server-reflexive candidates |
 | `turn_server` | TURN URI (recommended) | Fallback relay for restrictive NATs |
@@ -118,7 +118,7 @@ The browser handles ICE, DTLS-SRTP, and media natively via `RTCPeerConnection`.
 
 ## DTLS fingerprint
 
-EchoSDK generates a DTLS fingerprint and includes it in the SDP (`a=fingerprint:sha-256 ...`). The remote side (browser) verifies this fingerprint during the DTLS handshake. No certificate configuration is needed on the EchoSDK side — a self-signed certificate is generated automatically at startup.
+Medut generates a DTLS fingerprint and includes it in the SDP (`a=fingerprint:sha-256 ...`). The remote side (browser) verifies this fingerprint during the DTLS handshake. No certificate configuration is needed on the Medut side — a self-signed certificate is generated automatically at startup.
 
 ---
 
@@ -127,10 +127,10 @@ EchoSDK generates a DTLS fingerprint and includes it in the SDP (`a=fingerprint:
 WebRTC browsers support **Opus** and **PCMU/PCMA**. Set Opus as the preferred codec:
 
 ```c
-echosdk_config_t gcfg;
-echosdk_config_init(&gcfg);
-gcfg.audio_codecs[0]  = ECHOSDK_CODEC_OPUS;
-gcfg.audio_codecs[1]  = ECHOSDK_CODEC_PCMU;
+medut_config_t gcfg;
+medut_config_init(&gcfg);
+gcfg.audio_codecs[0]  = MEDUT_CODEC_OPUS;
+gcfg.audio_codecs[1]  = MEDUT_CODEC_PCMU;
 gcfg.audio_codec_count = 2;
 ```
 

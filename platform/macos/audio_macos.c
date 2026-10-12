@@ -8,7 +8,7 @@
  * automatic device-change events (e.g., AirPods connect/disconnect).
  */
 
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {

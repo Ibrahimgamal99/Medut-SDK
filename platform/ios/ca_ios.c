@@ -25,14 +25,14 @@
  * the device trusts.  A CA that iOS distrusts after our bundle was cut still
  * verifies here, and an enterprise/MDM root the device was given does not —
  * a deployment behind a corporate TLS proxy has to pass its own bundle as
- * echosdk_config_t.ca_cert_path, which takes priority over this.
+ * medut_config_t.ca_cert_path, which takes priority over this.
  */
 
 #include <stdio.h>
 #include <stddef.h>
 #include <sys/stat.h>
 #include <re.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 /* platform/ios/ca_roots.c (generated) */
 extern const char   bsdk_ca_roots_pem[];
@@ -60,7 +60,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	out = fopen(path, "w");
 	if (!out) {
-		warning("EchoSDK: cannot write CA bundle to %s — TLS server "
+		warning("Medut: cannot write CA bundle to %s — TLS server "
 		        "verification will fail unless ca_cert_path is set\n",
 		        path);
 		return NULL;
@@ -68,7 +68,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	n = fwrite(bsdk_ca_roots_pem, 1, bsdk_ca_roots_pem_len, out);
 	if (fclose(out) != 0 || n != bsdk_ca_roots_pem_len) {
-		warning("EchoSDK: short write of CA bundle to %s (%zu/%zu) — "
+		warning("Medut: short write of CA bundle to %s (%zu/%zu) — "
 		        "TLS server verification will fail unless ca_cert_path "
 		        "is set\n", path, n, bsdk_ca_roots_pem_len);
 		(void)remove(path);

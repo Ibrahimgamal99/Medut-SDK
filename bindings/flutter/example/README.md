@@ -1,4 +1,4 @@
-# echo_sdk_app
+# medut_app
 
 A new Flutter project.
 

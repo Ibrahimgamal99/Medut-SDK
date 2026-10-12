@@ -1,5 +1,5 @@
 /**
- * @file reconnect_state_test.c  Gate test for ECHOSDK_REG_RECONNECTING
+ * @file reconnect_state_test.c  Gate test for MEDUT_REG_RECONNECTING
  *
  * A registration the SDK is still recovering must be reported as RECONNECTING,
  * and only one it has given up on as FAILED.  Both halves are checked against a
@@ -15,7 +15,7 @@
  * Build (from repo root, after scripts/build-linux.sh):
  *   gcc -g -O1 -std=gnu11 \
  *       -Iinclude test/reconnect_state_test.c \
- *       dist/linux/x86_64/echosdk.so \
+ *       dist/linux/x86_64/medut.so \
  *       -Wl,-rpath,'$ORIGIN/../dist/linux/x86_64' \
  *       -o test/reconnect_state_test && ./test/reconnect_state_test
  *
@@ -28,33 +28,33 @@
 #include <stdatomic.h>
 #include <threads.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 #define MAX_SEQ 64
 
 static mtx_t                g_lock;
-static echosdk_reg_state_t  g_seq[MAX_SEQ];
+static medut_reg_state_t  g_seq[MAX_SEQ];
 static size_t               g_seq_n;
 static atomic_int           g_failed_seen;
 
-static const char *sname(echosdk_reg_state_t s)
+static const char *sname(medut_reg_state_t s)
 {
 	switch (s) {
-	case ECHOSDK_REG_UNREGISTERED:  return "UNREGISTERED";
-	case ECHOSDK_REG_REGISTERING:   return "REGISTERING";
-	case ECHOSDK_REG_REGISTERED:    return "REGISTERED";
-	case ECHOSDK_REG_FAILED:        return "FAILED";
-	case ECHOSDK_REG_UNREGISTERING: return "UNREGISTERING";
-	case ECHOSDK_REG_RECONNECTING:  return "RECONNECTING";
+	case MEDUT_REG_UNREGISTERED:  return "UNREGISTERED";
+	case MEDUT_REG_REGISTERING:   return "REGISTERING";
+	case MEDUT_REG_REGISTERED:    return "REGISTERED";
+	case MEDUT_REG_FAILED:        return "FAILED";
+	case MEDUT_REG_UNREGISTERING: return "UNREGISTERING";
+	case MEDUT_REG_RECONNECTING:  return "RECONNECTING";
 	}
 	return "?";
 }
 
-static void event_handler(const echosdk_event_t *ev, void *ud)
+static void event_handler(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 
-	if (ev->type != ECHOSDK_EV_REG_STATE)
+	if (ev->type != MEDUT_EV_REG_STATE)
 		return;
 
 	printf("[REG] %-13s err=%d attempt=%u delay=%u str=%s\n",
@@ -68,7 +68,7 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 		g_seq[g_seq_n++] = ev->u.reg.state;
 	mtx_unlock(&g_lock);
 
-	if (ev->u.reg.state == ECHOSDK_REG_FAILED)
+	if (ev->u.reg.state == MEDUT_REG_FAILED)
 		atomic_store(&g_failed_seen, 1);
 }
 
@@ -81,16 +81,16 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 
 int main(void)
 {
-	echosdk_config_t cfg;
-	echosdk_account_config_t acfg;
-	echosdk_account_handle_t acct = NULL;
+	medut_config_t cfg;
+	medut_account_config_t acfg;
+	medut_account_handle_t acct = NULL;
 	size_t reconnecting = 0, registering = 0;
-	echosdk_reg_state_t last = ECHOSDK_REG_UNREGISTERED;
+	medut_reg_state_t last = MEDUT_REG_UNREGISTERED;
 	int err;
 
 	mtx_init(&g_lock, mtx_plain);
 
-	echosdk_config_init(&cfg);
+	medut_config_init(&cfg);
 	cfg.event_cb               = event_handler;
 	cfg.log_level              = 0;
 	cfg.sip_timer_f_ms         = 2000;   /* fail an unanswered REGISTER fast */
@@ -102,18 +102,18 @@ int main(void)
 	cfg.keepalive_interval     = 0;      /* not what this test is about */
 	cfg.net_monitor_interval_s = 0;
 
-	err = echosdk_init(&cfg);
-	CHECK(!err, "echosdk_init: %d\n", err);
+	err = medut_init(&cfg);
+	CHECK(!err, "medut_init: %d\n", err);
 
 	memset(&acfg, 0, sizeof(acfg));
 	acfg.uri       = "alice@192.0.2.1";   /* TEST-NET-1: goes nowhere */
 	acfg.password  = "secret";
-	acfg.transport = ECHOSDK_TRANSPORT_UDP;
+	acfg.transport = MEDUT_TRANSPORT_UDP;
 
-	err = echosdk_account_create(&acfg, &acct);
+	err = medut_account_create(&acfg, &acct);
 	CHECK(!err, "account_create: %d\n", err);
 
-	echosdk_account_register(acct);
+	medut_account_register(acct);
 
 	/* Two 2 s timeouts plus two 1 s backoffs, with room to spare. */
 	for (int i = 0; i < 15 && !atomic_load(&g_failed_seen); i++)
@@ -121,12 +121,12 @@ int main(void)
 
 	mtx_lock(&g_lock);
 	for (size_t i = 0; i < g_seq_n; i++) {
-		if (g_seq[i] == ECHOSDK_REG_RECONNECTING)
+		if (g_seq[i] == MEDUT_REG_RECONNECTING)
 			reconnecting++;
 		/* The first REGISTER is a plain REGISTERING; every attempt after
 		 * it belongs to the recovery and must not report REGISTERING
 		 * again, or the app's status line flickers once per retry. */
-		else if (g_seq[i] == ECHOSDK_REG_REGISTERING && i > 0)
+		else if (g_seq[i] == MEDUT_REG_REGISTERING && i > 0)
 			registering++;
 	}
 	if (g_seq_n)
@@ -134,7 +134,7 @@ int main(void)
 	mtx_unlock(&g_lock);
 
 	CHECK(g_seq_n > 0, "no REG_STATE events at all\n");
-	CHECK(g_seq[0] == ECHOSDK_REG_REGISTERING,
+	CHECK(g_seq[0] == MEDUT_REG_REGISTERING,
 	      "first event was %s, want REGISTERING\n", sname(g_seq[0]));
 	CHECK(reconnecting >= 2,
 	      "only %zu RECONNECTING events; the retry loop should report one "
@@ -145,14 +145,14 @@ int main(void)
 	CHECK(atomic_load(&g_failed_seen),
 	      "the exhausted retry budget never reported FAILED — an app would "
 	      "render \"Reconnecting…\" for ever\n");
-	CHECK(last == ECHOSDK_REG_FAILED,
+	CHECK(last == MEDUT_REG_FAILED,
 	      "last event was %s, want FAILED\n", sname(last));
-	CHECK(echosdk_account_get_reg_state(acct) == ECHOSDK_REG_FAILED,
+	CHECK(medut_account_get_reg_state(acct) == MEDUT_REG_FAILED,
 	      "get_reg_state() = %s, want FAILED\n",
-	      sname(echosdk_account_get_reg_state(acct)));
+	      sname(medut_account_get_reg_state(acct)));
 
-	echosdk_account_destroy(acct);
-	echosdk_shutdown();
+	medut_account_destroy(acct);
+	medut_shutdown();
 	mtx_destroy(&g_lock);
 
 	printf("PASS\n");

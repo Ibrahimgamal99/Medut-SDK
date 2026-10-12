@@ -1,6 +1,6 @@
 # SDK usage guide — C/C++, Python, Flutter
 
-This is the primary reference for using the EchoSDK. It covers every major
+This is the primary reference for using the Medut. It covers every major
 operation — account setup, calls, hold, mute, transfer, stats, and more —
 in all three supported languages side by side.
 
@@ -50,15 +50,15 @@ a thin native plugin that calls the C API directly.
 
 **C**
 ```c
-#include "echosdk.h"
+#include "medut.h"
 
-static void on_event(const echosdk_event_t *ev, void *ud);
+static void on_event(const medut_event_t *ev, void *ud);
 
-echosdk_config_t cfg;
-echosdk_config_init(&cfg);          /* zero-fills; sets version + struct_size */
+medut_config_t cfg;
+medut_config_init(&cfg);          /* zero-fills; sets version + struct_size */
 
 /* Transport */
-cfg.transport    = ECHOSDK_TRANSPORT_TLS;   /* UDP / TCP / TLS / WS / WSS */
+cfg.transport    = MEDUT_TRANSPORT_TLS;   /* UDP / TCP / TLS / WS / WSS */
 cfg.server_host  = "pbx.example.com";
 cfg.server_port  = 0;                       /* 0 = transport default (5061) */
 /* WSS: cfg.server_url = "wss://pbx.example.com:8089/ws"; */
@@ -66,8 +66,8 @@ cfg.server_port  = 0;                       /* 0 = transport default (5061) */
 /* TLS */
 cfg.ca_cert_path  = "/etc/ssl/certs/ca-bundle.crt";
 cfg.verify_server = true;
-/* cfg.client_cert = "/etc/echosdk/client.crt";  mutual TLS */
-/* cfg.client_key  = "/etc/echosdk/client.key"; */
+/* cfg.client_cert = "/etc/medut/client.crt";  mutual TLS */
+/* cfg.client_key  = "/etc/medut/client.key"; */
 
 /* NAT / ICE */
 cfg.ice_enabled = true;
@@ -77,12 +77,12 @@ cfg.turn_user   = "alice";
 cfg.turn_pass   = "turn_secret";
 
 /* Media */
-cfg.media_enc         = ECHOSDK_MEDIA_ENC_SDES;   /* NONE / SDES / DTLS_SRTP */
-cfg.audio_codecs[0]   = ECHOSDK_CODEC_OPUS;
-cfg.audio_codecs[1]   = ECHOSDK_CODEC_PCMU;
+cfg.media_enc         = MEDUT_MEDIA_ENC_SDES;   /* NONE / SDES / DTLS_SRTP */
+cfg.audio_codecs[0]   = MEDUT_CODEC_OPUS;
+cfg.audio_codecs[1]   = MEDUT_CODEC_PCMU;
 cfg.audio_codec_count = 2;
-cfg.aec_mode              = ECHOSDK_AEC_SUPPRESSOR; /* half-duplex suppressor (default) */
-/* cfg.aec_mode           = ECHOSDK_AEC_WEBRTC; full-duplex — desktop only, opt-in build */
+cfg.aec_mode              = MEDUT_AEC_SUPPRESSOR; /* half-duplex suppressor (default) */
+/* cfg.aec_mode           = MEDUT_AEC_WEBRTC; full-duplex — desktop only, opt-in build */
 cfg.aec_suppression_level = 1.0f;  /* 0=off .. 1=max; default 1.0 */
 cfg.mic_gain_db           = 0.0f;  /* TX gain dB, [-20,+20]; 0=unity */
 cfg.speaker_gain_db       = 0.0f;  /* RX gain dB, [-20,+20]; 0=unity */
@@ -100,18 +100,18 @@ cfg.log_level         = 1;      /* 0=err 1=warn 2=info 3=debug  */
 cfg.event_cb       = on_event;
 cfg.event_userdata = NULL;
 
-echosdk_init(&cfg);
+medut_init(&cfg);
 ```
 
 **C++**
 ```cpp
-#include "echosdk.hpp"
+#include "medut.hpp"
 
-EchoSDK::SDK sdk;
+Medut::SDK sdk;
 
-/* Access the full echosdk_config_t via sdk.config() */
+/* Access the full medut_config_t via sdk.config() */
 auto& cfg = sdk.config();
-cfg.transport    = ECHOSDK_TRANSPORT_TLS;
+cfg.transport    = MEDUT_TRANSPORT_TLS;
 cfg.server_host  = "pbx.example.com";
 cfg.ca_cert_path = "/etc/ssl/certs/ca-bundle.crt";
 cfg.verify_server = true;
@@ -120,10 +120,10 @@ cfg.stun_server  = "stun:stun.l.google.com:19302";
 cfg.turn_server  = "turn:turn.example.com:3478";
 cfg.turn_user    = "alice";
 cfg.turn_pass    = "turn_secret";
-cfg.media_enc         = ECHOSDK_MEDIA_ENC_SDES;
-cfg.audio_codecs[0]   = ECHOSDK_CODEC_OPUS;
+cfg.media_enc         = MEDUT_MEDIA_ENC_SDES;
+cfg.audio_codecs[0]   = MEDUT_CODEC_OPUS;
 cfg.audio_codec_count = 1;
-cfg.aec_mode              = ECHOSDK_AEC_SUPPRESSOR;
+cfg.aec_mode              = MEDUT_AEC_SUPPRESSOR;
 cfg.aec_suppression_level = 1.0f;
 cfg.ns = cfg.agc = true;
 cfg.jitter_buffer_min_ms = 20;
@@ -131,7 +131,7 @@ cfg.jitter_buffer_max_ms = 300;
 cfg.stats_interval_ms = 5000;
 cfg.log_level         = 1;
 
-sdk.on_event([](const echosdk_event_t& ev) {
+sdk.on_event([](const medut_event_t& ev) {
     /* handle events — see section 3 */
 });
 
@@ -140,9 +140,9 @@ sdk.on_event([](const echosdk_event_t& ev) {
 
 **Python**
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
-# sdk.configure() accepts every field from echosdk_config_t as a keyword argument.
+# sdk.configure() accepts every field from medut_config_t as a keyword argument.
 # Must be called before the first sdk.create_account().
 sdk.configure(
     log_level             = 1,
@@ -161,9 +161,9 @@ sdk.configure(
 
 **Flutter**
 ```dart
-import 'package:echo_sdk/echo_sdk.dart';
+import 'package:medut/medut.dart';
 
-final sdk = EchoSDK(
+final sdk = Medut(
   logLevel:        1,
   statsIntervalMs: 5000,
   traceSip:        false,
@@ -178,7 +178,7 @@ final sdk = EchoSDK(
 
 **C**
 ```c
-echosdk_account_config_t acfg = { 0 };
+medut_account_config_t acfg = { 0 };
 
 /* Identity */
 acfg.uri          = "alice@pbx.example.com";   /* or "alice@host:port" */
@@ -187,13 +187,13 @@ acfg.display_name = "Alice";
 acfg.auth_user    = NULL;   /* NULL = user part of uri */
 
 /* Transport — pick one of: */
-acfg.transport    = ECHOSDK_TRANSPORT_TLS;
+acfg.transport    = MEDUT_TRANSPORT_TLS;
 /* acfg.server_host = "sip-edge.example.com";   server ≠ SIP domain */
 /* acfg.server_port = 5061; */
 /* acfg.server_url  = "wss://pbx.example.com/ws";   WebSocket */
 
 /* Media encryption */
-acfg.media_enc = ECHOSDK_MEDIA_ENC_SDES;   /* NONE / SDES / DTLS_SRTP */
+acfg.media_enc = MEDUT_MEDIA_ENC_SDES;   /* NONE / SDES / DTLS_SRTP */
 
 /* NAT / ICE */
 acfg.ice_enabled  = true;
@@ -211,13 +211,13 @@ strcpy(acfg.audio_codec_names[1], "alaw");   /* G.711 A-law  */
 strcpy(acfg.audio_codec_names[2], "opus");   /* Opus         */
 acfg.audio_codec_name_count = 3;
 
-echosdk_account_handle_t acct;
-echosdk_account_create(&acfg, &acct);
+medut_account_handle_t acct;
+medut_account_create(&acfg, &acct);
 
-echosdk_account_add_header(acct, "X-Tenant-Id", "42");    /* optional */
-echosdk_account_set_100rel(acct, ECHOSDK_100REL_ENABLED); /* optional */
+medut_account_add_header(acct, "X-Tenant-Id", "42");    /* optional */
+medut_account_set_100rel(acct, MEDUT_100REL_ENABLED); /* optional */
 
-echosdk_account_register(acct);
+medut_account_register(acct);
 ```
 
 Accepted codec name aliases:
@@ -238,17 +238,17 @@ Setting none of them offers `opus, PCMU, PCMA` — the cross-platform default.
 ```cpp
 /* Simple form — codec list via initializer_list */
 auto acct = sdk.create_account("alice@pbx.example.com", "secret",
-                               ECHOSDK_TRANSPORT_TLS,
-                               {ECHOSDK_CODEC_PCMU, ECHOSDK_CODEC_PCMA,
-                                ECHOSDK_CODEC_OPUS});
+                               MEDUT_TRANSPORT_TLS,
+                               {MEDUT_CODEC_PCMU, MEDUT_CODEC_PCMA,
+                                MEDUT_CODEC_OPUS});
 
-/* Full form — use string names via echosdk_account_config_t */
-echosdk_account_config_t acfg{};
+/* Full form — use string names via medut_account_config_t */
+medut_account_config_t acfg{};
 acfg.uri          = "alice@pbx.example.com";
 acfg.password     = "secret";
 acfg.display_name = "Alice";
-acfg.transport    = ECHOSDK_TRANSPORT_TLS;
-acfg.media_enc    = ECHOSDK_MEDIA_ENC_SDES;
+acfg.transport    = MEDUT_TRANSPORT_TLS;
+acfg.media_enc    = MEDUT_MEDIA_ENC_SDES;
 acfg.ice_enabled  = true;
 acfg.stun_server  = "stun:stun.l.google.com:19302";
 acfg.turn_server  = "turn:turn.example.com:3478";
@@ -262,7 +262,7 @@ acfg.audio_codec_name_count = 3;
 
 auto acct = sdk.create_account(acfg);
 acct.add_header("X-Tenant-Id", "42");
-acct.set_100rel(ECHOSDK_100REL_ENABLED);
+acct.set_100rel(MEDUT_100REL_ENABLED);
 acct.register_account();
 ```
 
@@ -292,7 +292,7 @@ account.register()
 final account = sdk.createAccount(
   'alice@pbx.example.com',
   'secret',
-  transport:   echosdk_transport_t.ECHOSDK_TRANSPORT_TLS,
+  transport:   medut_transport_t.MEDUT_TRANSPORT_TLS,
   audioCodecs: ['ulaw', 'alaw', 'opus'],
 );
 account.addHeader('X-Tenant-Id', '42');
@@ -305,79 +305,79 @@ account.register();
 
 **C**
 ```c
-static echosdk_call_handle_t g_call = NULL;
+static medut_call_handle_t g_call = NULL;
 
-static void on_event(const echosdk_event_t *ev, void *ud)
+static void on_event(const medut_event_t *ev, void *ud)
 {
     switch (ev->type) {
 
-    case ECHOSDK_EV_REG_STATE:
-        if (ev->u.reg.state == ECHOSDK_REG_REGISTERED)
+    case MEDUT_EV_REG_STATE:
+        if (ev->u.reg.state == MEDUT_REG_REGISTERED)
             printf("Registered\n");
-        else if (ev->u.reg.state == ECHOSDK_REG_RECONNECTING)
+        else if (ev->u.reg.state == MEDUT_REG_RECONNECTING)
             printf("Reconnecting: %s (attempt %u in %u ms)\n",
                    ev->u.reg.error_str ? ev->u.reg.error_str : "?",
                    ev->u.reg.retry_attempt,
                    ev->u.reg.retry_delay_ms);
-        else if (ev->u.reg.state == ECHOSDK_REG_FAILED)
+        else if (ev->u.reg.state == MEDUT_REG_FAILED)
             printf("Reg failed for good: %s\n",
                    ev->u.reg.error_str ? ev->u.reg.error_str : "?");
         break;
 
-    case ECHOSDK_EV_INCOMING_CALL:
+    case MEDUT_EV_INCOMING_CALL:
         printf("Incoming from %s\n", ev->u.incoming.from_uri);
         g_call = ev->u.incoming.call;
-        echosdk_call_answer(g_call);   /* or store and answer later */
+        medut_call_answer(g_call);   /* or store and answer later */
         break;
 
-    case ECHOSDK_EV_CALL_STATE:
+    case MEDUT_EV_CALL_STATE:
         printf("Call state %d  reason: %s\n",
                ev->u.call_state.state,
                ev->u.call_state.reason ? ev->u.call_state.reason : "");
-        if (ev->u.call_state.state == ECHOSDK_CALL_ENDED   ||
-            ev->u.call_state.state == ECHOSDK_CALL_FAILED  ||
-            ev->u.call_state.state == ECHOSDK_CALL_CANCELLED)
+        if (ev->u.call_state.state == MEDUT_CALL_ENDED   ||
+            ev->u.call_state.state == MEDUT_CALL_FAILED  ||
+            ev->u.call_state.state == MEDUT_CALL_CANCELLED)
             g_call = NULL;
         break;
 
-    case ECHOSDK_EV_CALL_DTMF:
+    case MEDUT_EV_CALL_DTMF:
         printf("DTMF: %c\n", ev->u.dtmf.digit);
         break;
 
-    case ECHOSDK_EV_SDP_NEGOTIATION:
+    case MEDUT_EV_SDP_NEGOTIATION:
         printf("Codec: %s  Crypto: %s\n",
                ev->u.sdp.negotiated_codec, ev->u.sdp.negotiated_crypto);
         break;
 
-    case ECHOSDK_EV_MEDIA_STATS:
+    case MEDUT_EV_MEDIA_STATS:
         printf("MOS-LQ %.2f  RTT %.0f ms  loss TX %.1f%%  RX %.1f%%\n",
                ev->u.stats.mos_lq, ev->u.stats.rtt_ms,
                ev->u.stats.loss_pct, ev->u.stats.loss_pct_rx);
         break;
 
-    case ECHOSDK_EV_TRANSFER_REQUEST:
+    case MEDUT_EV_TRANSFER_REQUEST:
         printf("Transfer to %s (attended=%d)\n",
                ev->u.transfer_req.refer_to_uri,
                ev->u.transfer_req.has_replaces);
         break;
 
-    case ECHOSDK_EV_MESSAGE:
+    case MEDUT_EV_MESSAGE:
         printf("MESSAGE from %s: %s\n", ev->u.msg.from_uri, ev->u.msg.body);
         break;
 
-    case ECHOSDK_EV_MWI:
+    case MEDUT_EV_MWI:
         printf("Voicemail: %u new, %u old\n",
                ev->u.mwi.new_voice, ev->u.mwi.old_voice);
         break;
 
-    case ECHOSDK_EV_PRESENCE_STATE:
+    case MEDUT_EV_PRESENCE_STATE:
         printf("Presence %s → %d\n",
                ev->u.presence.target_uri, ev->u.presence.status);
         break;
 
-    case ECHOSDK_EV_SIP_TRACE:
+    case MEDUT_EV_SIP_TRACE:
         printf("%s\n%s\n---\n",
-               ev->u.sip_trace.dir == ECHOSDK_MEDIA_DIR_TX ? ">>>" : "<<<",
+               ev->u.sip_trace.dir == MEDUT_MEDIA_DIR_TX ? ">>>" : "<<<",
                ev->u.sip_trace.raw_message);
         break;
 
@@ -388,34 +388,34 @@ static void on_event(const echosdk_event_t *ev, void *ud)
 
 **C++**
 ```cpp
-sdk.on_event([&](const echosdk_event_t& ev) {
+sdk.on_event([&](const medut_event_t& ev) {
     switch (ev.type) {
 
-    case ECHOSDK_EV_REG_STATE:
-        if (ev.u.reg.state == ECHOSDK_REG_REGISTERED)
+    case MEDUT_EV_REG_STATE:
+        if (ev.u.reg.state == MEDUT_REG_REGISTERED)
             std::cout << "Registered\n";
-        else if (ev.u.reg.state == ECHOSDK_REG_RECONNECTING)
+        else if (ev.u.reg.state == MEDUT_REG_RECONNECTING)
             std::cout << "Reconnecting: "
                       << (ev.u.reg.error_str ? ev.u.reg.error_str : "?") << "\n";
-        else if (ev.u.reg.state == ECHOSDK_REG_FAILED)
+        else if (ev.u.reg.state == MEDUT_REG_FAILED)
             std::cout << "Reg failed for good: "
                       << (ev.u.reg.error_str ? ev.u.reg.error_str : "?") << "\n";
         break;
 
-    case ECHOSDK_EV_INCOMING_CALL:
+    case MEDUT_EV_INCOMING_CALL:
         std::cout << "Incoming from " << ev.u.incoming.from_uri << "\n";
-        active_call = EchoSDK::Call(ev.u.incoming.call);
+        active_call = Medut::Call(ev.u.incoming.call);
         active_call.answer();
         break;
 
-    case ECHOSDK_EV_CALL_STATE:
-        if (ev.u.call_state.state == ECHOSDK_CALL_ENDED   ||
-            ev.u.call_state.state == ECHOSDK_CALL_FAILED  ||
-            ev.u.call_state.state == ECHOSDK_CALL_CANCELLED)
+    case MEDUT_EV_CALL_STATE:
+        if (ev.u.call_state.state == MEDUT_CALL_ENDED   ||
+            ev.u.call_state.state == MEDUT_CALL_FAILED  ||
+            ev.u.call_state.state == MEDUT_CALL_CANCELLED)
             active_call = {};
         break;
 
-    case ECHOSDK_EV_MEDIA_STATS:
+    case MEDUT_EV_MEDIA_STATS:
         std::cout << "MOS-LQ " << ev.u.stats.mos_lq
                   << "  RTT "  << ev.u.stats.rtt_ms << " ms\n";
         break;
@@ -428,7 +428,7 @@ sdk.on_event([&](const echosdk_event_t& ev) {
 **Python**
 ```python
 # No constants needed — events use string names and string state values.
-import echo_sdk as sdk
+import medut as sdk
 
 active_call = None
 
@@ -512,9 +512,9 @@ account.events.listen((ev) {
     activeCall!.answer();
 
   } else if (ev is CallStateEvent) {
-    final done = ev.state == echosdk_call_state_t.ECHOSDK_CALL_ENDED   ||
-                 ev.state == echosdk_call_state_t.ECHOSDK_CALL_FAILED  ||
-                 ev.state == echosdk_call_state_t.ECHOSDK_CALL_CANCELLED;
+    final done = ev.state == medut_call_state_t.MEDUT_CALL_ENDED   ||
+                 ev.state == medut_call_state_t.MEDUT_CALL_FAILED  ||
+                 ev.state == medut_call_state_t.MEDUT_CALL_CANCELLED;
     if (done) { activeCall = null; }
 
   } else if (ev is CallDtmfEvent) {
@@ -545,8 +545,8 @@ account.events.listen((ev) {
 
 **C**
 ```c
-echosdk_call_handle_t call;
-echosdk_call_invite(acct, "sip:bob@pbx.example.com", &call);
+medut_call_handle_t call;
+medut_call_invite(acct, "sip:bob@pbx.example.com", &call);
 /* → CALL_STATE events: CALLING → RINGING → ESTABLISHED (or FAILED) */
 ```
 
@@ -578,8 +578,8 @@ final call = account.call('sip:bob@pbx.example.com');
 
 **C**
 ```c
-echosdk_call_hold(call);    /* → CALL_STATE: HELD */
-echosdk_call_resume(call);  /* → CALL_STATE: ESTABLISHED */
+medut_call_hold(call);    /* → CALL_STATE: HELD */
+medut_call_resume(call);  /* → CALL_STATE: ESTABLISHED */
 ```
 
 **C++**
@@ -606,11 +606,11 @@ call.resume();
 
 **C**
 ```c
-echosdk_audio_mute(call, true);     /* mic off  — remote can't hear you */
-echosdk_audio_mute(call, false);    /* mic on */
+medut_audio_mute(call, true);     /* mic off  — remote can't hear you */
+medut_audio_mute(call, false);    /* mic on */
 
-echosdk_audio_mute_rx(call, true);  /* speaker off — you can't hear remote */
-echosdk_audio_mute_rx(call, false); /* speaker on */
+medut_audio_mute_rx(call, true);  /* speaker off — you can't hear remote */
+medut_audio_mute_rx(call, false); /* speaker on */
 ```
 
 **C++**
@@ -618,7 +618,7 @@ echosdk_audio_mute_rx(call, false); /* speaker on */
 call.mute(true);     /* mic off  */
 call.mute(false);    /* mic on   */
 /* Note: C++ wrapper exposes mute() but not mute_rx() directly.
-   Use the C function for RX mute: echosdk_audio_mute_rx(call.handle(), true); */
+   Use the C function for RX mute: medut_audio_mute_rx(call.handle(), true); */
 ```
 
 **Python**
@@ -647,8 +647,8 @@ Digits: `0`–`9`, `*`, `#`, `A`–`D` (RFC 4733 RTP events).
 
 **C**
 ```c
-echosdk_call_send_dtmf(call, '5');
-echosdk_call_send_dtmf(call, '#');
+medut_call_send_dtmf(call, '5');
+medut_call_send_dtmf(call, '#');
 ```
 
 **C++**
@@ -677,7 +677,7 @@ The remote party (bob) receives a REFER and re-invites the target. Your leg ends
 
 **C**
 ```c
-echosdk_call_transfer(call, "sip:carol@pbx.example.com");
+medut_call_transfer(call, "sip:carol@pbx.example.com");
 /* → CALL_STATE: ENDED for this call on success */
 ```
 
@@ -705,15 +705,15 @@ Warm handoff: hold the first call, dial a consultation, then bridge the two.
 **C**
 ```c
 /* Step 1 — hold the first call */
-echosdk_call_hold(call_a);
+medut_call_hold(call_a);
 
 /* Step 2 — dial consultation */
-echosdk_call_handle_t call_b;
-echosdk_call_invite(acct, "sip:carol@pbx.example.com", &call_b);
+medut_call_handle_t call_b;
+medut_call_invite(acct, "sip:carol@pbx.example.com", &call_b);
 /* wait for call_b → ESTABLISHED */
 
 /* Step 3 — send REFER w/ Replaces: bridges call_a to call_b */
-echosdk_call_attended_transfer(call_a, call_b);
+medut_call_attended_transfer(call_a, call_b);
 /* call_a → ENDED; call_b → ENDED */
 ```
 
@@ -726,7 +726,7 @@ call_a.attended_transfer(call_b);
 ```
 
 > Python and Flutter do not currently expose `attended_transfer`.
-> Call `echosdk_call_attended_transfer` via cffi / native plugin if needed.
+> Call `medut_call_attended_transfer` via cffi / native plugin if needed.
 
 ---
 
@@ -747,15 +747,15 @@ provisional replies and then hands you the decision — answer every
 
 **C**
 ```c
-case ECHOSDK_EV_TRANSFER_REQUEST: {
-    echosdk_call_handle_t call = ev->u.transfer_req.call;
-    echosdk_call_handle_t moved = NULL;
+case MEDUT_EV_TRANSFER_REQUEST: {
+    medut_call_handle_t call = ev->u.transfer_req.call;
+    medut_call_handle_t moved = NULL;
 
-    if (echosdk_call_transfer_accept(call, &moved) == ECHOSDK_OK) {
+    if (medut_call_transfer_accept(call, &moved) == MEDUT_OK) {
         /* `moved` is the new call to the target; the original stays up. */
     }
     else {
-        echosdk_call_transfer_reject(call, 603, "Declined");
+        medut_call_transfer_reject(call, 603, "Declined");
     }
     break;
 }
@@ -792,8 +792,8 @@ per-tick media numbers.
 
 **C**
 ```c
-echosdk_call_info_t info;
-if (echosdk_call_get_info(call, &info) == ECHOSDK_OK)
+medut_call_info_t info;
+if (medut_call_get_info(call, &info) == MEDUT_OK)
     printf("%s %s, up %llu ms\n",
            info.is_outgoing ? "to" : "from", info.peer_uri,
            (unsigned long long)info.duration_ms);
@@ -826,8 +826,8 @@ Call-level headers are sent on re-INVITEs, BYE, and REFER within that dialog.
 
 **C**
 ```c
-echosdk_account_add_header(acct, "X-Tenant-Id",  "42");   /* account-level */
-echosdk_call_add_header   (call, "X-Call-Track",  "abc");  /* call-level */
+medut_account_add_header(acct, "X-Tenant-Id",  "42");   /* account-level */
+medut_call_add_header   (call, "X-Call-Track",  "abc");  /* call-level */
 ```
 
 **C++**
@@ -854,33 +854,33 @@ account.addHeader('X-Tenant-Id', '42');
 
 **C**
 ```c
-echosdk_audio_device_t devs[32];
+medut_audio_device_t devs[32];
 int n;
 
-n = echosdk_audio_list_input_devices(devs, 32);
+n = medut_audio_list_input_devices(devs, 32);
 for (int i = 0; i < n; i++)
     printf("in  [%d] %s%s\n", i, devs[i].name,
            devs[i].is_default ? " *" : "");
 
-n = echosdk_audio_list_output_devices(devs, 32);
+n = medut_audio_list_output_devices(devs, 32);
 for (int i = 0; i < n; i++)
     printf("out [%d] %s%s\n", i, devs[i].name,
            devs[i].is_default ? " *" : "");
 
-echosdk_audio_set_input_device("HDA Intel PCH: ALC3204 Analog (hw:0,0)");
-echosdk_audio_set_output_device(NULL);   /* NULL = platform default */
+medut_audio_set_input_device("HDA Intel PCH: ALC3204 Analog (hw:0,0)");
+medut_audio_set_output_device(NULL);   /* NULL = platform default */
 ```
 
 **C++**
 ```cpp
 /* C++ uses the C functions directly — no wrapper needed */
-echosdk_audio_device_t devs[32];
-int n = echosdk_audio_list_input_devices(devs, 32);
+medut_audio_device_t devs[32];
+int n = medut_audio_list_input_devices(devs, 32);
 for (int i = 0; i < n; i++)
     std::cout << "in [" << i << "] " << devs[i].name << "\n";
 
-echosdk_audio_set_input_device("HDA Intel PCH: ALC3204 Analog (hw:0,0)");
-echosdk_audio_set_output_device(nullptr);
+medut_audio_set_input_device("HDA Intel PCH: ALC3204 Analog (hw:0,0)");
+medut_audio_set_output_device(nullptr);
 ```
 
 **Python**
@@ -904,7 +904,7 @@ for (final d in sdk.listOutputDevices()) {
   print('out ${d.name}${d.isDefault ? "  *" : ""}');
 }
 // setInputDevice / setOutputDevice not yet in Flutter binding;
-// call echosdk_audio_set_input_device via a native plugin if needed.
+// call medut_audio_set_input_device via a native plugin if needed.
 ```
 
 ---
@@ -916,8 +916,8 @@ C and C++ can also query them on demand.
 
 **C / C++ — on demand**
 ```c
-echosdk_ev_media_stats_t s;
-if (echosdk_call_get_stats(call, &s) == ECHOSDK_OK) {
+medut_ev_media_stats_t s;
+if (medut_call_get_stats(call, &s) == MEDUT_OK) {
     printf("MOS-LQ %.2f  MOS-CQ %.2f\n",    s.mos_lq, s.mos_cq);
     printf("RTT %.0f ms  jitter %.1f ms\n",  s.rtt_ms, s.jitter_ms);
     printf("loss TX %.1f%% RX %.1f%%\n",     s.loss_pct, s.loss_pct_rx);
@@ -931,7 +931,7 @@ if (echosdk_call_get_stats(call, &s) == ECHOSDK_OK) {
 
 **C++**
 ```cpp
-auto s = call.stats();   /* returns echosdk_ev_media_stats_t by value */
+auto s = call.stats();   /* returns medut_ev_media_stats_t by value */
 std::cout << "MOS-LQ " << s.mos_lq << "  RTT " << s.rtt_ms << " ms\n";
 ```
 
@@ -1004,9 +1004,9 @@ call.fetch_stats(existing_stats)  # update existing CallStats in-place
 ## 13. pcap capture (C / C++ / Python)
 
 ```c
-echosdk_pcap_start("/tmp/call.pcap");
+medut_pcap_start("/tmp/call.pcap");
 /* ... calls happen here ... */
-echosdk_pcap_stop();
+medut_pcap_stop();
 ```
 
 ```cpp
@@ -1020,7 +1020,7 @@ sdk.pcap_start("/tmp/call.pcap")
 sdk.pcap_stop()
 ```
 
-Flutter does not expose pcap. Use a native plugin to call `echosdk_pcap_start`.
+Flutter does not expose pcap. Use a native plugin to call `medut_pcap_start`.
 
 ---
 
@@ -1030,8 +1030,8 @@ Record call audio to a single mixed WAV file. Both sides of the conversation (RX
 
 **C**
 ```c
-echosdk_call_record_start(call, "/tmp/call.wav");
-echosdk_call_record_stop(call);   // call before hangup for a clean WAV header
+medut_call_record_start(call, "/tmp/call.wav");
+medut_call_record_stop(call);   // call before hangup for a clean WAV header
 ```
 
 **C++**
@@ -1056,11 +1056,11 @@ Typical pattern — tie recording to call state:
 
 **C**
 ```c
-case ECHOSDK_EV_CALL_STATE:
-    if (ev->u.call_state.state == ECHOSDK_CALL_ESTABLISHED)
-        echosdk_call_record_start(ev->u.call_state.call, "/tmp/call.wav");
-    if (ev->u.call_state.state == ECHOSDK_CALL_ENDED)
-        echosdk_call_record_stop(ev->u.call_state.call);
+case MEDUT_EV_CALL_STATE:
+    if (ev->u.call_state.state == MEDUT_CALL_ESTABLISHED)
+        medut_call_record_start(ev->u.call_state.call, "/tmp/call.wav");
+    if (ev->u.call_state.state == MEDUT_CALL_ENDED)
+        medut_call_record_stop(ev->u.call_state.call);
 ```
 
 Output format: PCM S16LE WAV, 48 kHz/2ch (Opus) or 8 kHz/1ch (G.711). Recording is independent of the media tap — both can be active at the same time.
@@ -1077,9 +1077,9 @@ adjustable live — no re-dial needed.
 **C**
 ```c
 /* dB, clamped to [-20, +20]. 0.0 = unity (fast-path bypass, zero overhead). */
-echosdk_set_mic_gain_db(6.0f);      /* boost quiet USB mic +6 dB */
-echosdk_set_speaker_gain_db(-3.0f); /* reduce playback -3 dB     */
-echosdk_set_mic_gain_db(0.0f);      /* back to unity              */
+medut_set_mic_gain_db(6.0f);      /* boost quiet USB mic +6 dB */
+medut_set_speaker_gain_db(-3.0f); /* reduce playback -3 dB     */
+medut_set_mic_gain_db(0.0f);      /* back to unity              */
 ```
 
 **C++**
@@ -1103,23 +1103,23 @@ sdk.set_mic_gain(0.0)   # bypass
 **C**
 ```c
 /* Simple on/off — re-enables whichever backend was set at init */
-echosdk_set_aec(true);
-echosdk_set_aec(false);
+medut_set_aec(true);
+medut_set_aec(false);
 
 /* Fine-grained: switch mode (only AEC_OFF ↔ init_mode allowed at runtime) */
-echosdk_set_aec_mode(ECHOSDK_AEC_OFF);
-echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR);  /* restore default */
+medut_set_aec_mode(MEDUT_AEC_OFF);
+medut_set_aec_mode(MEDUT_AEC_SUPPRESSOR);  /* restore default */
 
 /* Tune suppressor aggressiveness (SUPPRESSOR mode only)
  * 0.0 = no TX suppression; 1.0 = max (−16.5 dB floor, default) */
-echosdk_set_aec_suppression_level(0.6f);  /* less ducking on double-talk */
-echosdk_set_aec_suppression_level(1.0f);  /* restore default             */
+medut_set_aec_suppression_level(0.6f);  /* less ducking on double-talk */
+medut_set_aec_suppression_level(1.0f);  /* restore default             */
 ```
 
 **C++**
 ```cpp
 sdk.set_aec(true);
-sdk.set_aec_mode(ECHOSDK_AEC_OFF);
+sdk.set_aec_mode(MEDUT_AEC_OFF);
 sdk.set_aec_suppression_level(0.6f);
 ```
 
@@ -1140,7 +1140,7 @@ sdk.set_aec_suppression_level(0.6)    # tune aggressiveness (suppressor only)
 | Duplex | Half-duplex (ducks TX when RX loud) | Full-duplex (subtracts echo) |
 | Double-talk | One side goes quiet | Both parties heard |
 | Platform | All | Desktop only |
-| Build | None | `cmake -DECHOSDK_WITH_WEBRTC_AEC=ON` + `libwebrtc-audio-processing-1-dev` |
+| Build | None | `cmake -DMEDUT_WITH_WEBRTC_AEC=ON` + `libwebrtc-audio-processing-1-dev` |
 
 > `AEC_WEBRTC` must be configured at init — switching between SUPPRESSOR and WEBRTC
 > at runtime returns `EINVAL`. Only `AEC_OFF ↔ init_mode` transitions are valid.
@@ -1152,8 +1152,8 @@ sdk.set_aec_suppression_level(0.6)    # tune aggressiveness (suppressor only)
 
 **C**
 ```c
-echosdk_set_ns(true);    /* noise suppression  */
-echosdk_set_agc(true);   /* auto gain control  */
+medut_set_ns(true);    /* noise suppression  */
+medut_set_agc(true);   /* auto gain control  */
 ```
 
 **C++**
@@ -1178,8 +1178,8 @@ sdk.setAgc(true);
 
 **C**
 ```c
-echosdk_set_jitter_buffer(20, 200);   /* widen on poor network — new calls only */
-echosdk_call_set_dscp_rtp(call, 46);  /* EF — takes effect next outgoing packet */
+medut_set_jitter_buffer(20, 200);   /* widen on poor network — new calls only */
+medut_call_set_dscp_rtp(call, 46);  /* EF — takes effect next outgoing packet */
 ```
 
 **C++**
@@ -1213,7 +1213,7 @@ The SDK retries failed registrations automatically. These functions let you adju
 **C**
 ```c
 // Tighten retries for a specific account (e.g. aggressive mobile reconnect)
-echosdk_account_set_retry_policy(acct,
+medut_account_set_retry_policy(acct,
     1000,   // initial_ms   — first retry after 1 s
     30000,  // max_ms       — cap at 30 s
     1.5f,   // backoff      — 1 s → 1.5 s → 2.25 s → … → 30 s
@@ -1221,10 +1221,10 @@ echosdk_account_set_retry_policy(acct,
 );
 
 // User taps "Cancel reconnect"
-echosdk_account_cancel_retry(acct);
+medut_account_cancel_retry(acct);
 
 // User taps "Retry now" — skip the current backoff delay
-echosdk_account_retry_now(acct);
+medut_account_retry_now(acct);
 ```
 
 **C++**
@@ -1245,20 +1245,20 @@ account.retry_now()
 **Flutter**
 ```dart
 // Flutter binding exposes the same three calls
-internal.nativeBindings.echosdk_account_set_retry_policy(
+internal.nativeBindings.medut_account_set_retry_policy(
     account.handle, 1000, 30000, 1.5, 0);
-internal.nativeBindings.echosdk_account_cancel_retry(account.handle);
-internal.nativeBindings.echosdk_account_retry_now(account.handle);
+internal.nativeBindings.medut_account_cancel_retry(account.handle);
+internal.nativeBindings.medut_account_retry_now(account.handle);
 ```
 
-A registration the SDK is still working on reports `ECHOSDK_REG_RECONNECTING`,
-carrying the attempt and the delay; `ECHOSDK_REG_FAILED` means it has stopped
+A registration the SDK is still working on reports `MEDUT_REG_RECONNECTING`,
+carrying the attempt and the delay; `MEDUT_REG_FAILED` means it has stopped
 (auth, an exhausted budget, a cancelled retry):
 
 **C**
 ```c
-case ECHOSDK_EV_REG_STATE:
-    if (ev->u.reg.state == ECHOSDK_REG_RECONNECTING &&
+case MEDUT_EV_REG_STATE:
+    if (ev->u.reg.state == MEDUT_REG_RECONNECTING &&
         ev->u.reg.retry_attempt > 0)
         printf("retry %u in %u ms\n",
                ev->u.reg.retry_attempt,
@@ -1292,18 +1292,18 @@ def _(ev):
 
 **C**
 ```c
-echosdk_call_hangup(call);           /* BYE */
-echosdk_account_unregister(acct);    /* REGISTER Expires: 0 */
-echosdk_account_destroy(acct);       /* blocks until complete */
-echosdk_shutdown();
+medut_call_hangup(call);           /* BYE */
+medut_account_unregister(acct);    /* REGISTER Expires: 0 */
+medut_account_destroy(acct);       /* blocks until complete */
+medut_shutdown();
 ```
 
 **C++**
 ```cpp
 call.hangup();
 acct.unregister();
-/* acct destructor calls echosdk_account_destroy automatically */
-/* sdk destructor calls echosdk_shutdown automatically */
+/* acct destructor calls medut_account_destroy automatically */
+/* sdk destructor calls medut_shutdown automatically */
 ```
 
 **Python**
@@ -1329,8 +1329,8 @@ sdk.shutdown();
 
 | Goal | C/C++ / Python field | Flutter |
 |---|---|---|
-| Plain UDP | `transport=UDP` | `transport: ECHOSDK_TRANSPORT_UDP` |
-| TLS (port 5061) | `transport=TLS`, `ca_cert_path`, `verify_server=true` | `transport: ECHOSDK_TRANSPORT_TLS` |
+| Plain UDP | `transport=UDP` | `transport: MEDUT_TRANSPORT_UDP` |
+| TLS (port 5061) | `transport=TLS`, `ca_cert_path`, `verify_server=true` | `transport: MEDUT_TRANSPORT_TLS` |
 | WebSocket | `server_url="ws://host/ws"` | — native plugin |
 | Secure WebSocket | `server_url="wss://host/ws"` | — native plugin |
 | STUN only | `ice_enabled=true`, `stun_server="stun:host:3478"` | — native plugin |
@@ -1338,15 +1338,15 @@ sdk.shutdown();
 | STUN + TURN | both — TURN takes priority | — native plugin |
 | WebRTC interop | `media_enc=DTLS_SRTP`, `ice_enabled=true`, STUN+TURN | — native plugin |
 | Voice quality (init) | `aec_mode=SUPPRESSOR`, `ns=true`, `agc=true` | — native plugin |
-| Echo on/off (runtime) | `echosdk_set_aec(bool)` / `sdk.set_aec(bool)` | `sdk.setAec(bool)` |
-| Echo mode (runtime) | `echosdk_set_aec_mode(mode)` / `sdk.set_aec_mode(mode)` | — native plugin |
-| Echo suppressor strength | `echosdk_set_aec_suppression_level(f)` / `sdk.set_aec_suppression_level(f)` | — |
-| NS / AGC (runtime) | `echosdk_set_ns/agc()` / `sdk.set_ns/agc()` | `sdk.setNs/Agc()` |
-| Mic gain (runtime) | `echosdk_set_mic_gain_db(db)` / `sdk.set_mic_gain(db)` | — native plugin |
-| Speaker gain (runtime) | `echosdk_set_speaker_gain_db(db)` / `sdk.set_speaker_gain(db)` | — native plugin |
+| Echo on/off (runtime) | `medut_set_aec(bool)` / `sdk.set_aec(bool)` | `sdk.setAec(bool)` |
+| Echo mode (runtime) | `medut_set_aec_mode(mode)` / `sdk.set_aec_mode(mode)` | — native plugin |
+| Echo suppressor strength | `medut_set_aec_suppression_level(f)` / `sdk.set_aec_suppression_level(f)` | — |
+| NS / AGC (runtime) | `medut_set_ns/agc()` / `sdk.set_ns/agc()` | `sdk.setNs/Agc()` |
+| Mic gain (runtime) | `medut_set_mic_gain_db(db)` / `sdk.set_mic_gain(db)` | — native plugin |
+| Speaker gain (runtime) | `medut_set_speaker_gain_db(db)` / `sdk.set_speaker_gain(db)` | — native plugin |
 | Jitter buffer (init, adaptive) | `jitter_buffer_min_ms` / `jitter_buffer_max_ms` in `SDKConfig` | — native plugin |
-| Jitter buffer (runtime) | `echosdk_set_jitter_buffer()` / `sdk.set_jitter_buffer()` | `sdk.setJitterBuffer()` |
-| Per-call DSCP | `echosdk_call_set_dscp_rtp()` / `call.set_dscp_rtp()` | `call.setDscpRtp()` |
+| Jitter buffer (runtime) | `medut_set_jitter_buffer()` / `sdk.set_jitter_buffer()` | `sdk.setJitterBuffer()` |
+| Per-call DSCP | `medut_call_set_dscp_rtp()` / `call.set_dscp_rtp()` | `call.setDscpRtp()` |
 | Codec selection (string names) | `audio_codec_names[]`, `audio_codec_name_count` | `audioCodecs: [...]` |
 | Codec selection (enum) | `audio_codecs[]`, `audio_codec_count` | — (use string names) |
 

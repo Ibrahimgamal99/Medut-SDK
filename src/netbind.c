@@ -7,7 +7,7 @@
  * is tied to the device (SO_BINDTODEVICE); Android additionally needs the
  * socket attached to the platform Network (android_setsocknetwork), which
  * the app's ConnectivityManager callback hands over as a handle through
- * echosdk_network_set_interface_handle(); Darwin takes the interface index
+ * medut_network_set_interface_handle(); Darwin takes the interface index
  * (IP_BOUND_IF / IPV6_BOUND_IF).  Windows has no equivalent here.
  *
  * The handle table is written from the API thread and read on re_main;
@@ -15,7 +15,7 @@
  */
 
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 #if defined(__ANDROID__)
 #include <dlfcn.h>
@@ -66,12 +66,12 @@ static bool handle_lookup(const char *ifname, uint64_t *handle)
 	return found;
 }
 
-int echosdk_network_set_interface_handle(const char *ifname, uint64_t handle)
+int medut_network_set_interface_handle(const char *ifname, uint64_t handle)
 {
 	struct if_handle *slot = NULL;
 
 	if (!ifname || !ifname[0] || strlen(ifname) >= sizeof(slot->ifname))
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	lock_init_once();
 	mtx_lock(&s_lock);
@@ -85,22 +85,22 @@ int echosdk_network_set_interface_handle(const char *ifname, uint64_t handle)
 	}
 	if (!slot) {
 		mtx_unlock(&s_lock);
-		return ECHOSDK_ERR_NOMEM;
+		return MEDUT_ERR_NOMEM;
 	}
 	str_ncpy(slot->ifname, ifname, sizeof(slot->ifname));
 	slot->handle = handle;
 	slot->set    = true;
 	mtx_unlock(&s_lock);
 
-	info("EchoSDK/net: interface %s is platform network %llu\n", ifname,
+	info("Medut/net: interface %s is platform network %llu\n", ifname,
 	     (unsigned long long)handle);
-	return ECHOSDK_OK;
+	return MEDUT_OK;
 }
 
-int echosdk_network_clear_interface_handle(const char *ifname)
+int medut_network_clear_interface_handle(const char *ifname)
 {
 	if (!ifname)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	lock_init_once();
 	mtx_lock(&s_lock);
@@ -109,7 +109,7 @@ int echosdk_network_clear_interface_handle(const char *ifname)
 			memset(&s_ifv[i], 0, sizeof(s_ifv[i]));
 	}
 	mtx_unlock(&s_lock);
-	return ECHOSDK_OK;
+	return MEDUT_OK;
 }
 
 /* Interface cost for pair priority: 0 Wi-Fi/wired, 1 VPN, 2 cellular.
@@ -180,11 +180,11 @@ int bsdk_net_bind_socket(re_sock_t fd, const char *ifname, int af)
 			return ENOTSUP;
 		r = fn(handle, (int)fd);
 		if (r) {
-			warning("EchoSDK/net: binding socket to %s (network %llu)"
+			warning("Medut/net: binding socket to %s (network %llu)"
 				" failed: %d\n", ifname, (unsigned long long)handle, r);
 			return EIO;
 		}
-		debug("EchoSDK/net: socket %d pinned to %s (network %llu)\n",
+		debug("Medut/net: socket %d pinned to %s (network %llu)\n",
 		      (int)fd, ifname, (unsigned long long)handle);
 		return 0;
 	}

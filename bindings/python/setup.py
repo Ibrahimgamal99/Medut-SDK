@@ -3,11 +3,11 @@ from setuptools import setup, Distribution
 from wheel.bdist_wheel import bdist_wheel
 
 if sys.platform == "win32":
-    native_lib = ["echosdk.dll"]
+    native_lib = ["medut.dll"]
 elif sys.platform == "darwin":
-    native_lib = ["echosdk.dylib"]
+    native_lib = ["medut.dylib"]
 else:
-    native_lib = ["echosdk.so"]
+    native_lib = ["medut.so"]
 
 
 class BinaryDistribution(Distribution):
@@ -28,5 +28,5 @@ class BinaryWheel(bdist_wheel):
 setup(
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": BinaryWheel},
-    package_data={"echo_sdk": native_lib + ["_echosdk_clean.h"]},
+    package_data={"medut": native_lib + ["_medut_clean.h"]},
 )

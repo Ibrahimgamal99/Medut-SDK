@@ -14,7 +14,7 @@ library;
 
 import 'dart:convert';
 
-import 'package:echo_sdk/echo_sdk.dart';
+import 'package:medut/medut.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -113,10 +113,10 @@ class AccountProfile {
 
 /// Loads and saves the one [AccountProfile] the example app keeps.
 class AccountStore {
-  static const _prefsKey = 'echosdk.account';
-  static const _rememberKey = 'echosdk.account.remember';
-  static const _passKey = 'echosdk.account.password';
-  static const _turnPassKey = 'echosdk.account.turnPassword';
+  static const _prefsKey = 'medut.account';
+  static const _rememberKey = 'medut.account.remember';
+  static const _passKey = 'medut.account.password';
+  static const _turnPassKey = 'medut.account.turnPassword';
 
   /// `encryptedSharedPreferences` puts the Android backing store behind
   /// Keystore instead of a plain XML file; on iOS the Keychain item is

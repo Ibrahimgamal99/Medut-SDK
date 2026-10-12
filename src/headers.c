@@ -1,20 +1,20 @@
 /**
  * @file headers.c  Custom SIP header injection
  *
- * Per-account headers: echosdk_account_add_header() — applies to all
+ * Per-account headers: medut_account_add_header() — applies to all
  * outgoing requests for the account. Headers are stored in the account's
  * custom_hdrs list and also applied via baresip's ua_add_custom_hdr().
  *
- * Per-dialog headers: echosdk_call_add_header() (in call.c) — applies to
+ * Per-dialog headers: medut_call_add_header() (in call.c) — applies to
  * a specific call/dialog via call_add_custom_hdr(). Stored in the call's
  * custom_hdrs list.
  */
 
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 typedef struct {
-	struct echosdk_account *acct;
+	struct medut_account *acct;
 	const char             *name;
 	const char             *value;
 	int                     result;
@@ -51,10 +51,10 @@ static void add_hdr_fn(void *arg)
 	list_append(&ctx->acct->custom_hdrs, &ch->le, ch);
 }
 
-int echosdk_account_add_header(echosdk_account_handle_t acct,
+int medut_account_add_header(medut_account_handle_t acct,
                                 const char *name, const char *value)
 {
-	if (!acct || !name || !value) return ECHOSDK_ERR_INVAL;
+	if (!acct || !name || !value) return MEDUT_ERR_INVAL;
 	hdr_ctx_t ctx = {.acct = acct, .name = name, .value = value, .result = 0};
 	int err = bsdk_dispatch_sync(add_hdr_fn, &ctx);
 	return err ? err : ctx.result;
@@ -71,10 +71,10 @@ static void add_reg_hdr_fn(void *arg)
 	ctx->result = ua_add_custom_hdr(ctx->acct->ua, &name_pl, &value_pl);
 }
 
-int echosdk_account_add_register_header(echosdk_account_handle_t acct,
+int medut_account_add_register_header(medut_account_handle_t acct,
                                          const char *name, const char *value)
 {
-	if (!acct || !name || !value) return ECHOSDK_ERR_INVAL;
+	if (!acct || !name || !value) return MEDUT_ERR_INVAL;
 	hdr_ctx_t ctx = {.acct = acct, .name = name, .value = value, .result = 0};
 	int err = bsdk_dispatch_sync(add_reg_hdr_fn, &ctx);
 	return err ? err : ctx.result;

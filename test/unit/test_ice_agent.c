@@ -1,5 +1,5 @@
 /**
- * @file test_ice_agent.c  echo-ice: two agents over a simulated network
+ * @file test_ice_agent.c  medut-ice: two agents over a simulated network
  *
  * Two generations talk through in-memory sockets (udp_alloc_sockless)
  * joined by a simulator that delivers every datagram asynchronously

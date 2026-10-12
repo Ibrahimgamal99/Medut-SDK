@@ -16,11 +16,11 @@
  *            requires the session be activated only from
  *            -provider:didActivateAudioSession:, so a CallKit app passes
  *            false and this function stops after configuring — otherwise
- *            echosdk_init() (at app launch, or on a PushKit wake while
+ *            medut_init() (at app launch, or on a PushKit wake while
  *            CallKit is still reporting the call) would seize the exclusive
  *            PlayAndRecord route out from under CXProvider.
  *
- * Called from echosdk_init() (core.c) after modules_init.  Compiled as OBJC
+ * Called from medut_init() (core.c) after modules_init.  Compiled as OBJC
  * (enabled in the SRC_MODE branch of CMakeLists for iOS/Darwin); AVFoundation
  * is linked by the shared-library step in scripts/build-ios.sh and declared
  * in the Flutter plugin podspec.
@@ -28,7 +28,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #include <errno.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {
@@ -43,7 +43,7 @@ int bsdk_platform_audio_init(bool activate)
 	         withOptions:opts
 	               error:&error];
 	if (error) {
-		warning("EchoSDK/ios: AVAudioSession setCategory: %s\n",
+		warning("Medut/ios: AVAudioSession setCategory: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}
@@ -52,7 +52,7 @@ int bsdk_platform_audio_init(bool activate)
 	 * mic gain appropriate for telephone-quality voice calls. */
 	[session setMode:AVAudioSessionModeVoiceChat error:&error];
 	if (error) {
-		warning("EchoSDK/ios: AVAudioSession setMode: %s\n",
+		warning("Medut/ios: AVAudioSession setMode: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}
@@ -60,14 +60,14 @@ int bsdk_platform_audio_init(bool activate)
 	if (!activate) {
 		/* Category and mode are set; CallKit will activate the session
 		 * from -provider:didActivateAudioSession: when the call starts. */
-		info("EchoSDK/ios: AVAudioSession configured, activation left to "
+		info("Medut/ios: AVAudioSession configured, activation left to "
 		     "the app (platform_audio_activate = false)\n");
 		return 0;
 	}
 
 	[session setActive:YES error:&error];
 	if (error) {
-		warning("EchoSDK/ios: AVAudioSession setActive: %s\n",
+		warning("Medut/ios: AVAudioSession setActive: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}

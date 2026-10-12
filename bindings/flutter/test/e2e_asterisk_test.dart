@@ -1,6 +1,6 @@
 /// End-to-end test against a local Asterisk: registration over UDP **and**
 /// WSS, an echo call with media stats — through the exact code path a
-/// Flutter app uses (real libechosdk, owned events, Dart decode).
+/// Flutter app uses (real libmedut, owned events, Dart decode).
 ///
 /// Server setup (docker, host networking, UDP :5060 + WSS :8089 with a
 /// self-signed cert): see docs/quickstart/flutter.md.
@@ -18,7 +18,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:echo_sdk/echo_sdk.dart';
+import 'package:medut/medut.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<bool> _portOpen(int port) async {
@@ -33,11 +33,11 @@ Future<bool> _portOpen(int port) async {
 }
 
 void main() {
-  final libPath = File('../../dist/linux/x86_64/echosdk.so').absolute.path;
+  final libPath = File('../../dist/linux/x86_64/medut.so').absolute.path;
 
   test('UDP + WSS registration, echo call, media stats', () async {
     if (!Platform.isLinux || !File(libPath).existsSync()) {
-      markTestSkipped('needs dist/linux/x86_64/echosdk.so');
+      markTestSkipped('needs dist/linux/x86_64/medut.so');
       return;
     }
     if (!await _portOpen(8089)) {
@@ -52,8 +52,8 @@ void main() {
         type: InternetAddressType.IPv4, includeLoopback: false);
     final host = ifaces.expand((i) => i.addresses).first.address;
 
-    final sdk = EchoSDK(
-      config: const EchoSDKConfig(
+    final sdk = Medut(
+      config: const MedutConfig(
         logLevel: 1,
         statsIntervalMs: 1000,
         verifyServer: false, // self-signed test cert
@@ -65,8 +65,8 @@ void main() {
     // listen+Completer instead of Stream.first: .first futures proved
     // unreliable under the flutter_test zone setup while plain listeners
     // always fire.
-    Future<T> firstEvent<T extends EchoSDKEvent>(
-        Stream<EchoSDKEvent> stream, bool Function(T) match,
+    Future<T> firstEvent<T extends MedutEvent>(
+        Stream<MedutEvent> stream, bool Function(T) match,
         {Duration timeout = const Duration(seconds: 15)}) {
       final c = Completer<T>();
       late final StreamSubscription sub;

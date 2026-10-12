@@ -13,14 +13,14 @@ DEPS=(
   "baresip|https://github.com/baresip/baresip.git|d5ed26ccff4c884f27061cdf022f18332cda4c9c|CMakeLists.txt"
   "opus|https://github.com/xiph/opus.git|503d81b138d76621aae4b12786e90de48aa8db3a|CMakeLists.txt"
 )
-if [[ "${ECHOSDK_TLS:-openssl}" == "mbedtls" ]]; then
+if [[ "${MEDUT_TLS:-openssl}" == "mbedtls" ]]; then
   DEPS+=("mbedtls|https://github.com/Mbed-TLS/mbedtls.git|2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9|CMakeLists.txt")
 fi
 # OpenSSL sources are only needed where there is no system OpenSSL to link
 # against — i.e. cross-compiled targets like Android. Desktop builds keep
 # using the platform's own libssl/libcrypto, so they skip this clone.
 # (openssl-3.5.7, an LTS release.)
-if [[ "${ECHOSDK_OPENSSL_SRC:-0}" == "1" ]]; then
+if [[ "${MEDUT_OPENSSL_SRC:-0}" == "1" ]]; then
   DEPS+=("openssl|https://github.com/openssl/openssl.git|8cf17aaeb4599f8af87fefd810b5b5fee90fe69e|Configure")
 fi
 
@@ -31,7 +31,7 @@ for dep in "${DEPS[@]}"; do
   # A tree that is already here must also be at the pinned revision: a pin
   # bump used to leave every existing checkout on the old one, building
   # sources nobody had reviewed.  Moving it uses checkout -f, which drops the
-  # EchoSDK patches the build applied (it re-applies them: the patch steps
+  # Medut patches the build applied (it re-applies them: the patch steps
   # depend on .git/HEAD) — and also any hand edits under third_party/.
   if [[ -f "${dir}/${marker}" ]]; then
     have=$(git -C "${dir}" rev-parse HEAD 2>/dev/null || true)

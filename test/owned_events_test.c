@@ -3,7 +3,7 @@
  *
  * Proves the owned-event contract: events handed to the callback remain
  * valid (struct + strings) after the callback returns, until
- * echosdk_event_release() — even when released from a different thread.
+ * medut_event_release() — even when released from a different thread.
  *
  * No SIP server needed: registration against a black-hole address produces
  * REG_STATE(RECONNECTING/FAILED) events with error_str strings, plus LOG
@@ -12,7 +12,7 @@
  * Build (from repo root, after scripts/build-linux.sh):
  *   gcc -fsanitize=address -g -O1 -std=gnu11 \
  *       -Iinclude test/owned_events_test.c \
- *       -Wl,--whole-archive dist/linux/x86_64/echosdk.a -Wl,--no-whole-archive \
+ *       -Wl,--whole-archive dist/linux/x86_64/medut.a -Wl,--no-whole-archive \
  *       -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl -lstdc++ -lpulse \
  *       -o test/owned_events_test && ./test/owned_events_test
  *
@@ -25,12 +25,12 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 #define MAX_EVENTS 4096
 
 /* Events stashed by the callback, released later by the consumer thread. */
-static const echosdk_event_t *g_stash[MAX_EVENTS];
+static const medut_event_t *g_stash[MAX_EVENTS];
 static atomic_int  g_head = 0;   /* next slot the callback writes   */
 static atomic_int  g_tail = 0;   /* next slot the consumer releases */
 static atomic_int  g_reg_failed_seen = 0;
@@ -39,12 +39,12 @@ static atomic_bool g_stop = false;
 
 static bool g_owned_mode = true;   /* run with argv[1]=="borrowed" to compare */
 
-static void event_cb(const echosdk_event_t *ev, void *ud)
+static void event_cb(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 	if (!g_owned_mode) {
 		/* borrowed mode: touch strings inline only (legacy contract) */
-		if (ev->type == ECHOSDK_EV_LOG && ev->u.log.message)
+		if (ev->type == MEDUT_EV_LOG && ev->u.log.message)
 			(void)strlen(ev->u.log.message);
 		atomic_fetch_add(&g_head, 1);
 		atomic_fetch_add(&g_tail, 1);
@@ -53,7 +53,7 @@ static void event_cb(const echosdk_event_t *ev, void *ud)
 	int slot = atomic_fetch_add(&g_head, 1);
 	if (slot >= MAX_EVENTS) {
 		/* overflow — release inline so we don't leak */
-		echosdk_event_release(ev);
+		medut_event_release(ev);
 		return;
 	}
 	g_stash[slot] = ev;   /* keep the pointer PAST callback return */
@@ -78,26 +78,26 @@ static void *consumer_fn(void *arg)
 		/* Deliberate lag so the C side has long since "moved on". */
 		usleep(5000);
 
-		const echosdk_event_t *ev = g_stash[tail];
+		const medut_event_t *ev = g_stash[tail];
 		switch (ev->type) {
-		case ECHOSDK_EV_LOG:
+		case MEDUT_EV_LOG:
 			/* Touch every byte — ASAN catches use-after-free. */
 			if (ev->u.log.message)
 				(void)strlen(ev->u.log.message);
 			atomic_store(&g_log_seen, 1);
 			break;
-		case ECHOSDK_EV_REG_STATE:
+		case MEDUT_EV_REG_STATE:
 			/* A black-hole registrar times out, and a timeout with a
 			 * retry armed is reported as RECONNECTING — the string this
 			 * test is about rides on either one. */
-			if (ev->u.reg.state == ECHOSDK_REG_FAILED ||
-			    ev->u.reg.state == ECHOSDK_REG_RECONNECTING) {
+			if (ev->u.reg.state == MEDUT_REG_FAILED ||
+			    ev->u.reg.state == MEDUT_REG_RECONNECTING) {
 				if (ev->u.reg.error_str)
 					(void)strlen(ev->u.reg.error_str);
 				atomic_store(&g_reg_failed_seen, 1);
 			}
 			break;
-		case ECHOSDK_EV_SIP_TRACE:
+		case MEDUT_EV_SIP_TRACE:
 			if (ev->u.sip_trace.raw_message)
 				(void)strlen(ev->u.sip_trace.raw_message);
 			if (ev->u.sip_trace.transport)
@@ -106,7 +106,7 @@ static void *consumer_fn(void *arg)
 		default:
 			break;
 		}
-		echosdk_event_release(ev);
+		medut_event_release(ev);
 		atomic_store(&g_tail, tail + 1);
 	}
 	return NULL;
@@ -117,17 +117,17 @@ int main(int argc, char **argv)
 	if (argc > 1 && strcmp(argv[1], "borrowed") == 0)
 		g_owned_mode = false;
 
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 	cfg.log_level            = 3;      /* max LOG event volume */
 	cfg.trace_sip            = true;   /* SIP_TRACE events too */
 	cfg.event_cb             = event_cb;
 	cfg.deliver_owned_events = g_owned_mode;
 	cfg.net_monitor_interval_s = 0;
 
-	int err = echosdk_init(&cfg);
+	int err = medut_init(&cfg);
 	if (err) {
-		fprintf(stderr, "FAIL: echosdk_init: %d\n", err);
+		fprintf(stderr, "FAIL: medut_init: %d\n", err);
 		return 1;
 	}
 
@@ -136,27 +136,27 @@ int main(int argc, char **argv)
 
 	/* Register against a black-hole (TEST-NET-1) — guaranteed failure path
 	 * with short SIP timers so retries generate a stream of events. */
-	echosdk_account_config_t acfg;
+	medut_account_config_t acfg;
 	memset(&acfg, 0, sizeof(acfg));
 	acfg.uri       = "alice@192.0.2.1:5060";
 	acfg.password  = "secret";
-	acfg.transport = ECHOSDK_TRANSPORT_UDP;
+	acfg.transport = MEDUT_TRANSPORT_UDP;
 
-	echosdk_account_handle_t acct = NULL;
-	err = echosdk_account_create(&acfg, &acct);
+	medut_account_handle_t acct = NULL;
+	err = medut_account_create(&acfg, &acct);
 	if (err) {
 		fprintf(stderr, "FAIL: account_create: %d\n", err);
 		return 1;
 	}
-	echosdk_account_set_retry_policy(acct, 200, 1000, 1.5f, 0);
-	echosdk_account_register(acct);
+	medut_account_set_retry_policy(acct, 200, 1000, 1.5f, 0);
+	medut_account_register(acct);
 
 	/* Let events flow for a while (registration timeout is timer-B bound;
 	 * LOG/TRACE events arrive immediately). */
 	sleep(8);
 
-	echosdk_account_destroy(acct);
-	echosdk_shutdown();
+	medut_account_destroy(acct);
+	medut_shutdown();
 
 	/* Drain what's left, then stop the consumer. */
 	atomic_store(&g_stop, true);

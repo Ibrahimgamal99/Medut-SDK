@@ -17,7 +17,7 @@
  * each).  One SIP hostname costs two slots (A + AAAA in flight together), so
  * two accounts registering at once filled the pool, and every API call
  * behind them — register(), answer(), hangup(), the lot — queued until a
- * resolve returned.  Measured: 4 busy workers held echosdk_account_register()
+ * resolve returned.  Measured: 4 busy workers held medut_account_register()
  * off the wire for 3.0 s; 8 for 6.0 s.  The sync variants block the caller,
  * which for the Flutter binding is the UI isolate.
  *
@@ -33,12 +33,12 @@
  *
  * Lifetime: bsdk_dispatch_init() runs before the re thread starts and
  * bsdk_dispatch_close() after it has joined (both from re_loop.c).  A call
- * that arrives once the queue is gone gets ECHOSDK_ERR_STATE instead of a
+ * that arrives once the queue is gone gets MEDUT_ERR_STATE instead of a
  * push into a pipe nobody drains — which for the sync variant would have
  * been a cnd_wait() that never returns.
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* mqueue message ids: which struct `data` points at. */
 enum {
@@ -89,7 +89,7 @@ static void dispatch_mq_handler(int id, void *data, void *arg)
 	}
 
 	default:
-		warning("EchoSDK/dispatch: unknown mqueue id %d\n", id);
+		warning("Medut/dispatch: unknown mqueue id %d\n", id);
 		break;
 	}
 }
@@ -112,11 +112,11 @@ int bsdk_dispatch(bsdk_main_fn fn, void *arg)
 	int err;
 
 	if (!g_bsdk.initialized || !g_bsdk.dispatch_mq)
-		return ECHOSDK_ERR_STATE;
+		return MEDUT_ERR_STATE;
 
 	ctx = mem_alloc(sizeof(*ctx), NULL);
 	if (!ctx)
-		return ECHOSDK_ERR_NOMEM;
+		return MEDUT_ERR_NOMEM;
 
 	ctx->fn  = fn;
 	ctx->arg = arg;
@@ -133,13 +133,13 @@ int bsdk_dispatch_sync(bsdk_main_fn fn, void *arg)
 	int err;
 
 	if (!g_bsdk.initialized)
-		return ECHOSDK_ERR_STATE;
+		return MEDUT_ERR_STATE;
 
 	/* Already on the re-loop thread (e.g. called from a timer or netmon
 	 * handler): run inline — blocking here would deadlock the loop that
 	 * must execute the callback.  Compare against our own spawned thread:
 	 * re_thread_check() is NOT usable here because re->tid is stamped by
-	 * libre_init(), which runs on the app thread in echosdk_init(). */
+	 * libre_init(), which runs on the app thread in medut_init(). */
 	if (g_bsdk.re_thread_running &&
 	    thrd_equal(g_bsdk.re_thread, thrd_current())) {
 		fn(arg);
@@ -147,7 +147,7 @@ int bsdk_dispatch_sync(bsdk_main_fn fn, void *arg)
 	}
 
 	if (!g_bsdk.dispatch_mq)
-		return ECHOSDK_ERR_STATE;
+		return MEDUT_ERR_STATE;
 
 	ctx.fn       = fn;
 	ctx.arg      = arg;

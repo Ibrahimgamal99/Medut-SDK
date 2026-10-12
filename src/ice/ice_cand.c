@@ -1,5 +1,5 @@
 /**
- * @file ice_cand.c  echo-ice: candidates
+ * @file ice_cand.c  medut-ice: candidates
  *
  * Priorities follow RFC 8445 §5.1.2 through libre's ice_cand_calc_prio():
  * type preference (host 126 › prflx 110 › srflx 100 › relay 0) in the top

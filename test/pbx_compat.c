@@ -41,15 +41,15 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 /* ── Global state ────────────────────────────────────────────────────────── */
 
 typedef enum { PBX_3CX, PBX_FREESWITCH, PBX_KAMAILIO } pbx_flavor_t;
 
 static pbx_flavor_t              g_flavor;
-static echosdk_account_handle_t  g_acct   = NULL;
-static echosdk_call_handle_t     g_call   = NULL;
+static medut_account_handle_t  g_acct   = NULL;
+static medut_call_handle_t     g_call   = NULL;
 static const char               *g_peer   = NULL;
 static int                       g_timeout_s = 30;
 
@@ -102,7 +102,7 @@ static void reset_call_state(void)
 
 /* ── Media tap ───────────────────────────────────────────────────────────── */
 
-static void tap_cb(echosdk_call_handle_t call, echosdk_media_dir_t dir,
+static void tap_cb(medut_call_handle_t call, medut_media_dir_t dir,
                     const int16_t *pcm, size_t samples,
                     uint32_t rate, uint8_t ch, uint64_t ts, void *ud)
 {
@@ -113,34 +113,34 @@ static void tap_cb(echosdk_call_handle_t call, echosdk_media_dir_t dir,
 
 /* ── Event handler ───────────────────────────────────────────────────────── */
 
-static void event_handler(const echosdk_event_t *ev, void *ud)
+static void event_handler(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 	switch (ev->type) {
 
-	case ECHOSDK_EV_REG_STATE:
-		if (ev->u.reg.state == ECHOSDK_REG_REGISTERED)
+	case MEDUT_EV_REG_STATE:
+		if (ev->u.reg.state == MEDUT_REG_REGISTERED)
 			atomic_store(&g_registered, 1);
 		/* RECONNECTING too: a registration that needs retrying has not
 		 * come up, and this test has nothing to wait for. */
-		else if (ev->u.reg.state == ECHOSDK_REG_FAILED ||
-		         ev->u.reg.state == ECHOSDK_REG_RECONNECTING)
+		else if (ev->u.reg.state == MEDUT_REG_FAILED ||
+		         ev->u.reg.state == MEDUT_REG_RECONNECTING)
 			atomic_store(&g_failed, 1);
 		break;
 
-	case ECHOSDK_EV_CALL_STATE:
+	case MEDUT_EV_CALL_STATE:
 		switch (ev->u.call_state.state) {
-		case ECHOSDK_CALL_ESTABLISHED:
+		case MEDUT_CALL_ESTABLISHED:
 			g_call = ev->u.call_state.call;
 			atomic_store(&g_established, 1);
 			break;
-		case ECHOSDK_CALL_HELD:
+		case MEDUT_CALL_HELD:
 			atomic_store(&g_held, 1);
 			break;
-		case ECHOSDK_CALL_ENDED:
+		case MEDUT_CALL_ENDED:
 			atomic_store(&g_call_ended, 1);
 			break;
-		case ECHOSDK_CALL_FAILED:
+		case MEDUT_CALL_FAILED:
 			atomic_store(&g_call_ended, 1);
 			break;
 		default:
@@ -148,19 +148,19 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 		}
 		break;
 
-	case ECHOSDK_EV_CALL_DTMF:
+	case MEDUT_EV_CALL_DTMF:
 		atomic_store(&g_dtmf_ack, 1);
 		break;
 
-	case ECHOSDK_EV_TRANSFER_REQUEST:
+	case MEDUT_EV_TRANSFER_REQUEST:
 		atomic_store(&g_transfer_req, 1);
 		break;
 
-	case ECHOSDK_EV_MESSAGE:
+	case MEDUT_EV_MESSAGE:
 		atomic_store(&g_message_rx, 1);
 		break;
 
-	case ECHOSDK_EV_PRESENCE_STATE:
+	case MEDUT_EV_PRESENCE_STATE:
 		atomic_store(&g_presence_ev, 1);
 		break;
 
@@ -186,19 +186,19 @@ static void s2_call_and_tap(void)
 	reset_call_state();
 	atomic_store(&g_tap_frames, 0);
 
-	echosdk_call_handle_t call = NULL;
-	int err = echosdk_call_invite(g_acct, g_peer, &call);
+	medut_call_handle_t call = NULL;
+	int err = medut_call_invite(g_acct, g_peer, &call);
 	if (err) { FAIL("invite failed"); return; }
 
 	if (wait_for(&g_established, g_timeout_s) != 0)
-		{ FAIL("call not established"); echosdk_call_hangup(call); return; }
+		{ FAIL("call not established"); medut_call_hangup(call); return; }
 
 	/* Install tap, wait for frames */
-	echosdk_call_set_media_tap(call, tap_cb, NULL);
+	medut_call_set_media_tap(call, tap_cb, NULL);
 	usleep(500000); /* 500 ms */
 
 	int frames = atomic_load(&g_tap_frames);
-	echosdk_call_hangup(call);
+	medut_call_hangup(call);
 	wait_for(&g_call_ended, 5);
 
 	if (frames < 10)
@@ -212,16 +212,16 @@ static void s3_dtmf(void)
 	SCENARIO("DTMF via RTP events");
 	reset_call_state();
 
-	echosdk_call_handle_t call = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &call) != 0)
+	medut_call_handle_t call = NULL;
+	if (medut_call_invite(g_acct, g_peer, &call) != 0)
 		{ FAIL("invite failed"); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
-		{ FAIL("not established"); echosdk_call_hangup(call); return; }
+		{ FAIL("not established"); medut_call_hangup(call); return; }
 
 	atomic_store(&g_dtmf_ack, 0);
-	echosdk_call_send_dtmf(call, '5');
+	medut_call_send_dtmf(call, '5');
 	usleep(200000); /* DTMF events are local; just verify no crash */
-	echosdk_call_hangup(call);
+	medut_call_hangup(call);
 	wait_for(&g_call_ended, 5);
 	PASS();
 }
@@ -231,23 +231,23 @@ static void s4_hold_resume(void)
 	SCENARIO("Hold / resume");
 	reset_call_state();
 
-	echosdk_call_handle_t call = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &call) != 0)
+	medut_call_handle_t call = NULL;
+	if (medut_call_invite(g_acct, g_peer, &call) != 0)
 		{ FAIL("invite failed"); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
-		{ FAIL("not established"); echosdk_call_hangup(call); return; }
+		{ FAIL("not established"); medut_call_hangup(call); return; }
 
-	echosdk_call_hold(call);
+	medut_call_hold(call);
 	if (wait_for(&g_held, 5) != 0)
-		{ FAIL("hold not confirmed"); echosdk_call_hangup(call); return; }
+		{ FAIL("hold not confirmed"); medut_call_hangup(call); return; }
 
-	echosdk_call_resume(call);
+	medut_call_resume(call);
 	/* resume fires ESTABLISHED again — reuse g_established flag */
 	atomic_store(&g_established, 0);
 	if (wait_for(&g_established, 5) != 0)
-		{ FAIL("resume not confirmed"); echosdk_call_hangup(call); return; }
+		{ FAIL("resume not confirmed"); medut_call_hangup(call); return; }
 
-	echosdk_call_hangup(call);
+	medut_call_hangup(call);
 	wait_for(&g_call_ended, 5);
 	PASS();
 }
@@ -257,16 +257,16 @@ static void s5_blind_transfer(void)
 	SCENARIO("Blind transfer (REFER)");
 	reset_call_state();
 
-	echosdk_call_handle_t call = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &call) != 0)
+	medut_call_handle_t call = NULL;
+	if (medut_call_invite(g_acct, g_peer, &call) != 0)
 		{ FAIL("invite failed"); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
-		{ FAIL("not established"); echosdk_call_hangup(call); return; }
+		{ FAIL("not established"); medut_call_hangup(call); return; }
 
 	/* Transfer to self — PBX should accept and reply 202 */
-	echosdk_call_transfer(call, g_peer);
+	medut_call_transfer(call, g_peer);
 	usleep(300000);
-	echosdk_call_hangup(call);
+	medut_call_hangup(call);
 	wait_for(&g_call_ended, 5);
 	PASS();
 }
@@ -275,8 +275,8 @@ static void s6_message(void)
 {
 	SCENARIO("SIP MESSAGE");
 	atomic_store(&g_message_rx, 0);
-	int err = echosdk_message_send(g_acct, g_peer,
-	                               "Hello from EchoSDK", NULL);
+	int err = medut_message_send(g_acct, g_peer,
+	                               "Hello from Medut", NULL);
 	if (err) { FAIL("message_send failed"); return; }
 	/* We don't loop back in this test — just verify no error on send */
 	PASS();
@@ -285,26 +285,26 @@ static void s6_message(void)
 static void s7_100rel(void)
 {
 	SCENARIO("100rel / PRACK (FreeSWITCH)");
-	echosdk_account_set_100rel(g_acct, ECHOSDK_100REL_REQUIRED);
+	medut_account_set_100rel(g_acct, MEDUT_100REL_REQUIRED);
 	reset_call_state();
 
-	echosdk_call_handle_t call = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &call) != 0)
+	medut_call_handle_t call = NULL;
+	if (medut_call_invite(g_acct, g_peer, &call) != 0)
 		{ FAIL("invite failed"); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
 		{ FAIL("not established (100rel rejected?)"); return; }
 
-	echosdk_call_hangup(call);
+	medut_call_hangup(call);
 	wait_for(&g_call_ended, 5);
-	echosdk_account_set_100rel(g_acct, ECHOSDK_100REL_ENABLED);
+	medut_account_set_100rel(g_acct, MEDUT_100REL_ENABLED);
 	PASS();
 }
 
 static void s8_presence(void)
 {
 	SCENARIO("Presence PUBLISH (Kamailio)");
-	int err = echosdk_account_publish_presence(g_acct,
-	                                            ECHOSDK_PRESENCE_OPEN);
+	int err = medut_account_publish_presence(g_acct,
+	                                            MEDUT_PRESENCE_OPEN);
 	if (err) { FAIL("publish failed"); return; }
 	usleep(200000);
 	PASS();
@@ -316,37 +316,37 @@ static void s9_attended_transfer(void)
 	reset_call_state();
 
 	/* Leg A */
-	echosdk_call_handle_t leg_a = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &leg_a) != 0)
+	medut_call_handle_t leg_a = NULL;
+	if (medut_call_invite(g_acct, g_peer, &leg_a) != 0)
 		{ FAIL("leg_a invite failed"); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
-		{ FAIL("leg_a not established"); echosdk_call_hangup(leg_a); return; }
+		{ FAIL("leg_a not established"); medut_call_hangup(leg_a); return; }
 
-	echosdk_call_hold(leg_a);
+	medut_call_hold(leg_a);
 	if (wait_for(&g_held, 5) != 0)
-		{ FAIL("leg_a hold failed"); echosdk_call_hangup(leg_a); return; }
+		{ FAIL("leg_a hold failed"); medut_call_hangup(leg_a); return; }
 
 	/* Leg B (consultation) */
 	atomic_store(&g_established, 0);
-	echosdk_call_handle_t leg_b = NULL;
-	if (echosdk_call_invite(g_acct, g_peer, &leg_b) != 0)
-		{ FAIL("leg_b invite failed"); echosdk_call_hangup(leg_a); return; }
+	medut_call_handle_t leg_b = NULL;
+	if (medut_call_invite(g_acct, g_peer, &leg_b) != 0)
+		{ FAIL("leg_b invite failed"); medut_call_hangup(leg_a); return; }
 	if (wait_for(&g_established, g_timeout_s) != 0)
 		{ FAIL("leg_b not established"); goto cleanup; }
 
 	/* Attended transfer */
-	int err = echosdk_call_attended_transfer(leg_a, leg_b);
+	int err = medut_call_attended_transfer(leg_a, leg_b);
 	if (err) { FAIL("attended_transfer failed"); goto cleanup; }
 
 	usleep(500000);
 	PASS();
-	echosdk_call_hangup(leg_b);
+	medut_call_hangup(leg_b);
 	wait_for(&g_call_ended, 5);
 	return;
 
 cleanup:
-	echosdk_call_hangup(leg_a);
-	echosdk_call_hangup(leg_b);
+	medut_call_hangup(leg_a);
+	medut_call_hangup(leg_b);
 	wait_for(&g_call_ended, 5);
 }
 
@@ -383,20 +383,20 @@ int main(int argc, char *argv[])
 	else if (!strcmp(pbx_str, "kamailio"))   g_flavor = PBX_KAMAILIO;
 	else { fprintf(stderr, "Unknown PBX: %s\n", pbx_str); return 1; }
 
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 	cfg.event_cb   = event_handler;
 	cfg.server_url = server;
 	cfg.log_level  = 0;
 
-	int err = echosdk_init(&cfg);
-	if (err) { fprintf(stderr, "echosdk_init: %d\n", err); return 1; }
+	int err = medut_init(&cfg);
+	if (err) { fprintf(stderr, "medut_init: %d\n", err); return 1; }
 
-	echosdk_account_config_t acfg = {.aor = user, .auth_pass = pass};
-	err = echosdk_account_create(&acfg, &g_acct);
+	medut_account_config_t acfg = {.aor = user, .auth_pass = pass};
+	err = medut_account_create(&acfg, &g_acct);
 	if (err) { fprintf(stderr, "account_create: %d\n", err); goto done; }
 
-	echosdk_account_register(g_acct);
+	medut_account_register(g_acct);
 
 	/* ── Run scenarios ── */
 	printf("PBX compat: %s  server=%s  peer=%s\n\n", pbx_str, server, g_peer);
@@ -420,7 +420,7 @@ done:
 	       g_scenarios_passed, g_scenarios_run);
 	printf("════════════════════════════════\n");
 
-	echosdk_shutdown();
+	medut_shutdown();
 	return (g_scenarios_passed == g_scenarios_run && !atomic_load(&g_failed))
 	       ? 0 : 1;
 }

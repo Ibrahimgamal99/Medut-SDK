@@ -1,5 +1,5 @@
 /**
- * @file test_ice_sdp.c  echo-ice: candidate and SDP grammar round-trips
+ * @file test_ice_sdp.c  medut-ice: candidate and SDP grammar round-trips
  *
  * Links the engine files against libre only.  The remote SDP bodies are
  * real: the Asterisk/FreePBX answer is the one captured on 2026-09-15

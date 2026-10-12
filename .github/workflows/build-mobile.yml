@@ -19,7 +19,7 @@ jobs:
   # vendor something that cannot link.
   ios:
     runs-on: macos-14
-    name: iOS · EchoSDK.xcframework + example app
+    name: iOS · Medut.xcframework + example app
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-xcframework
-          path: dist/ios/EchoSDK.xcframework/
+          path: dist/ios/Medut.xcframework/
           if-no-files-found: error
 
       - uses: subosito/flutter-action@v2
@@ -39,7 +39,7 @@ jobs:
           cache: true
 
       # build-ios.sh stages the xcframework into bindings/flutter/ios/Frameworks,
-      # which is what echo_sdk.podspec vendors — so `pod install` resolves here
+      # which is what medut.podspec vendors — so `pod install` resolves here
       # and its prepare_command guard passes. No signing identity on CI.
       - name: Build example app (no codesign)
         working-directory: bindings/flutter/example
@@ -48,8 +48,8 @@ jobs:
           flutter build ios --debug --no-codesign
 
   # ── Dart binding: analyzer + tests against a real native build ───────────
-  # The native library is built first so test/echo_sdk_smoke_test.dart actually
-  # runs. It self-skips when dist/linux/x86_64/echosdk.so is missing, so
+  # The native library is built first so test/medut_smoke_test.dart actually
+  # runs. It self-skips when dist/linux/x86_64/medut.so is missing, so
   # without this the job passed while executing nothing.
   dart:
     runs-on: ubuntu-22.04
@@ -69,12 +69,12 @@ jobs:
       - name: Build native library
         run: bash scripts/build-linux.sh
         env:
-          ECHOSDK_WITH_WEBRTC_AEC: 'OFF'
+          MEDUT_WITH_WEBRTC_AEC: 'OFF'
 
       # Guards against silently going back to a vacuous test run. The smoke
       # test resolves this same path relative to bindings/flutter.
       - name: Assert the tests have a library to load
-        run: test -f dist/linux/x86_64/echosdk.so
+        run: test -f dist/linux/x86_64/medut.so
 
       - uses: subosito/flutter-action@v2
         with:

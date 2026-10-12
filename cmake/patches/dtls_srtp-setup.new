@@ -1,5 +1,5 @@
 	/* RFC 4145 */
-	/* EchoSDK-patched: the answerer takes the passive DTLS role.
+	/* Medut-patched: the answerer takes the passive DTLS role.
 	 *
 	 * RFC 5763 s5 lets the answerer pick either role when the offer says
 	 * `actpass`, and upstream picks `active` — which makes us the side that

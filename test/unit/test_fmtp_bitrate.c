@@ -13,7 +13,7 @@
  * its own previous output.  A parameter dropped, duplicated or corrupted here
  * silently changes how audio is encoded, which is why it gets its own test.
  *
- * Links src/adapt.c against libre only.  The baresip and EchoSDK symbols the
+ * Links src/adapt.c against libre only.  The baresip and Medut symbols the
  * rest of that file references are stubbed below: pulling in libbaresip would
  * drag every audio backend the sysroot happens to have been built with.
  */
@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 static int g_pass, g_fail;
 
@@ -38,8 +38,8 @@ static int g_pass, g_fail;
 struct bsdk_ctx g_bsdk;
 int32_t opus_packet_loss;   /* modules/opus/opus.c */
 
-void bsdk_post_quality_alert(struct echosdk_call *lc,
-                             echosdk_quality_issue_t issue,
+void bsdk_post_quality_alert(struct medut_call *lc,
+                             medut_quality_issue_t issue,
                              float value, float threshold, bool recovering)
 {
 	(void)lc; (void)issue; (void)value; (void)threshold; (void)recovering;
@@ -82,7 +82,7 @@ struct list *call_streaml(const struct call *call)
 }
 bool stream_is_secure(const struct stream *strm) { (void)strm; return true; }
 bool bsdk_ice_setup_pending(void *call) { (void)call; return false; }
-void bsdk_netmon_call_stalled(struct echosdk_call *lc) { (void)lc; }
+void bsdk_netmon_call_stalled(struct medut_call *lc) { (void)lc; }
 
 /* baresip's info() macro expands to this; its implementation lives in
  * libbaresip's log.c, which the test deliberately does not link. */

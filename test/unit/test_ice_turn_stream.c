@@ -1,5 +1,5 @@
 /**
- * @file test_ice_turn_stream.c  echo-ice: TURN over TCP/TLS stream framing
+ * @file test_ice_turn_stream.c  medut-ice: TURN over TCP/TLS stream framing
  *
  * icea_turn_stream_frames() reassembles RFC 5766 §11.5 framing off a byte
  * stream: STUN messages and ChannelData frames back to back, ChannelData

@@ -3,7 +3,7 @@
 		enum setup rsetup = setup_decode(setup);
 		bool active;
 
-		/* EchoSDK-patched: keep the role we take and the role we
+		/* Medut-patched: keep the role we take and the role we
 		 * advertise in step, now that the answerer advertises `passive`
 		 * (session_alloc).
 		 *
@@ -29,7 +29,7 @@
 				return err;
 		}
 
-		/* EchoSDK-patched: a re-negotiation that reverses the DTLS role
+		/* Medut-patched: a re-negotiation that reverses the DTLS role
 		 * has to restart the association.  media_start() latches
 		 * `started` and never clears it, so without this the new role
 		 * is recorded and then ignored: we go on waiting in the old
@@ -41,7 +41,7 @@
 			     sdp_media_name(st->sdpm),
 			     st->active ? "client" : "server",
 			     active ? "client" : "server");
-			echosdk_media_reset(st);
+			medut_media_reset(st);
 		}
 
 		st->active = active;

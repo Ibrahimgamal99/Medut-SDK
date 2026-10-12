@@ -1,5 +1,5 @@
 /**
- * @file ice_sdp.c  echo-ice: SDP grammar (RFC 8839)
+ * @file ice_sdp.c  medut-ice: SDP grammar (RFC 8839)
  *
  * Writes a=ice-ufrag / a=ice-pwd at session level, one a=candidate per local
  * candidate, a=remote-candidates once we are controlling and concluded, and

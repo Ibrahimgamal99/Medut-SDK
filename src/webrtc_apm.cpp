@@ -10,7 +10,7 @@
  *  - AudioProcessing::Config must never be default-constructed here: its
  *    inline constructor calls the out-of-line Pipeline::Pipeline(), which
  *    the shim does not provide.  GetConfig() hands back a copy instead.
- *  - Do not include re or echosdk headers: RE_ATOMIC picks its C11 branch
+ *  - Do not include re or medut headers: RE_ATOMIC picks its C11 branch
  *    from __STDC_VERSION__, which C++ does not define.
  */
 

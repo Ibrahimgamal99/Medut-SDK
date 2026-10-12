@@ -19,16 +19,16 @@ sudo pacman -S webrtc-audio-processing
 
 Everything else (`libssl`, `libz`, `libpulse`, …) is already on every desktop Linux.
 
-> **Missing library at import time?** EchoSDK raises `ImportError` with the exact
+> **Missing library at import time?** Medut raises `ImportError` with the exact
 > install command for your distro — you don't need to remember the package name.
 
 ### Windows
 
 No extra installs needed. OpenSSL, zlib, and opus are all statically embedded in
-`echosdk.dll`. The only requirement is the **Visual C++ Redistributable (2015–2022)**,
+`medut.dll`. The only requirement is the **Visual C++ Redistributable (2015–2022)**,
 which ships with Windows, Visual Studio, and most apps — it is almost never missing.
 
-If you do hit a `vcruntime140.dll` error at import time, EchoSDK will tell you:
+If you do hit a `vcruntime140.dll` error at import time, Medut will tell you:
 
 ```
 winget install Microsoft.VCRedist.2022.x64
@@ -46,11 +46,11 @@ bash bindings/python/build.sh
 
 This does everything in one step:
 1. Builds the SDK if the `.so` is missing
-2. Regenerates `_echosdk_clean.h` from `include/echosdk.h` so the binding stays in sync
+2. Regenerates `_medut_clean.h` from `include/medut.h` so the binding stays in sync
 3. Copies the `.so` into the package directory — no `LD_LIBRARY_PATH` needed
 4. Installs the Python package (`pip install -e`)
 
-Re-run `build.sh` whenever `include/echosdk.h` or the C source changes.
+Re-run `build.sh` whenever `include/medut.h` or the C source changes.
 
 ### Windows
 
@@ -59,7 +59,7 @@ Re-run `build.sh` whenever `include/echosdk.h` or the C source changes.
 ```
 
 This does the same steps as `build.sh` but for Windows:
-1. Builds `echosdk.dll` via `scripts\build-windows.ps1` if missing
+1. Builds `medut.dll` via `scripts\build-windows.ps1` if missing
 2. Copies the DLL into the package directory
 3. Installs the Python package (`pip install -e`)
 
@@ -73,10 +73,10 @@ Build the shared library for your platform:
 
 | Platform | Command | Output |
 |---|---|---|
-| Linux | `bash scripts/build-linux.sh` | `dist/linux/x86_64/echosdk.so` |
-| macOS | `bash scripts/build-macos.sh` | `dist/macos/universal/echosdk.dylib` |
-| Windows | `.\scripts\build-windows.ps1` | `dist\windows\x64\echosdk.dll` |
-| Android | `bash scripts/build-android.sh` | `dist/android/<ABI>/echosdk.so` |
+| Linux | `bash scripts/build-linux.sh` | `dist/linux/x86_64/medut.so` |
+| macOS | `bash scripts/build-macos.sh` | `dist/macos/universal/medut.dylib` |
+| Windows | `.\scripts\build-windows.ps1` | `dist\windows\x64\medut.dll` |
+| Android | `bash scripts/build-android.sh` | `dist/android/<ABI>/medut.so` |
 
 Then install the package:
 
@@ -92,7 +92,7 @@ The loader searches for the library in this order:
 
 | Priority | Source |
 |---|---|
-| 1 | `ECHOSDK_LIB` env var — absolute path to the `.so`/`.dylib`/`.dll` |
+| 1 | `MEDUT_LIB` env var — absolute path to the `.so`/`.dylib`/`.dll` |
 | 2 | `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` directories |
 | 3 | Package directory — the `.so` copied there by `build.sh` |
 | 4 | Repo `dist/` directory — works from a source checkout |
@@ -100,7 +100,7 @@ The loader searches for the library in this order:
 
 To pin a specific build:
 ```bash
-export ECHOSDK_LIB=/abs/path/to/echosdk.so
+export MEDUT_LIB=/abs/path/to/medut.so
 # or
 export LD_LIBRARY_PATH=/abs/path/to/dir:$LD_LIBRARY_PATH
 ```
@@ -110,7 +110,7 @@ export LD_LIBRARY_PATH=/abs/path/to/dir:$LD_LIBRARY_PATH
 ## Register and wait for a call
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 sdk.configure(log_level=1)
 account = sdk.create_account("alice@pbx.example.com", "secret")
@@ -137,7 +137,7 @@ sdk.run()
 ## Make an outgoing call
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 sdk.configure(log_level=1, stats_interval_ms=5000)
 account = sdk.create_account("alice@pbx.example.com", "secret", transport="tls")
@@ -163,7 +163,7 @@ sdk.run()
 ## Custom TLS + ICE
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 sdk.configure(log_level=2, verify_server=True)
 account = sdk.create_account("alice@pbx.example.com", "secret",
@@ -258,7 +258,7 @@ Range: −20 to +20 dB. `0.0` = unity — fast-path bypass with no per-sample wo
 Takes effect within one audio frame (~20 ms), safe to call from any thread.
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 # Boost a quiet USB mic by 6 dB (≈ 2× amplitude):
 sdk.set_mic_gain(6.0)
@@ -303,7 +303,7 @@ For true acoustic echo cancellation where both parties can speak simultaneously:
 
 ```python
 # At init time — configure before first create_account():
-sdk.configure(aec_mode=2)   # 2 = WEBRTC; requires ECHOSDK_WITH_WEBRTC_AEC=ON build
+sdk.configure(aec_mode=2)   # 2 = WEBRTC; requires MEDUT_WITH_WEBRTC_AEC=ON build
 
 # At runtime — only off ↔ init_mode transitions are valid:
 sdk.set_aec(False)   # pause
@@ -311,7 +311,7 @@ sdk.set_aec(True)    # resume WebRTC AEC
 ```
 
 **Requires:**
-1. Build with: `cmake -DECHOSDK_WITH_WEBRTC_AEC=ON ...`
+1. Build with: `cmake -DMEDUT_WITH_WEBRTC_AEC=ON ...`
 2. System library: `libwebrtc-audio-processing-1-dev` (Debian/Ubuntu) or equivalent
 3. Desktop platform only — WebRTC AEC returns `ENOTSUP` on Android/iOS
 
@@ -327,7 +327,7 @@ sdk.set_aec(True)    # resume WebRTC AEC
 | **Double-talk** | One side goes quiet | Both parties heard simultaneously |
 | **CPU** | Negligible | Moderate |
 | **Platform** | All | Desktop only |
-| **Build flag** | None | `ECHOSDK_WITH_WEBRTC_AEC=ON` |
+| **Build flag** | None | `MEDUT_WITH_WEBRTC_AEC=ON` |
 | **Best for** | Mobile / low-power / simple calls | Desktop softphone / professional voice |
 
 ---
@@ -335,7 +335,7 @@ sdk.set_aec(True)    # resume WebRTC AEC
 ## Module-level API
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 sdk.configure(**kwargs)         # set global options before first account
 sdk.create_account(uri, password, **kwargs)  # returns Account

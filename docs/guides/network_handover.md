@@ -12,7 +12,7 @@ recover on their own:
 | The registrar's binding still points at the old Contact | Inbound calls are routed into the void until the next REGISTER refresh — up to `reg_expires` seconds |
 | Active calls advertise the old address in the SDP `c=` line | The peer keeps sending RTP where you can no longer receive it — one-way or dead audio |
 
-EchoSDK repairs all three. The sequence is:
+Medut repairs all three. The sequence is:
 
 ```
 detect → settle → rebind transports → re-REGISTER → re-INVITE → verify media
@@ -25,7 +25,7 @@ detect → settle → rebind transports → re-REGISTER → re-INVITE → verify
 The SDK cannot see the OS connectivity signal, so tell it:
 
 ```c
-echosdk_network_changed();
+medut_network_changed();
 ```
 
 Safe to call from any thread, as often as the OS fires. Calls are coalesced —
@@ -37,10 +37,10 @@ the handover runs once, after the address set has been stable for
 ```kotlin
 val cm = getSystemService(ConnectivityManager::class.java)
 cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-    override fun onAvailable(network: Network)  = EchoSDK.networkChanged()
-    override fun onLost(network: Network)       = EchoSDK.networkChanged()
+    override fun onAvailable(network: Network)  = Medut.networkChanged()
+    override fun onLost(network: Network)       = Medut.networkChanged()
     override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) =
-        EchoSDK.networkChanged()
+        Medut.networkChanged()
 })
 ```
 
@@ -51,7 +51,7 @@ wastes battery when the OS already has the signal.
 
 ```swift
 let monitor = NWPathMonitor()
-monitor.pathUpdateHandler = { _ in echosdk_network_changed() }
+monitor.pathUpdateHandler = { _ in medut_network_changed() }
 monitor.start(queue: DispatchQueue.global(qos: .utility))
 ```
 
@@ -60,43 +60,43 @@ monitor.start(queue: DispatchQueue.global(qos: .utility))
 Leave the built-in poller on (`net_monitor_interval_s`, default 10 s) and you
 need no platform code at all. It reconciles the kernel's address list against
 the stack's on every tick. If you already subscribe to NetworkManager,
-`SCNetworkReachability`, or `NotifyAddrChange`, call `echosdk_network_changed()`
+`SCNetworkReachability`, or `NotifyAddrChange`, call `medut_network_changed()`
 from there and set the interval to 0.
 
 ---
 
 ## Watching it happen
 
-Every stage arrives as `ECHOSDK_EV_NETWORK`:
+Every stage arrives as `MEDUT_EV_NETWORK`:
 
 ```c
-case ECHOSDK_EV_NETWORK: {
-    const echosdk_ev_network_t *n = &ev->u.network;
+case MEDUT_EV_NETWORK: {
+    const medut_ev_network_t *n = &ev->u.network;
     switch (n->event) {
-    case ECHOSDK_NET_CHANGE_DETECTED:
+    case MEDUT_NET_CHANGE_DETECTED:
         log("network changed — settling");
         break;
-    case ECHOSDK_NET_DOWN:
+    case MEDUT_NET_DOWN:
         log("no usable network — holding");
         break;
-    case ECHOSDK_NET_UP:
+    case MEDUT_NET_UP:
         log("network back: %s", n->local_addr);
         break;
-    case ECHOSDK_NET_TRANSPORT_RESET:
+    case MEDUT_NET_TRANSPORT_RESET:
         log("SIP transports rebound on %s", n->local_addr);
         break;
-    case ECHOSDK_NET_CALL_MIGRATING:
+    case MEDUT_NET_CALL_MIGRATING:
         log("link settled — rebuilding the media path %u/%u",
             n->attempt, n->max_attempts);
         break;
-    case ECHOSDK_NET_CALL_MIGRATE_ACCEPTED:
+    case MEDUT_NET_CALL_MIGRATE_ACCEPTED:
         log("peer accepted the new path — waiting for audio to resume");
         break;
-    case ECHOSDK_NET_CALL_MIGRATED:
+    case MEDUT_NET_CALL_MIGRATED:
         log("media recovered after %.1f s", n->elapsed_ms / 1000.0);
         break;
-    case ECHOSDK_NET_CALL_MIGRATION_FAILED:
-        log("media did not recover (%s)", echosdk_strerror(n->error));
+    case MEDUT_NET_CALL_MIGRATION_FAILED:
+        log("media did not recover (%s)", medut_strerror(n->error));
         break;
     default:
         break;
@@ -136,10 +136,10 @@ def _(ev):
 
 ### The registration state follows too
 
-An app does not have to subscribe to `ECHOSDK_EV_NETWORK` just to keep its
+An app does not have to subscribe to `MEDUT_EV_NETWORK` just to keep its
 status indicator honest. From `CHANGE_DETECTED` (or `DOWN`, if the link went
 away entirely) every account the app asked to register moves to
-`ECHOSDK_REG_RECONNECTING`, and stays there through the re-REGISTER until it is
+`MEDUT_REG_RECONNECTING`, and stays there through the re-REGISTER until it is
 answered — the binding at the registrar points at an address the device has
 left, so reporting `REGISTERED` across a handover would show a green dot over a
 path that cannot take an inbound call.
@@ -186,16 +186,16 @@ confirmation available.
 Runtime overrides:
 
 ```c
-echosdk_network_set_monitor_interval(0);              /* mobile */
-echosdk_network_set_handover_policy(true, false);     /* reinvite, don't hang up */
+medut_network_set_monitor_interval(0);              /* mobile */
+medut_network_set_handover_policy(true, false);     /* reinvite, don't hang up */
 ```
 
 Queries:
 
 ```c
 char ip[64];
-echosdk_network_local_addr(ip, sizeof(ip));   /* "" when there is no address */
-bool up = echosdk_network_is_up();            /* false = no routable address */
+medut_network_local_addr(ip, sizeof(ip));   /* "" when there is no address */
+bool up = medut_network_is_up();            /* false = no routable address */
 ```
 
 ---
@@ -207,7 +207,7 @@ bool up = echosdk_network_is_up();            /* false = no routable address */
 | Wi-Fi → cellular, cellular → Wi-Fi | Full sequence; SDP `c=` follows the new source address |
 | Both networks briefly down | `DOWN` emitted, handover held with exponential backoff (1→32 s), applied when an address returns. Transports are never flushed into a void |
 | Interface still coming up (address burst) | Debounced — the handover runs once, on the final address set |
-| Route changed, addresses unchanged | `echosdk_network_changed()` still re-checks each call's source address and re-INVITEs only what actually moved |
+| Route changed, addresses unchanged | `medut_network_changed()` still re-checks each call's source address and re-INVITEs only what actually moved |
 | Address changed but a call's path did not | That call is skipped — no pointless re-INVITE. **Except over WS/WSS**, see the row below |
 | WS/WSS call, path unchanged | Still re-INVITEd. A WebSocket client has no listening port, so its Contact is the RFC 7118 placeholder `sip:user@<ip>:9;transport=wss` and the server reaches it by remembering which WebSocket the dialog's requests arrived on. A transport reset always builds a new WebSocket, so without the re-INVITE that association is stale: media keeps flowing and your own BYE still gets out, but an **inbound BYE can never be delivered** and the call hangs in `ESTABLISHED`. The re-INVITE re-binds the dialog to the live connection |
 | IPv4 ↔ IPv6 | Handled; the address family follows the new source address |
@@ -281,15 +281,15 @@ fall back to the plain re-INVITE with the pre-handover candidate set, which
 recovers a call the peer can reach directly or through a still-valid TURN relay,
 and cannot recover one it cannot.
 
-Such a call emits `ECHOSDK_NET_CALL_ICE_STALE` once per handover, *before* that
+Such a call emits `MEDUT_NET_CALL_ICE_STALE` once per handover, *before* that
 re-INVITE, so you can tell the user something useful while the attempt is in
 flight rather than after it has failed. `cfg.net_ice_handover` then decides how
 long to keep trying:
 
 | Value | Behaviour |
 |---|---|
-| `ECHOSDK_ICE_HANDOVER_BEST_EFFORT` (default) | The full `net_verify_ms` × `net_max_attempts` budget — 24 s at the defaults. Right when calls often are direct or TURN-relayed, because those do recover |
-| `ECHOSDK_ICE_HANDOVER_FAIL_FAST` | One attempt, then `CALL_MIGRATION_FAILED`. Right when calls are ICE+TURN over cellular: re-offering the same wrong candidates cannot succeed, and 24 s of silence is worse for the user than a prompt "reconnecting…" |
+| `MEDUT_ICE_HANDOVER_BEST_EFFORT` (default) | The full `net_verify_ms` × `net_max_attempts` budget — 24 s at the defaults. Right when calls often are direct or TURN-relayed, because those do recover |
+| `MEDUT_ICE_HANDOVER_FAIL_FAST` | One attempt, then `CALL_MIGRATION_FAILED`. Right when calls are ICE+TURN over cellular: re-offering the same wrong candidates cannot succeed, and 24 s of silence is worse for the user than a prompt "reconnecting…" |
 
 Neither applies to a call whose ICE *was* restarted: it is not offering the wrong
 candidates any more, so it keeps the full retry budget — what it is waiting on
@@ -299,12 +299,12 @@ candidates any more, so it keeps the full retry budget — what it is waiting on
 a fail-fast call renders as `1/1` rather than promising retries it will not make.
 
 ```c
-case ECHOSDK_NET_CALL_ICE_STALE:
+case MEDUT_NET_CALL_ICE_STALE:
     /* This call could not be re-gathered; recovery may not work. */
     ui_show_reconnecting(n->call);
     break;
 
-case ECHOSDK_NET_CALL_MIGRATION_FAILED:
+case MEDUT_NET_CALL_MIGRATION_FAILED:
     redial(n->call);   /* a fresh call gathers fresh candidates */
     break;
 ```
@@ -322,7 +322,7 @@ tears down and rebuilds its own RTP instance, and replies `401 Unauthorized` to
 checks that arrive while that rebuild is in flight; libre's check list is
 one-shot per generation, so those pairs stay Failed.
 
-Such a call emits `ECHOSDK_NET_CALL_ICE_FAILED`. It is *not* the same as
+Such a call emits `MEDUT_NET_CALL_ICE_FAILED`. It is *not* the same as
 `CALL_ICE_STALE` — there the candidates could not be re-gathered at all; here
 they were gathered, offered and answered, and the checks failed.
 
@@ -334,7 +334,7 @@ path was never proven", and let the media-stall alert tell you whether audio is
 actually flowing:
 
 ```c
-case ECHOSDK_NET_CALL_ICE_FAILED:
+case MEDUT_NET_CALL_ICE_FAILED:
     /* Media is probably still up on the previous pair — do not hang up.
      * Watch for MEDIA_STALL to decide whether it really died. */
     log_warn("ICE could not validate a path for this call");
@@ -351,18 +351,13 @@ recovers; one that does not is left to the app with the event above.
 
 An ICE restart that the SDK offers makes it the controlling agent for the new
 generation, as libwebrtc and Asterisk do (offerer = controlling); when the
-peer offers the restart, the SDK takes the controlled role. Before this the
-answerer's CONTROLLED role was kept across its own restart offer, so an
-*inbound* call's handover met a peer that had also become controlled, and the
-RFC 8445 §7.3.1.1 role-conflict procedure decided — a coin toss that sometimes
-ended with nobody nominating a pair (measured 2026-10-11: one restart in eight
-on an inbound call stayed CONNECTED for good while outbound calls never
-conflicted). Role conflicts are still handled, correctly now, for peers that
-do not follow the convention.
+peer offers the restart, the SDK takes the controlled role. A peer that does
+not follow this convention is handled by the RFC 8445 §7.3.1.1 role-conflict
+procedure.
 
 ### A second path before the switch (experimental)
 
-With `ice_multipath` on (Dart: `EchoSDKConfig.iceMultipath`), every ICE
+With `ice_multipath` on (Dart: `MedutConfig.iceMultipath`), every ICE
 generation gathers on the interfaces the platform can pin a socket to besides
 the one the call signals from — cellular next to Wi-Fi on a phone — with
 sockets bound to that network (`android_setsocknetwork`, `IP_BOUND_IF`,

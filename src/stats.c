@@ -2,7 +2,7 @@
  * @file stats.c  RTCP stats polling timer + MOS calculation
  *
  * A tmr fires on re_main every cfg->stats_interval_ms. For each active call
- * it reads RTCP stats from the audio stream and posts ECHOSDK_EV_MEDIA_STATS.
+ * it reads RTCP stats from the audio stream and posts MEDUT_EV_MEDIA_STATS.
  *
  * ── Loss rates are windowed, not cumulative ──────────────────────────────
  * RTCP carries lifetime cumulative counters (RFC 3550 A.3), the same
@@ -47,7 +47,7 @@
  */
 
 #include <math.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* ── MOS calculations ───────────────────────────────────────────────────── */
 
@@ -180,10 +180,10 @@ static mos_pair_t mos_simplified(float loss_pct, float jitter_ms, float rtt_ms)
 }
 
 static mos_pair_t calc_mos(float loss_pct, float jitter_ms, float jb_ms,
-                           float rtt_ms, echosdk_mos_method_t method,
+                           float rtt_ms, medut_mos_method_t method,
                            codec_params_t cp)
 {
-	if (method == ECHOSDK_MOS_SIMPLIFIED)
+	if (method == MEDUT_MOS_SIMPLIFIED)
 		return mos_simplified(loss_pct, jitter_ms, rtt_ms);
 	return mos_emodel(loss_pct, jb_ms, rtt_ms, cp);
 }
@@ -217,7 +217,7 @@ static uint32_t counter_delta_i(int32_t now, int32_t prev)
  * on: VBR codes silence in a few kbps, so a quiet microphone pulled the
  * session average under 12 kbps, the Ie bucket down a step and the MOS
  * ceiling from 4.43 to 4.37 with no loss on the link at all. */
-static uint32_t opus_encoder_kbps(const struct echosdk_call *lc,
+static uint32_t opus_encoder_kbps(const struct medut_call *lc,
                                   struct stream *strm)
 {
 	uint32_t bps = lc->adapt_bitrate;
@@ -241,7 +241,7 @@ static uint32_t opus_encoder_kbps(const struct echosdk_call *lc,
 	return bps / 1000;
 }
 
-/* Both EchoSDK-patched into baresip (cmake/patch-baresip-sources.cmake,
+/* Both Medut-patched into baresip (cmake/patch-baresip-sources.cmake,
  * jobs 9 and 5): the receive decoder's state, and the Opus module's count
  * of how each lost frame was filled in. */
 struct audec_state *audio_decoder_state(const struct audio *a);
@@ -260,15 +260,15 @@ int opus_decode_fec_stats(const struct audec_state *ads,
  * answers what it is sized for, which the bitrate controller needs as is;
  * a pinned level survives congestion there, but below the FEC floor the
  * encoder codes none, so it is not "active". */
-static void fill_fec_stats(echosdk_ev_media_stats_t *s,
-                           const struct echosdk_call *lc)
+static void fill_fec_stats(medut_ev_media_stats_t *s,
+                           const struct medut_call *lc)
 {
 	s->fec_active = bsdk_adapt_fec_status(lc, &s->fec_level_pct) &&
 	                !lc->adapt_congested;
 }
 
-static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
-                                               struct echosdk_call *lc,
+static const struct aucodec *fill_audio_stats(medut_ev_media_stats_t *s,
+                                               struct medut_call *lc,
                                                struct audio *au,
                                                struct stream *strm,
                                                bool advance)
@@ -474,15 +474,15 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 		int ltype = 0, rtype = 0;
 		uint32_t rtt = 0, gen = 0;
 
-		s->ice_state       = (echosdk_ice_state_t)
+		s->ice_state       = (medut_ice_state_t)
 		                     bsdk_ice_call_state(lc->bc);
-		s->ice_local_type  = ECHOSDK_ICE_CAND_NONE;
-		s->ice_remote_type = ECHOSDK_ICE_CAND_NONE;
+		s->ice_local_type  = MEDUT_ICE_CAND_NONE;
+		s->ice_remote_type = MEDUT_ICE_CAND_NONE;
 
 		if (bsdk_ice_call_selected(lc->bc, &ice_l, &ice_r, &ltype,
 		                           &rtype, &rtt, &gen)) {
-			s->ice_local_type  = (echosdk_ice_cand_type_t)ltype;
-			s->ice_remote_type = (echosdk_ice_cand_type_t)rtype;
+			s->ice_local_type  = (medut_ice_cand_type_t)ltype;
+			s->ice_remote_type = (medut_ice_cand_type_t)rtype;
 			s->ice_rtt_ms      = (float)rtt;
 			s->ice_generation  = gen;
 			re_snprintf(s->ice_local_addr,
@@ -507,15 +507,15 @@ static const struct aucodec *fill_audio_stats(echosdk_ev_media_stats_t *s,
 
 /* Session-average MOS.  The running sum is in the R domain for the E-model,
  * so the conversion to MOS happens once, on the mean — not per tick. */
-static float session_mos_avg(const struct echosdk_call *lc,
-                             const echosdk_ev_media_stats_t *s)
+static float session_mos_avg(const struct medut_call *lc,
+                             const medut_ev_media_stats_t *s)
 {
 	if (!lc->stats_mos_n)
 		return 0.f;
 
 	float mean = lc->stats_q_sum / (float)lc->stats_mos_n;
 
-	if (g_bsdk.cfg.mos_method == ECHOSDK_MOS_SIMPLIFIED)
+	if (g_bsdk.cfg.mos_method == MEDUT_MOS_SIMPLIFIED)
 		return mean;   /* already a MOS */
 
 	codec_params_t cp = codec_emodel_params(s->codec_name,
@@ -526,23 +526,23 @@ static float session_mos_avg(const struct echosdk_call *lc,
 
 /* ── Quality alert helper ────────────────────────────────────────────────── */
 
-static const char *quality_issue_str(echosdk_quality_issue_t issue)
+static const char *quality_issue_str(medut_quality_issue_t issue)
 {
 	switch (issue) {
-	case ECHOSDK_QUALITY_MOS:         return "mos";
-	case ECHOSDK_QUALITY_LOSS:        return "loss";
-	case ECHOSDK_QUALITY_JITTER:      return "jitter";
-	case ECHOSDK_QUALITY_RTT:         return "rtt";
-	case ECHOSDK_QUALITY_MEDIA_STALL: return "media-stall";
+	case MEDUT_QUALITY_MOS:         return "mos";
+	case MEDUT_QUALITY_LOSS:        return "loss";
+	case MEDUT_QUALITY_JITTER:      return "jitter";
+	case MEDUT_QUALITY_RTT:         return "rtt";
+	case MEDUT_QUALITY_MEDIA_STALL: return "media-stall";
 	default:                          return "?";
 	}
 }
 
-void bsdk_post_quality_alert(struct echosdk_call *lc,
-                             echosdk_quality_issue_t issue,
+void bsdk_post_quality_alert(struct medut_call *lc,
+                             medut_quality_issue_t issue,
                              float value, float threshold, bool recovering)
 {
-	struct echosdk_queued_event *qev;
+	struct medut_queued_event *qev;
 
 	/* Logged as well as posted.  An alert only reaches the app as an event,
 	 * and an app is free to route it somewhere that is not the log — this
@@ -552,14 +552,14 @@ void bsdk_post_quality_alert(struct echosdk_call *lc,
 	 * often has: chasing a silent 36 s call on 2026-08-31 meant proving from
 	 * SDP and ICE state that media never came up, while the SDK had known it
 	 * for 32 of those seconds. */
-	info("EchoSDK: quality %s %s: %.1f (threshold %.1f)\n",
+	info("Medut: quality %s %s: %.1f (threshold %.1f)\n",
 	     quality_issue_str(issue), recovering ? "recovered" : "alert",
 	     value, threshold);
 
 	qev = bsdk_qev_alloc();
 	if (!qev) return;
-	qev->ev.type = ECHOSDK_EV_QUALITY_ALERT;
-	echosdk_ev_quality_alert_t *a = &qev->ev.u.quality_alert;
+	qev->ev.type = MEDUT_EV_QUALITY_ALERT;
+	medut_ev_quality_alert_t *a = &qev->ev.u.quality_alert;
 	a->call       = lc;
 	a->issue      = issue;
 	a->value      = value;
@@ -570,7 +570,7 @@ void bsdk_post_quality_alert(struct echosdk_call *lc,
 
 /* ── Per-call stats collection (timer path) ──────────────────────────────── */
 
-static void collect_call_stats(struct echosdk_call *lc)
+static void collect_call_stats(struct medut_call *lc)
 {
 	if (!lc->bc)
 		return;
@@ -583,12 +583,12 @@ static void collect_call_stats(struct echosdk_call *lc)
 	if (!strm)
 		return;
 
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
-	qev->ev.type = ECHOSDK_EV_MEDIA_STATS;
-	echosdk_ev_media_stats_t *s = &qev->ev.u.stats;
+	qev->ev.type = MEDUT_EV_MEDIA_STATS;
+	medut_ev_media_stats_t *s = &qev->ev.u.stats;
 
 	/* advance=true: this is the tick that owns the loss window. */
 	const struct aucodec *ac = fill_audio_stats(s, lc, au, strm, true);
@@ -608,27 +608,27 @@ static void collect_call_stats(struct echosdk_call *lc)
 	s->is_final        = false;
 
 	/* Quality alert threshold crossing detection */
-	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const medut_config_t *cfg = &g_bsdk.cfg;
 	if (cfg->mos_alert_threshold > 0.f && s->mos_lq > 0.f) {
 		bool was_bad = lc->last_mos_lq > 0.f
 		            && lc->last_mos_lq < cfg->mos_alert_threshold;
 		bool is_bad  = s->mos_lq < cfg->mos_alert_threshold;
 		if (is_bad != was_bad)
-			bsdk_post_quality_alert(lc, ECHOSDK_QUALITY_MOS, s->mos_lq,
+			bsdk_post_quality_alert(lc, MEDUT_QUALITY_MOS, s->mos_lq,
 			                   cfg->mos_alert_threshold, was_bad);
 	}
 	if (cfg->loss_alert_threshold > 0.f) {
 		bool was_bad = lc->last_loss_pct > cfg->loss_alert_threshold;
 		bool is_bad  = s->loss_pct      > cfg->loss_alert_threshold;
 		if (is_bad != was_bad)
-			bsdk_post_quality_alert(lc, ECHOSDK_QUALITY_LOSS, s->loss_pct,
+			bsdk_post_quality_alert(lc, MEDUT_QUALITY_LOSS, s->loss_pct,
 			                   cfg->loss_alert_threshold, was_bad);
 	}
 	if (cfg->jitter_alert_threshold > 0.f) {
 		bool was_bad = lc->last_jitter_ms > cfg->jitter_alert_threshold;
 		bool is_bad  = s->jitter_ms       > cfg->jitter_alert_threshold;
 		if (is_bad != was_bad)
-			bsdk_post_quality_alert(lc, ECHOSDK_QUALITY_JITTER, s->jitter_ms,
+			bsdk_post_quality_alert(lc, MEDUT_QUALITY_JITTER, s->jitter_ms,
 			                   cfg->jitter_alert_threshold, was_bad);
 	}
 	lc->last_mos_lq    = s->mos_lq;
@@ -647,7 +647,7 @@ static void collect_call_stats(struct echosdk_call *lc)
 
 /* ── Final stats snapshot on call teardown ───────────────────────────────── */
 
-void bsdk_stats_collect_final(struct echosdk_call *lc)
+void bsdk_stats_collect_final(struct medut_call *lc)
 {
 	if (!lc || !lc->bc)
 		return;
@@ -660,12 +660,12 @@ void bsdk_stats_collect_final(struct echosdk_call *lc)
 	if (!strm)
 		return;
 
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
-	qev->ev.type = ECHOSDK_EV_MEDIA_STATS;
-	echosdk_ev_media_stats_t *s = &qev->ev.u.stats;
+	qev->ev.type = MEDUT_EV_MEDIA_STATS;
+	medut_ev_media_stats_t *s = &qev->ev.u.stats;
 
 	/* advance=false: the teardown snapshot reports the window since the
 	 * last tick but must not fold itself into the session average, which
@@ -688,10 +688,10 @@ void bsdk_stats_collect_final(struct echosdk_call *lc)
 
 /* ── Timer handler (re_main thread) ─────────────────────────────────────── */
 
-static void stats_visit(struct echosdk_call *lc, void *arg)
+static void stats_visit(struct medut_call *lc, void *arg)
 {
 	(void)arg;
-	if (lc->state == ECHOSDK_CALL_ESTABLISHED)
+	if (lc->state == MEDUT_CALL_ESTABLISHED)
 		collect_call_stats(lc);
 }
 
@@ -724,15 +724,15 @@ void bsdk_stats_close(void)
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call      *lc;
-	echosdk_ev_media_stats_t *out;
+	struct medut_call      *lc;
+	medut_ev_media_stats_t *out;
 	int                       result;
 } getstats_ctx_t;
 
 static void getstats_fn(void *arg)
 {
 	getstats_ctx_t *ctx = arg;
-	struct echosdk_call *lc = ctx->lc;
+	struct medut_call *lc = ctx->lc;
 	if (!lc->bc) { ctx->result = ENOENT; return; }
 
 	struct audio *au = call_audio(lc->bc);
@@ -741,7 +741,7 @@ static void getstats_fn(void *arg)
 	struct stream *strm = audio_strm(au);
 	if (!strm) { ctx->result = ENOENT; return; }
 
-	echosdk_ev_media_stats_t *s = ctx->out;
+	medut_ev_media_stats_t *s = ctx->out;
 
 	/* advance=false: a getter must not consume the polling tick's loss
 	 * window, or an app that polls between ticks would zero the rates the
@@ -768,10 +768,10 @@ static void getstats_fn(void *arg)
 	ctx->result = 0;
 }
 
-int echosdk_call_get_stats(echosdk_call_handle_t call,
-                            echosdk_ev_media_stats_t *out)
+int medut_call_get_stats(medut_call_handle_t call,
+                            medut_ev_media_stats_t *out)
 {
-	if (!call || !out) return ECHOSDK_ERR_INVAL;
+	if (!call || !out) return MEDUT_ERR_INVAL;
 
 	/* Zero before anything can fail.  Every early return below — no call
 	 * object, no audio, no stream, or a dispatch that never runs — used to

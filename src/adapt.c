@@ -14,7 +14,7 @@
  *
  *   1. Media-stall detection.  Watch the inbound RTP packet counter.  When it
  *      stops advancing for cfg.media_stall_ms, raise a non-fatal
- *      ECHOSDK_QUALITY_MEDIA_STALL alert; raise it again with `recovering`
+ *      MEDUT_QUALITY_MEDIA_STALL alert; raise it again with `recovering`
  *      when packets resume.  This is deliberately *not* a call teardown —
  *      cfg.rtp_timeout_s (baresip's avt.rtp_timeout) is there for apps that
  *      want the fatal version, and it defaults to off because ending a call
@@ -54,7 +54,7 @@
  * All functions here run on the re_main thread.
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Opus refuses a maxaveragebitrate outside this range (modules/opus/sdp.c),
  * so a target outside it would be silently ignored rather than clamped. */
@@ -153,7 +153,7 @@ static bool fec_auto(void)
 }
 
 /* The expected loss this call's encoder is sized for, followed or pinned. */
-static uint32_t fec_level_now(const struct echosdk_call *lc)
+static uint32_t fec_level_now(const struct medut_call *lc)
 {
 	if (!fec_auto())
 		return g_bsdk.cfg.opus_expected_loss_pct;
@@ -241,7 +241,7 @@ int bsdk_adapt_fmtp_set_bitrate(char *buf, size_t sz, const char *src,
  * the negotiated codec has no encoder-update handler, which is how a G.711
  * call reports "nothing to adapt".
  */
-int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
+int bsdk_adapt_apply_bitrate(struct medut_call *lc, uint32_t bitrate)
 {
 	struct audio            *au;
 	struct stream           *strm;
@@ -334,17 +334,17 @@ int bsdk_adapt_apply_bitrate(struct echosdk_call *lc, uint32_t bitrate)
  * so holds for the full grace once — bounded, once per call, and the alert
  * still follows.
  */
-bool bsdk_media_setup_pending(const struct echosdk_call *lc)
+bool bsdk_media_setup_pending(const struct medut_call *lc)
 {
 	struct list *streaml;
 	struct le *le;
-	echosdk_media_enc_t enc;
+	medut_media_enc_t enc;
 
 	if (!lc->bc)
 		return false;
 
 	enc = lc->acct ? lc->acct->cfg.media_enc : g_bsdk.cfg.media_enc;
-	if (enc != ECHOSDK_MEDIA_ENC_DTLS_SRTP)
+	if (enc != MEDUT_MEDIA_ENC_DTLS_SRTP)
 		return false;
 
 	streaml = call_streaml(lc->bc);
@@ -361,19 +361,19 @@ bool bsdk_media_setup_pending(const struct echosdk_call *lc)
 	return false;
 }
 
-static void stall_clear(struct echosdk_call *lc, uint32_t elapsed_ms)
+static void stall_clear(struct medut_call *lc, uint32_t elapsed_ms)
 {
 	if (!lc->stall_active)
 		return;
 
 	lc->stall_active = false;
-	bsdk_post_quality_alert(lc, ECHOSDK_QUALITY_MEDIA_STALL,
+	bsdk_post_quality_alert(lc, MEDUT_QUALITY_MEDIA_STALL,
 	                        (float)elapsed_ms,
 	                        (float)g_bsdk.cfg.media_stall_ms, true);
 }
 
-static void stall_tick(struct echosdk_call *lc,
-                        const echosdk_ev_media_stats_t *s)
+static void stall_tick(struct medut_call *lc,
+                        const medut_ev_media_stats_t *s)
 {
 	uint64_t now = tmr_jiffies();
 	uint32_t elapsed;
@@ -387,7 +387,7 @@ static void stall_tick(struct echosdk_call *lc,
 	 * MIGRATED / MIGRATION_FAILED).  Reporting a stall in either case would
 	 * be a second, less informative voice on the same event — so treat both
 	 * as a fresh start rather than a stall. */
-	if (lc->state == ECHOSDK_CALL_HELD || lc->local_hold ||
+	if (lc->state == MEDUT_CALL_HELD || lc->local_hold ||
 	    call_is_onhold(lc->bc) ||
 	    lc->net_mig_state == BSDK_MIG_STALLED ||
 	    lc->net_mig_state == BSDK_MIG_WAIT_ADDR ||
@@ -467,7 +467,7 @@ static void stall_tick(struct echosdk_call *lc,
 			return;
 
 		lc->stall_active = true;
-		bsdk_post_quality_alert(lc, ECHOSDK_QUALITY_MEDIA_STALL,
+		bsdk_post_quality_alert(lc, MEDUT_QUALITY_MEDIA_STALL,
 		                        (float)elapsed,
 		                        (float)g_bsdk.cfg.media_stall_ms, false);
 
@@ -483,8 +483,8 @@ static void stall_tick(struct echosdk_call *lc,
 
 /* ── Bitrate adaptation ──────────────────────────────────────────────────── */
 
-static void bitrate_tick(struct echosdk_call *lc,
-                          const echosdk_ev_media_stats_t *s)
+static void bitrate_tick(struct medut_call *lc,
+                          const medut_ev_media_stats_t *s)
 {
 	uint32_t min_br, max_br, cur, next;
 	float    loss;
@@ -539,7 +539,7 @@ static void bitrate_tick(struct echosdk_call *lc,
 			/* A pinned level stays set (fec_level_now()); the
 			 * encoder just codes no FEC at the rates below the
 			 * floor. */
-			info("EchoSDK: congested at %u bps (loss %.1f%%, "
+			info("Medut: congested at %u bps (loss %.1f%%, "
 			     "%.1f%% before): %s\n",
 			     cur, lc->fec.smooth, lc->adapt_step_loss,
 			     fec_auto() ? "FEC off, floor released"
@@ -594,7 +594,7 @@ static void bitrate_tick(struct echosdk_call *lc,
 	if (bsdk_adapt_apply_bitrate(lc, next))
 		return;   /* fixed-rate codec or transient error — try again later */
 
-	info("EchoSDK: adaptive bitrate %u -> %u bps (loss %.1f%%)\n",
+	info("Medut: adaptive bitrate %u -> %u bps (loss %.1f%%)\n",
 	     cur, next, loss);
 }
 
@@ -746,7 +746,7 @@ bool bsdk_adapt_fec_update(struct bsdk_fec *f, uint32_t sent, uint32_t lost,
 	return f->active != was_active || f->level != was_level;
 }
 
-bool bsdk_adapt_fec_status(const struct echosdk_call *lc, uint32_t *level)
+bool bsdk_adapt_fec_status(const struct medut_call *lc, uint32_t *level)
 {
 	struct audio            *au;
 	struct stream           *strm;
@@ -780,7 +780,7 @@ bool bsdk_adapt_fec_status(const struct echosdk_call *lc, uint32_t *level)
 	return lvl > 0;
 }
 
-static void fec_tick(struct echosdk_call *lc, bool changed)
+static void fec_tick(struct medut_call *lc, bool changed)
 {
 	if (!fec_auto())
 		return;
@@ -801,11 +801,11 @@ static void fec_tick(struct echosdk_call *lc, bool changed)
 	lc->fec_applied = true;
 
 	if (lc->fec.active != lc->fec_applied_active)
-		info("EchoSDK: Opus FEC %s (%u%%, peer loss %.1f%%)\n",
+		info("Medut: Opus FEC %s (%u%%, peer loss %.1f%%)\n",
 		     lc->fec.active ? "on" : "off", lc->fec.level,
 		     lc->fec.smooth);
 	else if (lc->fec.level != lc->fec_applied_level)
-		info("EchoSDK: Opus FEC %u%% -> %u%% (peer loss %.1f%%)\n",
+		info("Medut: Opus FEC %u%% -> %u%% (peer loss %.1f%%)\n",
 		     lc->fec_applied_level, lc->fec.level, lc->fec.smooth);
 	lc->fec_applied_active = lc->fec.active;
 	lc->fec_applied_level  = lc->fec.level;
@@ -813,7 +813,7 @@ static void fec_tick(struct echosdk_call *lc, bool changed)
 
 /* ── Entry points ────────────────────────────────────────────────────────── */
 
-void bsdk_adapt_call_start(struct echosdk_call *lc)
+void bsdk_adapt_call_start(struct medut_call *lc)
 {
 	if (!lc)
 		return;
@@ -838,8 +838,8 @@ void bsdk_adapt_call_start(struct echosdk_call *lc)
 	lc->stall_setup_pending = bsdk_media_setup_pending(lc);
 }
 
-void bsdk_adapt_tick(struct echosdk_call *lc,
-                      const echosdk_ev_media_stats_t *s)
+void bsdk_adapt_tick(struct medut_call *lc,
+                      const medut_ev_media_stats_t *s)
 {
 	if (!lc || !lc->bc || !s)
 		return;
@@ -853,7 +853,7 @@ void bsdk_adapt_tick(struct echosdk_call *lc,
 	bitrate_tick(lc, s);
 }
 
-void bsdk_adapt_media_renegotiated(struct echosdk_call *lc)
+void bsdk_adapt_media_renegotiated(struct medut_call *lc)
 {
 	/* baresip's audio_update() has just rebuilt the encoder from the remote
 	 * fmtp and the shared expected-loss global; re-apply this call's level
@@ -865,7 +865,7 @@ void bsdk_adapt_media_renegotiated(struct echosdk_call *lc)
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call *lc;
+	struct medut_call *lc;
 	uint32_t             bitrate;
 	int                  result;
 } setbr_ctx_t;
@@ -876,24 +876,24 @@ static void set_bitrate_fn(void *arg)
 	int err = bsdk_adapt_apply_bitrate(ctx->lc, ctx->bitrate);
 
 	switch (err) {
-	case 0:       ctx->result = ECHOSDK_OK;            break;
-	case EINVAL:  ctx->result = ECHOSDK_ERR_INVAL;     break;
+	case 0:       ctx->result = MEDUT_OK;            break;
+	case EINVAL:  ctx->result = MEDUT_ERR_INVAL;     break;
 	case ENOENT:
-	case ENOTSUP: ctx->result = ECHOSDK_ERR_STATE;     break;
-	default:      ctx->result = ECHOSDK_ERR_TRANSPORT; break;
+	case ENOTSUP: ctx->result = MEDUT_ERR_STATE;     break;
+	default:      ctx->result = MEDUT_ERR_TRANSPORT; break;
 	}
 }
 
-int echosdk_call_set_bitrate(echosdk_call_handle_t call, uint32_t bitrate_bps)
+int medut_call_set_bitrate(medut_call_handle_t call, uint32_t bitrate_bps)
 {
 	setbr_ctx_t ctx = { .lc = call, .bitrate = bitrate_bps, .result = 0 };
 	int err;
 
 	if (!call)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 	if (bitrate_bps && (bitrate_bps < BSDK_ADAPT_BR_MIN ||
 	                    bitrate_bps > BSDK_ADAPT_BR_MAX))
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	err = bsdk_dispatch_sync(set_bitrate_fn, &ctx);
 	return err ? err : ctx.result;
@@ -916,7 +916,7 @@ static void set_adaptive_fn(void *arg)
 		g_bsdk.cfg.adapt_max_bitrate = ctx->max_bps;
 }
 
-void echosdk_set_adaptive_bitrate(bool enabled, uint32_t min_bps,
+void medut_set_adaptive_bitrate(bool enabled, uint32_t min_bps,
                                    uint32_t max_bps)
 {
 	adaptcfg_ctx_t ctx = { .enabled = enabled, .min_bps = min_bps,
@@ -927,7 +927,7 @@ void echosdk_set_adaptive_bitrate(bool enabled, uint32_t min_bps,
 /* ── Per-call RTP timeout ────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call *lc;
+	struct medut_call *lc;
 	uint32_t             seconds;
 	int                  result;
 } rtptmo_ctx_t;
@@ -935,10 +935,10 @@ typedef struct {
 static void set_rtp_timeout_fn(void *arg)
 {
 	rtptmo_ctx_t *ctx = arg;
-	struct echosdk_call *lc = ctx->lc;
+	struct medut_call *lc = ctx->lc;
 
 	if (!lc->bc) {
-		ctx->result = ECHOSDK_ERR_STATE;
+		ctx->result = MEDUT_ERR_STATE;
 		return;
 	}
 
@@ -955,16 +955,16 @@ static void set_rtp_timeout_fn(void *arg)
 		if (strm)
 			stream_enable_rtp_timeout(strm, ctx->seconds * 1000u);
 	}
-	ctx->result = ECHOSDK_OK;
+	ctx->result = MEDUT_OK;
 }
 
-int echosdk_call_set_rtp_timeout(echosdk_call_handle_t call, uint32_t seconds)
+int medut_call_set_rtp_timeout(medut_call_handle_t call, uint32_t seconds)
 {
 	rtptmo_ctx_t ctx = { .lc = call, .seconds = seconds, .result = 0 };
 	int err;
 
 	if (!call)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	err = bsdk_dispatch_sync(set_rtp_timeout_fn, &ctx);
 	return err ? err : ctx.result;

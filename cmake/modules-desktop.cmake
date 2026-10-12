@@ -6,8 +6,8 @@
 # Crypto:  srtp = SDES-SRTP, dtls_srtp = DTLS-SRTP (RFC 5764).
 # NAT:     stun/turn/ice = RFC 5389/5766/8445.
 
-set(ECHOSDK_DESKTOP_MODULES
-  # Audio codecs — must stay identical to ECHOSDK_MOBILE_MODULES_BASE so the
+set(MEDUT_DESKTOP_MODULES
+  # Audio codecs — must stay identical to MEDUT_MOBILE_MODULES_BASE so the
   # default SDP offer (see BSDK_DEFAULT_AUDIO_CODECS in src/account.c) is
   # satisfiable on every platform.
   "opus"
@@ -32,5 +32,5 @@ set(ECHOSDK_DESKTOP_MODULES
   "uuid"
 )
 # No "webrtc_aec": it creates the APM without enabling the echo canceller.
-# EchoSDK's own bsdk_webrtc filter (src/webrtc_apm.cpp) replaces it.
-list(JOIN ECHOSDK_DESKTOP_MODULES ";" ECHOSDK_DESKTOP_MODULES)
+# Medut's own bsdk_webrtc filter (src/webrtc_apm.cpp) replaces it.
+list(JOIN MEDUT_DESKTOP_MODULES ";" MEDUT_DESKTOP_MODULES)

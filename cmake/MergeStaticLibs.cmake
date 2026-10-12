@@ -1,4 +1,4 @@
-# echosdk_merge(OUTPUT <path> INPUTS <lib...> DEPENDS <target...>)
+# medut_merge(OUTPUT <path> INPUTS <lib...> DEPENDS <target...>)
 #
 # Merges one or more static archives into a single archive.
 # Uses platform-appropriate tooling:
@@ -7,16 +7,16 @@
 #   GNU/LLVM → ar MRI script     (addlib preserves per-source namespacing)
 #
 # The resulting archive is placed at OUTPUT.
-# A custom target "echosdk" is added so `cmake --build . --target echosdk` works.
+# A custom target "medut" is added so `cmake --build . --target medut` works.
 
-function(echosdk_merge)
+function(medut_merge)
   cmake_parse_arguments(_M "" "OUTPUT" "INPUTS;DEPENDS" ${ARGN})
 
   if(NOT _M_OUTPUT)
-    message(FATAL_ERROR "echosdk_merge: OUTPUT is required")
+    message(FATAL_ERROR "medut_merge: OUTPUT is required")
   endif()
   if(NOT _M_INPUTS)
-    message(FATAL_ERROR "echosdk_merge: INPUTS is required")
+    message(FATAL_ERROR "medut_merge: INPUTS is required")
   endif()
 
   # -----------------------------------------------------------------------
@@ -68,7 +68,7 @@ function(echosdk_merge)
     endforeach()
     string(APPEND _MRI "SAVE\nEND\n")
 
-    set(_MRI_FILE "${CMAKE_BINARY_DIR}/echosdk_merge.mri")
+    set(_MRI_FILE "${CMAKE_BINARY_DIR}/medut_merge.mri")
 
     # Write MRI script at configure time so the build command can reference it
     file(WRITE "${_MRI_FILE}" "${_MRI}")
@@ -83,5 +83,5 @@ function(echosdk_merge)
     )
   endif()
 
-  add_custom_target(echosdk ALL DEPENDS "${_M_OUTPUT}")
+  add_custom_target(medut ALL DEPENDS "${_M_OUTPUT}")
 endfunction()

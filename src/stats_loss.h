@@ -18,8 +18,8 @@
  *
  * Free of re/baresip so test/unit/test_stats_loss.c can include it as is.
  */
-#ifndef ECHOSDK_STATS_LOSS_H
-#define ECHOSDK_STATS_LOSS_H
+#ifndef MEDUT_STATS_LOSS_H
+#define MEDUT_STATS_LOSS_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -130,4 +130,4 @@ static inline bool bsdk_rx_loss_fold(struct bsdk_rx_loss_win *w,
 	return true;
 }
 
-#endif /* ECHOSDK_STATS_LOSS_H */
+#endif /* MEDUT_STATS_LOSS_H */

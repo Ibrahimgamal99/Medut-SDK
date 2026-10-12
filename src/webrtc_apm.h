@@ -1,7 +1,7 @@
 /**
  * @file webrtc_apm.h  C interface to libwebrtc-audio-processing-1
  *
- * The one piece of EchoSDK written in C++, kept as small as it can be: the
+ * The one piece of Medut written in C++, kept as small as it can be: the
  * filter logic that drives it lives in audio_processing.c.  The library is
  * reached through webrtc_shim.c (dlopen), so every entry point here copes
  * with it being absent — create returns NULL and nothing else is called.

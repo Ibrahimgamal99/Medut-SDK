@@ -8,7 +8,7 @@
  * proves insufficient (e.g. for low-latency audio processing or AEC bypass).
  */
 
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {

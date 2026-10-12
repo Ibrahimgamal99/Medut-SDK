@@ -2,7 +2,7 @@
 
 ## Overview
 
-EchoSDK supports encrypted SIP signaling via TLS (TCP) and WSS (WebSocket over TLS). This guide covers certificate configuration, common server setups, and troubleshooting.
+Medut supports encrypted SIP signaling via TLS (TCP) and WSS (WebSocket over TLS). This guide covers certificate configuration, common server setups, and troubleshooting.
 
 ---
 
@@ -10,34 +10,34 @@ EchoSDK supports encrypted SIP signaling via TLS (TCP) and WSS (WebSocket over T
 
 | Transport | Enum | Default port | Encryption |
 |---|---|---|---|
-| UDP | `ECHOSDK_TRANSPORT_UDP` | 5060 | None |
-| TCP | `ECHOSDK_TRANSPORT_TCP` | 5060 | None |
-| TLS | `ECHOSDK_TRANSPORT_TLS` | 5061 | TLS over TCP |
-| WS | `ECHOSDK_TRANSPORT_WS` | 80/8088 | None |
-| WSS | `ECHOSDK_TRANSPORT_WSS` | 443 | TLS over WebSocket |
+| UDP | `MEDUT_TRANSPORT_UDP` | 5060 | None |
+| TCP | `MEDUT_TRANSPORT_TCP` | 5060 | None |
+| TLS | `MEDUT_TRANSPORT_TLS` | 5061 | TLS over TCP |
+| WS | `MEDUT_TRANSPORT_WS` | 80/8088 | None |
+| WSS | `MEDUT_TRANSPORT_WSS` | 443 | TLS over WebSocket |
 
 ---
 
 ## Basic TLS setup
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri         = "alice@pbx.example.com",
     .password    = "secret",
-    .transport   = ECHOSDK_TRANSPORT_TLS,
+    .transport   = MEDUT_TRANSPORT_TLS,
     .server_host = "pbx.example.com",
     .server_port = 5061,
     .verify_tls  = true,
 };
 ```
 
-> **Note:** `verify_tls` is reserved for future per-account control. Currently the effective TLS verification setting is the global `verify_server` field in `echosdk_config_t` (defaults to `true`). Set it there to control verification for all accounts.
+> **Note:** `verify_tls` is reserved for future per-account control. Currently the effective TLS verification setting is the global `verify_server` field in `medut_config_t` (defaults to `true`). Set it there to control verification for all accounts.
 
-### Global TLS config (echosdk_config_t)
+### Global TLS config (medut_config_t)
 
 ```c
-echosdk_config_t cfg;
-echosdk_config_init(&cfg);
+medut_config_t cfg;
+medut_config_init(&cfg);
 
 cfg.ca_cert_path  = "/etc/ssl/certs/ca-bundle.crt";  // NULL = platform store
 cfg.verify_server = true;
@@ -48,7 +48,7 @@ cfg.sni_hostname  = NULL;  // auto-derived from server_host
 
 The SDK links its own OpenSSL, which starts with an **empty** trust store — it
 does not inherit the platform's. Leaving `ca_cert_path` NULL makes the SDK fill
-it from the platform at `echosdk_init()`:
+it from the platform at `medut_init()`:
 
 | Platform | Source of trust | Picks up enterprise/MDM roots |
 |---|---|---|
@@ -76,7 +76,7 @@ Setting `ca_cert_path` always overrides the platform store, on every platform.
 WebSocket transport is required when connecting to SIP servers behind reverse proxies (Asterisk HTTP, Kamailio with XHTTP, OpenSIPS).
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri         = "alice@pbx.example.com",
     .password    = "secret",
     .server_url  = "wss://pbx.example.com:443/ws",
@@ -90,8 +90,8 @@ When `server_url` is set, `transport` is derived from the URL scheme (`ws://` �
 Some servers validate the WebSocket `Origin` header:
 
 ```c
-echosdk_config_t cfg;
-echosdk_config_init(&cfg);
+medut_config_t cfg;
+medut_config_init(&cfg);
 cfg.ws_origin = "https://app.example.com";
 ```
 
@@ -134,7 +134,7 @@ dtlsenable=yes
 dtlsautoarrange=yes
 ```
 
-EchoSDK config:
+Medut config:
 ```c
 .server_url = "ws://asterisk.local:8088/ws",
 // or WSS:
@@ -155,7 +155,7 @@ registration is already connected to, so the existing connection is reused. With
 `log_level` at debug you will see
 
 ```
-EchoSDK: ws in-dialog target 127.0.0.1:8088 is loopback; reusing the registration flow to <server>
+Medut: ws in-dialog target 127.0.0.1:8088 is loopback; reusing the registration flow to <server>
 ```
 
 Nothing to configure. One caveat:
@@ -206,10 +206,10 @@ cfg.sni_hostname = "proxy.example.com";  // matches cert CN/SAN
 ## Self-signed certificates (development)
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri         = "alice@192.168.1.10",
     .password    = "secret",
-    .transport   = ECHOSDK_TRANSPORT_TLS,
+    .transport   = MEDUT_TRANSPORT_TLS,
     .server_host = "192.168.1.10",
     .server_port = 5061,
     .verify_tls  = false,   // accept self-signed
@@ -219,8 +219,8 @@ echosdk_account_config_t cfg = {
 Or load a specific CA:
 
 ```c
-echosdk_config_t gcfg;
-echosdk_config_init(&gcfg);
+medut_config_t gcfg;
+medut_config_init(&gcfg);
 gcfg.ca_cert_path  = "/path/to/self-signed-ca.pem";
 gcfg.verify_server = true;
 ```
@@ -242,8 +242,8 @@ cfg.client_key  = "/path/to/client.key";
 
 | Error | Cause | Fix |
 |---|---|---|
-| `ECHOSDK_ERR_TRANSPORT` | TLS handshake failed | Check server cert, set `verify_tls = false` to test |
-| `ECHOSDK_ERR_AUTH` after TLS connects | Wrong SIP credentials | Verify `uri` + `password` |
+| `MEDUT_ERR_TRANSPORT` | TLS handshake failed | Check server cert, set `verify_tls = false` to test |
+| `MEDUT_ERR_AUTH` after TLS connects | Wrong SIP credentials | Verify `uri` + `password` |
 | Certificate verification fails | Self-signed or expired | Set `ca_cert_path` or `verify_tls = false` |
 | `unable to get local issuer certificate`, reported as `Register: Protocol error [100]` | Server chain does not reach a trusted root | The cert is fine and the chain is complete — the *client* has no anchor for it. See [Certificate trust store](#certificate-trust-store); on iOS, an MDM/private root needs `ca_cert_path` |
 | SNI mismatch | Proxy cert doesn't match | Set `sni_hostname` explicitly |

@@ -29,8 +29,8 @@ also switch off RTCP accounting inside baresip, which silently disables quality
 alerts, media-stall detection and adaptive bitrate along with it.
 
 ```c
-echosdk_config_t cfg;
-echosdk_config_init(&cfg);        /* sensible defaults for all of the below */
+medut_config_t cfg;
+medut_config_init(&cfg);        /* sensible defaults for all of the below */
 
 cfg.stats_interval_ms = 2000;     /* required by everything here */
 ```
@@ -47,8 +47,8 @@ cfg.media_stall_ms = 4000;   /* warn  — default */
 cfg.rtp_timeout_s  = 0;      /* end   — default off */
 ```
 
-`media_stall_ms` fires `ECHOSDK_EV_QUALITY_ALERT` with issue
-`ECHOSDK_QUALITY_MEDIA_STALL` when inbound RTP stops advancing, and fires again
+`media_stall_ms` fires `MEDUT_EV_QUALITY_ALERT` with issue
+`MEDUT_QUALITY_MEDIA_STALL` when inbound RTP stops advancing, and fires again
 with `recovering = true` when it resumes. The call is left alone. This is what
 turns "the user says they can't hear anything" into an event you can act on.
 
@@ -57,9 +57,9 @@ by default because ending a call is destructive and some deployments run
 legitimate one-way media. 30–60 s is the usual choice when it is wanted.
 
 ```c
-case ECHOSDK_EV_QUALITY_ALERT: {
-    const echosdk_ev_quality_alert_t *a = &ev->u.quality_alert;
-    if (a->issue != ECHOSDK_QUALITY_MEDIA_STALL)
+case MEDUT_EV_QUALITY_ALERT: {
+    const medut_ev_quality_alert_t *a = &ev->u.quality_alert;
+    if (a->issue != MEDUT_QUALITY_MEDIA_STALL)
         break;
     if (a->recovering)
         ui_clear_warning(a->call);
@@ -86,7 +86,7 @@ receive anything.
 Per-call override:
 
 ```c
-echosdk_call_set_rtp_timeout(call, 45);   /* 0 = never, for this call */
+medut_call_set_rtp_timeout(call, 45);   /* 0 = never, for this call */
 ```
 
 ---
@@ -115,9 +115,9 @@ proxy. It does two jobs at once:
   SDK re-REGISTERs immediately instead of waiting up to an hour.
 
 A probe that goes unanswered is also reported: the account moves to
-`ECHOSDK_REG_RECONNECTING`, so an app whose status indicator is bound to the
+`MEDUT_REG_RECONNECTING`, so an app whose status indicator is bound to the
 registration state says "Reconnecting…" for a binding that is registered on
-paper and unreachable in fact. It goes back to `ECHOSDK_REG_REGISTERED` when the
+paper and unreachable in fact. It goes back to `MEDUT_REG_REGISTERED` when the
 re-REGISTER lands — or, with `keepalive_reregister` off, when a later probe is
 answered again.
 
@@ -128,7 +128,7 @@ uplink is exactly wrong.
 On foreground or push wake, ask directly rather than waiting for the tick:
 
 ```c
-echosdk_account_keepalive_now(account);
+medut_account_keepalive_now(account);
 ```
 
 ---
@@ -148,7 +148,7 @@ cfg.sip_timer_f_ms = 10000;   /* REGISTER with no response         */
 come back. Once a provisional response arrives the call moves to `RINGING`, the
 far end is demonstrably reachable, and how long to let it ring is a product
 decision, not a transport timeout. On expiry the call is cancelled with 408 and
-surfaces as `ECHOSDK_CALL_FAILED` / `ECHOSDK_ERR_TIMEOUT`.
+surfaces as `MEDUT_CALL_FAILED` / `MEDUT_ERR_TIMEOUT`.
 
 `sip_t1_ms` and `sip_t2_ms` exist for completeness and have no effect —
 retransmission intervals live inside libre's transaction layer.
@@ -207,8 +207,8 @@ there is nothing to vary.
 At runtime:
 
 ```c
-echosdk_set_adaptive_bitrate(true, 8000, 24000);
-echosdk_call_set_bitrate(call, 16000);   /* manual; 0 = negotiated rate */
+medut_set_adaptive_bitrate(true, 8000, 24000);
+medut_call_set_bitrate(call, 16000);   /* manual; 0 = negotiated rate */
 ```
 
 ### Opus FEC switches itself on and off
@@ -240,7 +240,7 @@ in-band FEC works on its own:
   Only a new report counts: the stats ticks between two reports carry no
   loss information, so they neither switch FEC on nor count towards off.
 
-The state is on every `ECHOSDK_EV_MEDIA_STATS` tick as `fec_active` and
+The state is on every `MEDUT_EV_MEDIA_STATS` tick as `fec_active` and
 `fec_level_pct`.
 
 A non-zero `opus_expected_loss_pct` pins the redundancy instead.
@@ -324,7 +324,7 @@ played as silence. Offering Opus is what makes such a link survivable.
 
 ## A stall is not always yours to repair
 
-`ECHOSDK_QUALITY_MEDIA_STALL` says inbound RTP stopped.  It does not say why,
+`MEDUT_QUALITY_MEDIA_STALL` says inbound RTP stopped.  It does not say why,
 and the two causes want opposite responses:
 
 * **Your path broke** — a NAT rebinding, a multi-WAN router moving your flow,
@@ -337,14 +337,14 @@ and the two causes want opposite responses:
   quiet comes back silent.
 
 The ICE agent answers the question.  While its connectivity checks are still
-being answered on the selected pair — `ECHOSDK_ICE_CONNECTED` or
-`ECHOSDK_ICE_COMPLETED` — the path is alive in both directions and the SDK
+being answered on the selected pair — `MEDUT_ICE_CONNECTED` or
+`MEDUT_ICE_COMPLETED` — the path is alive in both directions and the SDK
 declines the repair, logging *"the far end has gone quiet, not our path"*.
 The quality alert still reaches the app, because a user staring at a silent
-call wants to be told.  `ECHOSDK_ICE_DISCONNECTED` or `ECHOSDK_ICE_FAILED` is
+call wants to be told.  `MEDUT_ICE_DISCONNECTED` or `MEDUT_ICE_FAILED` is
 the opposite verdict and the repair runs as before, as it does for a call
 without ICE.
 
 So: treat `MEDIA_STALL` as "no audio is arriving", and read
-`echosdk_call_ice_state()` (or the `ice_state` field on the stats tick) to
+`medut_call_ice_state()` (or the `ice_state` field on the stats tick) to
 learn whose problem it is.

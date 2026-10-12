@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build EchoSDK for Linux x86_64.
-# Output: dist/linux/x86_64/echosdk.a  +  dist/linux/x86_64/include/
+# Build Medut for Linux x86_64.
+# Output: dist/linux/x86_64/medut.a  +  dist/linux/x86_64/include/
 #
 # Prerequisites: cmake ninja gcc openssl-devel (or libssl-dev)
 #                webrtc-audio-processing-devel (build-time only; optional at runtime)
@@ -34,27 +34,27 @@ bash "${SCRIPT_DIR}/fetch-third-party.sh"
 
 cmake -S "${ROOT}" -B "${BUILD_DIR}" -GNinja \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  -DECHOSDK_TLS=openssl \
-  -DECHOSDK_MODULES_PROFILE=desktop \
-  -DECHOSDK_WITH_WEBRTC_AEC="${ECHOSDK_WITH_WEBRTC_AEC:-ON}" \
+  -DMEDUT_TLS=openssl \
+  -DMEDUT_MODULES_PROFILE=desktop \
+  -DMEDUT_WITH_WEBRTC_AEC="${MEDUT_WITH_WEBRTC_AEC:-ON}" \
   -DHAVE_THREADS=OFF \
   -DCMAKE_C_FLAGS="-std=gnu11 -D_GNU_SOURCE -D_DEFAULT_SOURCE -Wno-error=deprecated-declarations"
 
-# gen_hpp re-embeds include/echosdk.h into bindings/cpp/echosdk.hpp; without
+# gen_hpp re-embeds include/medut.h into bindings/cpp/medut.hpp; without
 # it the C++ binding falls behind the header it ships with.
-cmake --build "${BUILD_DIR}" --target echosdk gen_hpp -j"$(nproc)"
+cmake --build "${BUILD_DIR}" --target medut gen_hpp -j"$(nproc)"
 cmake --install "${BUILD_DIR}"
 
 # ── Link shared library ───────────────────────────────────────────────────────
 DIST_DIR="${ROOT}/dist/linux/x86_64"
-SO="${DIST_DIR}/echosdk.so"
+SO="${DIST_DIR}/medut.so"
 echo ""
 echo "=== Linking ${SO} ==="
-# glibc_symver.c is already compiled into echosdk.a via the SRC_MODE build.
+# glibc_symver.c is already compiled into medut.a via the SRC_MODE build.
 # No --wrap flags: the SIP fixes live in the patched libre sources
 # (cmake/patch-re-sources.cmake), so the archive is self-contained.
 gcc -shared \
-  -Wl,--whole-archive "${DIST_DIR}/echosdk.a" -Wl,--no-whole-archive \
+  -Wl,--whole-archive "${DIST_DIR}/medut.a" -Wl,--no-whole-archive \
   -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl \
   "${PULSE_LDLIB}" \
   -Wl,--default-symver \
@@ -64,4 +64,4 @@ gcc -shared \
 
 echo ""
 echo "Done. Output:"
-ls -lh "${DIST_DIR}/echosdk.a" "${SO}"
+ls -lh "${DIST_DIR}/medut.a" "${SO}"

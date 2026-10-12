@@ -2,16 +2,16 @@
 
 ## Init/shutdown trace
 
-`echosdk_init()` and `echosdk_shutdown()` walk through ~14 stages. To trace which step a hang or crash occurs at, set the `ECHOSDK_DEBUG_INIT` env var before launching:
+`medut_init()` and `medut_shutdown()` walk through ~14 stages. To trace which step a hang or crash occurs at, set the `MEDUT_DEBUG_INIT` env var before launching:
 
 ```bash
 # Linux / macOS
-ECHOSDK_DEBUG_INIT=1 ./your_app
+MEDUT_DEBUG_INIT=1 ./your_app
 ```
 
 ```powershell
 # Windows
-$env:ECHOSDK_DEBUG_INIT=1
+$env:MEDUT_DEBUG_INIT=1
 .\your_app.exe
 ```
 
@@ -49,11 +49,11 @@ Enable per-message SIP tracing:
 cfg.trace_sip = true;
 ```
 
-Each `ECHOSDK_EV_SIP_TRACE` event contains the full SIP message. Log it:
+Each `MEDUT_EV_SIP_TRACE` event contains the full SIP message. Log it:
 
 ```c
-case ECHOSDK_EV_SIP_TRACE: {
-    const char *dir = (ev->u.sip_trace.dir == ECHOSDK_MEDIA_DIR_TX)
+case MEDUT_EV_SIP_TRACE: {
+    const char *dir = (ev->u.sip_trace.dir == MEDUT_MEDIA_DIR_TX)
                       ? "SEND" : "RECV";
     printf("[%s %s %s]\n%s\n",
            dir, ev->u.sip_trace.transport,
@@ -81,9 +81,9 @@ case ECHOSDK_EV_SIP_TRACE: {
 Write packets to a file for Wireshark analysis:
 
 ```c
-echosdk_pcap_start("/tmp/debug.pcap");
+medut_pcap_start("/tmp/debug.pcap");
 // ... reproduce issue ...
-echosdk_pcap_stop();
+medut_pcap_stop();
 ```
 
 Open in Wireshark:
@@ -120,10 +120,10 @@ Enable SDP diff to see codec and encryption negotiation:
 cfg.trace_sdp_diff = true;
 ```
 
-The `ECHOSDK_EV_SDP_NEGOTIATION` event shows:
+The `MEDUT_EV_SDP_NEGOTIATION` event shows:
 
 ```c
-case ECHOSDK_EV_SDP_NEGOTIATION: {
+case MEDUT_EV_SDP_NEGOTIATION: {
     printf("Codec: %s  Crypto: %s\n",
            ev->u.sdp.negotiated_codec,
            ev->u.sdp.negotiated_crypto);
@@ -147,7 +147,7 @@ cfg.stats_interval_ms = 3000;
 ```
 
 ```c
-case ECHOSDK_EV_MEDIA_STATS: {
+case MEDUT_EV_MEDIA_STATS: {
     printf("MOS-LQ=%.2f loss=%.1f%% jitter=%.1fms RTT=%.1fms\n",
            ev->u.stats.mos_lq, ev->u.stats.loss_pct,
            ev->u.stats.jitter_ms, ev->u.stats.rtt_ms);
@@ -170,7 +170,7 @@ case ECHOSDK_EV_MEDIA_STATS: {
 
 | Problem | Check |
 |---|---|
-| No REGISTER sent | `echosdk_account_register()` called? Network reachable? |
+| No REGISTER sent | `medut_account_register()` called? Network reachable? |
 | 401 Unauthorized | Wrong `uri` or `password`; check `auth_user` override |
 | 403 Forbidden | Account not provisioned on server; check `uri` domain |
 | 408 Timeout | Wrong `server_host`/`server_port`; firewall blocks SIP port |
@@ -189,7 +189,7 @@ attempt 4: wait 16s
 max:      wait 5 min  (reg_retry_max_ms)
 ```
 
-Monitor retries via `retry_attempt` and `retry_delay_ms` in `ECHOSDK_EV_REG_STATE`.
+Monitor retries via `retry_attempt` and `retry_delay_ms` in `MEDUT_EV_REG_STATE`.
 
 ---
 
@@ -197,14 +197,14 @@ Monitor retries via `retry_attempt` and `retry_delay_ms` in `ECHOSDK_EV_REG_STAT
 
 | Code | Meaning | Action |
 |---|---|---|
-| `ECHOSDK_ERR_DNS` | Cannot resolve server hostname | Check DNS / network |
-| `ECHOSDK_ERR_TRANSPORT` | TCP/TLS/WebSocket connection failed | Check firewall, TLS cert |
-| `ECHOSDK_ERR_AUTH` | SIP authentication failed | Verify credentials |
-| `ECHOSDK_ERR_FORBIDDEN` | Server refused this request (403) — on a call, a dialplan or policy refusal | Not a credentials problem; surface the refusal, not a login prompt |
-| `ECHOSDK_ERR_TIMEOUT` | No response (timer B/F expired) | Check server reachability |
-| `ECHOSDK_ERR_SERVER_5XX` | Server error | Check server logs |
-| `ECHOSDK_ERR_WS_PROTOCOL_REJECTED` | WebSocket upgrade rejected | Check `ws_origin`, server config |
-| `ECHOSDK_ERR_STATE` | API called in wrong lifecycle state | Check call/account state before calling |
+| `MEDUT_ERR_DNS` | Cannot resolve server hostname | Check DNS / network |
+| `MEDUT_ERR_TRANSPORT` | TCP/TLS/WebSocket connection failed | Check firewall, TLS cert |
+| `MEDUT_ERR_AUTH` | SIP authentication failed | Verify credentials |
+| `MEDUT_ERR_FORBIDDEN` | Server refused this request (403) — on a call, a dialplan or policy refusal | Not a credentials problem; surface the refusal, not a login prompt |
+| `MEDUT_ERR_TIMEOUT` | No response (timer B/F expired) | Check server reachability |
+| `MEDUT_ERR_SERVER_5XX` | Server error | Check server logs |
+| `MEDUT_ERR_WS_PROTOCOL_REJECTED` | WebSocket upgrade rejected | Check `ws_origin`, server config |
+| `MEDUT_ERR_STATE` | API called in wrong lifecycle state | Check call/account state before calling |
 
 ---
 
@@ -217,8 +217,8 @@ legitimate one. These are the log lines the SDK emits so that does not happen.
 ### The BYE that never left
 
 ```
-EchoSDK/sipsess: BYE queued
-EchoSDK/sipsess: BYE could not be sent (…) — the peer will stay on the call
+Medut/sipsess: BYE queued
+Medut/sipsess: BYE could not be sent (…) — the peer will stay on the call
                  until it gives up on its own
 ```
 
@@ -235,7 +235,7 @@ far end stays connected. Read the line at teardown:
 ### In-dialog requests routed away from the WebSocket flow
 
 ```
-EchoSDK: ws in-dialog route echo:5060 is not the registration flow;
+Medut: ws in-dialog route echo:5060 is not the registration flow;
          routing over pbx.example.com:443 instead (RFC 7118 B.2)
 ```
 
@@ -249,7 +249,7 @@ was accepted. This line means the SDK put it back on the registration flow.
 ### ICE candidates the peer was never told about
 
 ```
-EchoSDK/ice: selected local candidate <addr> was never signalled (offered <addr>)
+Medut/ice: selected local candidate <addr> was never signalled (offered <addr>)
              — re-offering so the peer accepts our media
 ```
 
@@ -261,7 +261,7 @@ the one on network handover, logged as `restarting ICE on <addr>`.
 ### ICE gathering that never finishes
 
 ```
-EchoSDK/ice: candidate gathering did not complete in time; offering the
+Medut/ice: candidate gathering did not complete in time; offering the
              candidates gathered so far (cfg.ice_gathering_timeout_ms=2000)
 ```
 
@@ -275,7 +275,7 @@ dial, `restart` for the re-gather of an ICE restart on network handover.
 ### ICE restart on handover
 
 ```
-EchoSDK/ice: restarting ICE on 100.82.7.19 — new credentials, re-gathering,
+Medut/ice: restarting ICE on 100.82.7.19 — new credentials, re-gathering,
              re-INVITE follows within 2000 ms
 ```
 
@@ -290,8 +290,8 @@ If a call still fails to migrate, look for the reasons a restart could not be
 performed:
 
 ```
-EchoSDK/ice: restart: replacement session failed (...) — keeping the current ICE state
-EchoSDK/ice: restart gathering failed (...) — offering the candidates gathered so far
+Medut/ice: restart: replacement session failed (...) — keeping the current ICE state
+Medut/ice: restart gathering failed (...) — offering the candidates gathered so far
 ```
 
 The first falls back to the plain re-INVITE and emits `CALL_ICE_STALE`; the
@@ -304,7 +304,7 @@ baresip would close a call that is up and merely needs a new offer.
 connchk: {audio.1} STUN Response: 401 Unauthorized
 ice: {audio.1} checklist update: no valid candidate pair (validlist=0)
 ice: connectivity check failed: No such file or directory [2]
-EchoSDK/ice: the restarted ICE generation did not nominate a pair within 6000 ms
+Medut/ice: the restarted ICE generation did not nominate a pair within 6000 ms
 ```
 
 The peer rejected the connectivity checks for the generation an ICE restart
@@ -321,7 +321,7 @@ Figure 6's state machine has no edge out of Failed. **Do not "fix" this by
 re-running the check list** — the only spec-legal recovery is a *new* ICE
 restart, i.e. fresh credentials and therefore a fresh generation.
 
-The call is left up and `ECHOSDK_NET_CALL_ICE_FAILED` is emitted. Audio usually
+The call is left up and `MEDUT_NET_CALL_ICE_FAILED` is emitted. Audio usually
 keeps working, because the stream is held on the pair a previous generation
 validated — check the `peer` field in the periodic level line to confirm which
 address it is actually on:
@@ -397,9 +397,9 @@ A WSS/WebRTC-facing PBX always offers `SAVPF`; set `media_enc` to DTLS-SRTP.
 ## Debug workflow
 
 1. Set `log_level = 2`, `trace_sip = true`, `trace_sdp_diff = true`.
-2. Start pcap capture: `echosdk_pcap_start("debug.pcap")`.
+2. Start pcap capture: `medut_pcap_start("debug.pcap")`.
 3. Reproduce the issue.
-4. Stop pcap: `echosdk_pcap_stop()`.
+4. Stop pcap: `medut_pcap_stop()`.
 5. Review SIP trace output for message flow.
 6. Open pcap in Wireshark for detailed analysis.
 7. Set `log_level = 3` if more detail is needed.

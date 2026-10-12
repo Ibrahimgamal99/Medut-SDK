@@ -9,13 +9,13 @@
  *   bsdk_spk_gain → bsdk_aec → bsdk_webrtc
  *
  * bsdk_webrtc    — WebRTC APM (AEC3 + NS + high-pass), desktop Linux builds
- *                  with ECHOSDK_WITH_WEBRTC_AEC.  First on TX so it sees the
+ *                  with MEDUT_WITH_WEBRTC_AEC.  First on TX so it sees the
  *                  raw microphone, last on RX so its far-end reference has
  *                  every RX gain applied.  That reference is the decoded audio
  *                  as it enters the playout buffer, not what the speaker
  *                  plays: the buffer and the device add their delay after it,
  *                  and AEC3's delay estimator absorbs that.  Registered only
- *                  for ECHOSDK_AEC_WEBRTC.
+ *                  for MEDUT_AEC_WEBRTC.
  * bsdk_mic_gain  — fixed dB scalar on the TX path (pre-boost before NS/AGC).
  * bsdk_ns        — broadband noise gate on TX: attenuates the pauses, leaves
  *                  speech alone.  Not a spectral suppressor; with WebRTC in
@@ -63,14 +63,14 @@
  * same at 10, 20 or 60 ms ptime.
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 #include <rem_au.h>
 #include <rem_aulevel.h>
 #include <rem_auframe.h>
 #include <string.h>
 #include <math.h>
 
-#if defined(ECHOSDK_PROFILE_DESKTOP) && defined(ECHOSDK_HAS_WEBRTC_AEC)
+#if defined(MEDUT_PROFILE_DESKTOP) && defined(MEDUT_HAS_WEBRTC_AEC)
 #define BSDK_WEBRTC 1
 #include "webrtc_apm.h"
 #endif
@@ -116,10 +116,10 @@ static RE_ATOMIC bool     s_webrtc_fallback;/* WEBRTC asked for, library absent 
 static RE_ATOMIC bool     s_user_ns;
 static RE_ATOMIC bool     s_user_agc;
 static RE_ATOMIC bool     s_aec_on;
-/* The app asked for the suppressor (echosdk_set_aec_mode) while it owns the
+/* The app asked for the suppressor (medut_set_aec_mode) while it owns the
  * device.  The one way the suppressor runs on an app-owned device, on every
  * platform: taking the device over never switches it on by itself, and
- * neither does echosdk_set_aec(true). */
+ * neither does medut_set_aec(true). */
 static RE_ATOMIC bool     s_supp_external_req;
 /* The app-owned device captures through the platform's voice path
  * (VoiceProcessingIO, VOICE_COMMUNICATION), as its engine reports from its
@@ -202,7 +202,7 @@ void bsdk_ap_log_chain(const char *why)
 	 * mic" is the first question worth answering when a caller reports that
 	 * the far end cannot hear them — on a device, from a log, without a
 	 * debugger. */
-	info("EchoSDK: TX chain [%s]: mic_gain=%s ns=%s agc=%s aec=%s\n",
+	info("Medut: TX chain [%s]: mic_gain=%s ns=%s agc=%s aec=%s\n",
 	     why ? why : "",
 	     load_f(&g_mic_gain_bits) != 1.0f ? "on" : "unity/bypass",
 	     ns, agc, aec);
@@ -904,7 +904,7 @@ static struct ap_call *webrtc_call_get(const struct audio *au)
 	c->apm_tried = true;
 	c->apm = bsdk_apm_create();
 	if (!c->apm) {
-		warning("EchoSDK: WebRTC APM would not start; "
+		warning("Medut: WebRTC APM would not start; "
 		        "this call has no echo cancellation\n");
 		return c;
 	}
@@ -987,7 +987,7 @@ static int webrtc_encode(struct aufilt_enc_st *st, struct auframe *af)
 	size_t block = webrtc_block(af);
 	if (!block || af->sampc % block) {
 		if (!c->c_warned) {
-			warning("EchoSDK: webrtc: TX frame of %zu samples at "
+			warning("Medut: webrtc: TX frame of %zu samples at "
 			        "%u Hz/%u ch is not whole 10 ms blocks; "
 			        "passing it through\n",
 			        af->sampc, af->srate, af->ch);
@@ -1000,7 +1000,7 @@ static int webrtc_encode(struct aufilt_enc_st *st, struct auframe *af)
 	for (size_t i = 0; i < af->sampc; i += block) {
 		int r = bsdk_apm_capture(c->apm, p + i, af->srate, af->ch);
 		if (r && !c->c_warned) {
-			warning("EchoSDK: webrtc: capture error %d\n", r);
+			warning("Medut: webrtc: capture error %d\n", r);
 			c->c_warned = true;
 		}
 	}
@@ -1030,7 +1030,7 @@ static int webrtc_decode(struct aufilt_dec_st *st, struct auframe *af)
 	size_t block = webrtc_block(af);
 	if (!block || block > RBUF_MAX) {
 		if (!c->r_warned) {
-			warning("EchoSDK: webrtc: RX at %u Hz/%u ch is not an "
+			warning("Medut: webrtc: RX at %u Hz/%u ch is not an "
 			        "APM format; no echo reference\n",
 			        af->srate, af->ch);
 			c->r_warned = true;
@@ -1148,31 +1148,31 @@ static struct aufilt g_spk_gain_filter = {
 /* Which echo control init settles on.  WEBRTC without the library (not
  * compiled in, or absent at runtime) falls back to the suppressor rather
  * than leaving the call with none. */
-static enum aec_backend pick_backend(echosdk_aec_mode_t mode)
+static enum aec_backend pick_backend(medut_aec_mode_t mode)
 {
 	switch (mode) {
-	case ECHOSDK_AEC_OFF:
+	case MEDUT_AEC_OFF:
 		return BACKEND_OFF;
-	case ECHOSDK_AEC_WEBRTC:
+	case MEDUT_AEC_WEBRTC:
 #ifdef BSDK_WEBRTC
 		if (bsdk_webrtc_lib_available())
 			return BACKEND_WEBRTC;
-		warning("EchoSDK: %s not found; WebRTC AEC unavailable, "
-		        "using the built-in suppressor\n", ECHOSDK_WEBRTC_SONAME);
+		warning("Medut: %s not found; WebRTC AEC unavailable, "
+		        "using the built-in suppressor\n", MEDUT_WEBRTC_SONAME);
 #else
-		warning("EchoSDK: WebRTC AEC not in this build; "
+		warning("Medut: WebRTC AEC not in this build; "
 		        "using the built-in suppressor\n");
 #endif
 		re_atomic_rlx_set(&s_webrtc_fallback, true);
 		return BACKEND_SUPPRESSOR;
-	case ECHOSDK_AEC_SUPPRESSOR:
+	case MEDUT_AEC_SUPPRESSOR:
 	default:
 		return BACKEND_SUPPRESSOR;
 	}
 }
 
 void bsdk_audio_processing_init(bool ns, bool agc,
-                                echosdk_aec_mode_t aec_mode,
+                                medut_aec_mode_t aec_mode,
                                 float aec_suppression_level,
                                 float mic_db, float spk_db)
 {
@@ -1199,7 +1199,7 @@ void bsdk_audio_processing_init(bool ns, bool agc,
 	re_atomic_rlx_set(&s_backend, (unsigned)pick_backend(aec_mode));
 	re_atomic_rlx_set(&s_user_ns,  ns);
 	re_atomic_rlx_set(&s_user_agc, agc);
-	re_atomic_rlx_set(&s_aec_on,   aec_mode != ECHOSDK_AEC_OFF);
+	re_atomic_rlx_set(&s_aec_on,   aec_mode != MEDUT_AEC_OFF);
 	re_atomic_rlx_set(&s_supp_external_req, false);
 	re_atomic_rlx_set(&s_external_vp, false);
 	re_atomic_rlx_add(&s_webrtc_gen, 1u);

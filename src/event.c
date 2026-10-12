@@ -1,9 +1,9 @@
 /**
- * @file event.c  baresip bevent → echosdk_event_t bridge
+ * @file event.c  baresip bevent → medut_event_t bridge
  *
  * baresip's global event handler fires on re_main. We CANNOT call consumer
- * callbacks from re_main because consumers may call back into EchoSDK
- * (e.g. echosdk_call_answer() from inside ECHOSDK_EV_INCOMING_CALL), which
+ * callbacks from re_main because consumers may call back into Medut
+ * (e.g. medut_call_answer() from inside MEDUT_EV_INCOMING_CALL), which
  * would deadlock if we tried to dispatch to re_main from re_main.
  *
  * Solution: re_main-side handler enqueues to a mutex+condvar queue.
@@ -14,15 +14,15 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 #include "sip_status.h"
 
 /* ── Queued-event allocation ─────────────────────────────────────────────── */
 
 /* A queued event may own a reference to the call wrapper it describes
- * (deref_after_deliver — see the field comment in echosdk_internal.h).  That
+ * (deref_after_deliver — see the field comment in medut_internal.h).  That
  * reference has to be released on *every* path the event can die on: normal
- * delivery, echosdk_event_release() in owned mode, and the queue-full drop
+ * delivery, medut_event_release() in owned mode, and the queue-full drop
  * inside bsdk_event_post_qev().
  *
  * It used to be released by hand at each of those, which meant the drop path —
@@ -33,7 +33,7 @@
  * cannot forget it. */
 static void qev_destructor(void *arg)
 {
-	struct echosdk_queued_event *qev = arg;
+	struct medut_queued_event *qev = arg;
 
 	mem_deref(qev->deref_after_deliver);
 }
@@ -41,9 +41,9 @@ static void qev_destructor(void *arg)
 /* Allocate a zeroed queued event.  Every producer goes through here: log.c,
  * trace.c, sdp.c, stats.c, message.c, presence.c, transfer.c, netmon.c and
  * this file. */
-struct echosdk_queued_event *bsdk_qev_alloc(void)
+struct medut_queued_event *bsdk_qev_alloc(void)
 {
-	return mem_zalloc(sizeof(struct echosdk_queued_event), qev_destructor);
+	return mem_zalloc(sizeof(struct medut_queued_event), qev_destructor);
 }
 
 /* ── Owned-event cloning (cfg.deliver_owned_events) ──────────────────────── */
@@ -52,8 +52,8 @@ struct echosdk_queued_event *bsdk_qev_alloc(void)
  * Pointers outside buf (static strings, call-wrapper buffers, NULL) pass
  * through unchanged. */
 static const char *rb(const char *p,
-                      const struct echosdk_queued_event *o,
-                      const struct echosdk_queued_event *n)
+                      const struct medut_queued_event *o,
+                      const struct medut_queued_event *n)
 {
 	if (p >= o->buf && p < o->buf + sizeof(o->buf))
 		return n->buf + (p - o->buf);
@@ -64,7 +64,7 @@ static const char *rb(const char *p,
  *
  * The whole block (struct + inline buf) is memcpy'd, then every string
  * pointer of the active union member is rebased into the clone's buf.
- * Keep the switch in sync with the echosdk_event_t union in echosdk.h
+ * Keep the switch in sync with the medut_event_t union in medut.h
  * and with the event construction sites (log.c, trace.c, sdp.c, stats.c,
  * message.c, presence.c, transfer.c, netmon.c, this file).
  *
@@ -72,11 +72,11 @@ static const char *rb(const char *p,
  * CALL_ENDED delivery) is transferred to the clone.  SDP events point
  * local_sdp/remote_sdp into the call wrapper's stable buffers, so the
  * clone takes an extra reference on the wrapper to keep them valid until
- * echosdk_event_release(). */
-static struct echosdk_queued_event *
-qev_clone(struct echosdk_queued_event *old)
+ * medut_event_release(). */
+static struct medut_queued_event *
+qev_clone(struct medut_queued_event *old)
 {
-	struct echosdk_queued_event *n = bsdk_qev_alloc();
+	struct medut_queued_event *n = bsdk_qev_alloc();
 	if (!n)
 		return NULL;
 
@@ -85,22 +85,22 @@ qev_clone(struct echosdk_queued_event *old)
 	n->deref_after_deliver   = old->deref_after_deliver;
 	old->deref_after_deliver = NULL;
 
-	echosdk_event_t *ev = &n->ev;
+	medut_event_t *ev = &n->ev;
 	switch (ev->type) {
-	case ECHOSDK_EV_LOG:
+	case MEDUT_EV_LOG:
 		ev->u.log.message = rb(ev->u.log.message, old, n);
 		break;
-	case ECHOSDK_EV_REG_STATE:
+	case MEDUT_EV_REG_STATE:
 		ev->u.reg.error_str = rb(ev->u.reg.error_str, old, n);
 		break;
-	case ECHOSDK_EV_INCOMING_CALL:
+	case MEDUT_EV_INCOMING_CALL:
 		ev->u.incoming.from_uri     = rb(ev->u.incoming.from_uri, old, n);
 		ev->u.incoming.display_name = rb(ev->u.incoming.display_name, old, n);
 		break;
-	case ECHOSDK_EV_CALL_STATE:
+	case MEDUT_EV_CALL_STATE:
 		ev->u.call_state.reason = rb(ev->u.call_state.reason, old, n);
 		break;
-	case ECHOSDK_EV_SDP_NEGOTIATION:
+	case MEDUT_EV_SDP_NEGOTIATION:
 		ev->u.sdp.negotiated_codec  = rb(ev->u.sdp.negotiated_codec, old, n);
 		ev->u.sdp.negotiated_crypto = rb(ev->u.sdp.negotiated_crypto, old, n);
 		/* local_sdp/remote_sdp live in the call wrapper (sdp.c) —
@@ -110,44 +110,44 @@ qev_clone(struct echosdk_queued_event *old)
 		if (ev->u.sdp.call && !n->deref_after_deliver)
 			n->deref_after_deliver = mem_ref(ev->u.sdp.call);
 		break;
-	case ECHOSDK_EV_SIP_TRACE:
+	case MEDUT_EV_SIP_TRACE:
 		ev->u.sip_trace.transport   = rb(ev->u.sip_trace.transport, old, n);
 		ev->u.sip_trace.remote_addr = rb(ev->u.sip_trace.remote_addr, old, n);
 		ev->u.sip_trace.raw_message = rb(ev->u.sip_trace.raw_message, old, n);
 		break;
-	case ECHOSDK_EV_MEDIA_STATS:
+	case MEDUT_EV_MEDIA_STATS:
 		ev->u.stats.codec_name = rb(ev->u.stats.codec_name, old, n);
 		break;
-	case ECHOSDK_EV_REGISTRAR_WARNING:
+	case MEDUT_EV_REGISTRAR_WARNING:
 		ev->u.reg_warn.message = rb(ev->u.reg_warn.message, old, n);
 		break;
-	case ECHOSDK_EV_TRANSFER_REQUEST:
+	case MEDUT_EV_TRANSFER_REQUEST:
 		ev->u.transfer_req.refer_to_uri =
 			rb(ev->u.transfer_req.refer_to_uri, old, n);
 		break;
-	case ECHOSDK_EV_TRANSFER_FAILED:
+	case MEDUT_EV_TRANSFER_FAILED:
 		ev->u.transfer_failed.reason =
 			rb(ev->u.transfer_failed.reason, old, n);
 		break;
-	case ECHOSDK_EV_MWI:
+	case MEDUT_EV_MWI:
 		ev->u.mwi.raw_body = rb(ev->u.mwi.raw_body, old, n);
 		break;
-	case ECHOSDK_EV_MESSAGE:
+	case MEDUT_EV_MESSAGE:
 		ev->u.msg.from_uri     = rb(ev->u.msg.from_uri, old, n);
 		ev->u.msg.body         = rb(ev->u.msg.body, old, n);
 		ev->u.msg.content_type = rb(ev->u.msg.content_type, old, n);
 		break;
-	case ECHOSDK_EV_PRESENCE_STATE:
+	case MEDUT_EV_PRESENCE_STATE:
 		ev->u.presence.target_uri = rb(ev->u.presence.target_uri, old, n);
 		break;
-	case ECHOSDK_EV_QUALITY_ALERT:
-	case ECHOSDK_EV_CALL_DTMF:
+	case MEDUT_EV_QUALITY_ALERT:
+	case MEDUT_EV_CALL_DTMF:
 		/* no string fields */
 		break;
-	case ECHOSDK_EV_NETWORK:
+	case MEDUT_EV_NETWORK:
 		ev->u.network.local_addr = rb(ev->u.network.local_addr, old, n);
 		break;
-	case ECHOSDK_EV_ICE_STATE:
+	case MEDUT_EV_ICE_STATE:
 		ev->u.ice.local_addr  = rb(ev->u.ice.local_addr, old, n);
 		ev->u.ice.remote_addr = rb(ev->u.ice.remote_addr, old, n);
 		break;
@@ -156,14 +156,14 @@ qev_clone(struct echosdk_queued_event *old)
 	return n;
 }
 
-void echosdk_event_release(const echosdk_event_t *ev)
+void medut_event_release(const medut_event_t *ev)
 {
 	if (!ev)
 		return;
 
-	struct echosdk_queued_event *qev = (struct echosdk_queued_event *)
+	struct medut_queued_event *qev = (struct medut_queued_event *)
 		((char *)(uintptr_t)ev -
-		 offsetof(struct echosdk_queued_event, ev));
+		 offsetof(struct medut_queued_event, ev));
 
 	/* qev_destructor releases deref_after_deliver. */
 	mem_deref(qev);
@@ -185,16 +185,16 @@ static int event_thread_fn(void *arg)
 		/* Drain the whole queue before checking shutdown again */
 		struct le *le = list_head(&g_bsdk.ev_queue);
 		if (le) {
-			struct echosdk_queued_event *qev = le->data;
+			struct medut_queued_event *qev = le->data;
 			list_unlink(&qev->le);
 			g_bsdk.ev_queue_len--;
 			/* Snapshot the handler while still holding ev_lock:
-			 * echosdk_set_event_handler() may swap all three fields
+			 * medut_set_event_handler() may swap all three fields
 			 * concurrently and this delivery must use one coherent
 			 * set. Once taken, the old callback can still be running
 			 * here after the swap returns, which is why the swap only
 			 * promises that no *new* delivery uses it. */
-			echosdk_event_cb_t  cb    = g_bsdk.cfg.event_cb;
+			medut_event_cb_t  cb    = g_bsdk.cfg.event_cb;
 			void               *cb_ud = g_bsdk.cfg.event_userdata;
 			bool                owned = g_bsdk.cfg.deliver_owned_events;
 			/* Held across the callback so a handler swap can wait the
@@ -207,9 +207,9 @@ static int event_thread_fn(void *arg)
 			if (cb) {
 				if (owned) {
 					/* Hand the consumer an owned clone; it
-					 * frees it via echosdk_event_release().
+					 * frees it via medut_event_release().
 					 * OOM → event dropped. */
-					struct echosdk_queued_event *own =
+					struct medut_queued_event *own =
 						qev_clone(qev);
 					if (own)
 						cb(&own->ev, cb_ud);
@@ -241,14 +241,14 @@ static int event_thread_fn(void *arg)
 
 /* Takes ownership of qev. Returns true on success, false if queue was full
  * (qev is freed on failure). Safe to call from re_main or any thread. */
-bool bsdk_event_post_qev(struct echosdk_queued_event *qev)
+bool bsdk_event_post_qev(struct medut_queued_event *qev)
 {
 	mtx_lock(&g_bsdk.ev_lock);
 	if (g_bsdk.ev_queue_len >= g_bsdk.ev_queue_max) {
 		int type = qev->ev.type;   /* read before deref */
 		mtx_unlock(&g_bsdk.ev_lock);
 		mem_deref(qev);
-		warning("EchoSDK/event: dropped event type %d (queue full)\n", type);
+		warning("Medut/event: dropped event type %d (queue full)\n", type);
 		return false;
 	}
 	list_append(&g_bsdk.ev_queue, &qev->le, qev);
@@ -259,11 +259,11 @@ bool bsdk_event_post_qev(struct echosdk_queued_event *qev)
 }
 
 /* Post a copy of ev to the event queue. Safe to call from re_main. */
-void bsdk_event_post(const echosdk_event_t *ev)
+void bsdk_event_post(const medut_event_t *ev)
 {
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev) {
-		warning("EchoSDK/event: dropped event type %d (OOM)\n", ev->type);
+		warning("Medut/event: dropped event type %d (OOM)\n", ev->type);
 		return;
 	}
 	memcpy(&qev->ev, ev, sizeof(*ev));
@@ -282,9 +282,9 @@ void bsdk_event_post(const echosdk_event_t *ev)
  * ours to describe, and a genuine codec mismatch is still possible there.
  */
 static bool codec_reason_is_really_menc(const char *reason,
-                                        const struct echosdk_account *acct)
+                                        const struct medut_account *acct)
 {
-	echosdk_media_enc_t enc;
+	medut_media_enc_t enc;
 
 	if (!reason || !acct)
 		return false;
@@ -293,7 +293,7 @@ static bool codec_reason_is_really_menc(const char *reason,
 		return false;
 
 	enc = acct->cfg.media_enc ? acct->cfg.media_enc : g_bsdk.cfg.media_enc;
-	return enc == ECHOSDK_MEDIA_ENC_NONE;
+	return enc == MEDUT_MEDIA_ENC_NONE;
 }
 
 static void bevent_handler(enum bevent_ev bev,
@@ -302,14 +302,14 @@ static void bevent_handler(enum bevent_ev bev,
 {
 	(void)arg;
 
-	echosdk_event_t ev = {0};
+	medut_event_t ev = {0};
 	bool post = true;
 	struct ua   *ua   = bevent_get_ua(event);
 	struct call *bc   = bevent_get_call(event);
 
-	struct echosdk_account *acct =
+	struct medut_account *acct =
 		ua ? bsdk_account_find_by_ua(ua) : NULL;
-	struct echosdk_call    *lc   =
+	struct medut_call    *lc   =
 		bc ? bsdk_call_find(bc) : NULL;
 
 	switch (bev) {
@@ -325,7 +325,7 @@ static void bevent_handler(enum bevent_ev bev,
 	}
 
 	case BEVENT_REGISTERING:
-		ev.type          = ECHOSDK_EV_REG_STATE;
+		ev.type          = MEDUT_EV_REG_STATE;
 		ev.u.reg.account = acct;
 
 		if (acct && acct->reconnecting) {
@@ -334,9 +334,9 @@ static void bevent_handler(enum bevent_ev bev,
 			 * told about, not a new registration.  Reporting REGISTERING
 			 * here would flip the status line between "Reconnecting…" and
 			 * "Registering…" once per attempt for the whole outage. */
-			ev.u.reg.state  = ECHOSDK_REG_RECONNECTING;
+			ev.u.reg.state  = MEDUT_REG_RECONNECTING;
 			ev.u.reg.error  = acct->reg_error;
-			acct->reg_state = ECHOSDK_REG_RECONNECTING;
+			acct->reg_state = MEDUT_REG_RECONNECTING;
 			/* The countdown event already said exactly this, so
 			 * the attempt leaving the socket is not news. */
 			if (!bsdk_account_reg_ev_prepare(acct, &ev)) {
@@ -349,7 +349,7 @@ static void bevent_handler(enum bevent_ev bev,
 			 * own copy: acct->reg_error_str is re-written by the next
 			 * failure, and the consumer reads this on another thread. */
 			if (acct->reg_error_str[0]) {
-				struct echosdk_queued_event *qev =
+				struct medut_queued_event *qev =
 				        bsdk_qev_alloc();
 				if (qev) {
 					str_ncpy(qev->buf, acct->reg_error_str,
@@ -362,9 +362,9 @@ static void bevent_handler(enum bevent_ev bev,
 			}
 		}
 		else {
-			ev.u.reg.state = ECHOSDK_REG_REGISTERING;
+			ev.u.reg.state = MEDUT_REG_REGISTERING;
 			if (acct)
-				acct->reg_state = ECHOSDK_REG_REGISTERING;
+				acct->reg_state = MEDUT_REG_REGISTERING;
 		}
 		break;
 
@@ -377,17 +377,17 @@ static void bevent_handler(enum bevent_ev bev,
 	 * REGISTERING forever with no event and no error. */
 	case BEVENT_REGISTER_OK:
 	case BEVENT_FALLBACK_OK:
-		ev.type        = ECHOSDK_EV_REG_STATE;
-		ev.u.reg.state = ECHOSDK_REG_REGISTERED;
-		ev.u.reg.error = ECHOSDK_OK;
+		ev.type        = MEDUT_EV_REG_STATE;
+		ev.u.reg.state = MEDUT_REG_REGISTERED;
+		ev.u.reg.error = MEDUT_OK;
 		ev.u.reg.account = acct;
 		if (acct) {
-			acct->reg_state    = ECHOSDK_REG_REGISTERED;
+			acct->reg_state    = MEDUT_REG_REGISTERED;
 			acct->retry_attempt = 0;
 			/* Recovered — the next failure starts a new reconnect. */
 			acct->reconnecting = false;
 			acct->ka_failed    = false;
-			acct->reg_error    = ECHOSDK_OK;
+			acct->reg_error    = MEDUT_OK;
 			acct->reg_error_str[0] = '\0';
 			/* Registered and reachable — start probing so we notice if
 			 * that stops being true before the next refresh. */
@@ -399,16 +399,16 @@ static void bevent_handler(enum bevent_ev bev,
 	case BEVENT_REGISTER_FAIL:
 	case BEVENT_FALLBACK_FAIL: {   /* see FALLBACK_OK above */
 		const char *reason = bevent_get_text(event);
-		ev.type            = ECHOSDK_EV_REG_STATE;
+		ev.type            = MEDUT_EV_REG_STATE;
 		ev.u.reg.account   = acct;
 		/* Classify error by 3-digit SIP status code */
 		int code = bsdk_sip_reason_code(reason);
 		if (code == 401 || code == 403 || code == 407)
-			ev.u.reg.error = ECHOSDK_ERR_AUTH;
+			ev.u.reg.error = MEDUT_ERR_AUTH;
 		else if (code >= 500 && code < 600)
-			ev.u.reg.error = ECHOSDK_ERR_SERVER_5XX;
+			ev.u.reg.error = MEDUT_ERR_SERVER_5XX;
 		else
-			ev.u.reg.error = ECHOSDK_ERR_TRANSPORT;
+			ev.u.reg.error = MEDUT_ERR_TRANSPORT;
 
 		/* RECONNECTING while the SDK still has a retry to spend on this —
 		 * a timeout, a 5xx, a transport that died with the network.  FAILED
@@ -419,11 +419,11 @@ static void bevent_handler(enum bevent_ev bev,
 		 * sent, or not answered): it is unregistered either way, and the
 		 * binding lapses at the registrar on its own. */
 		if (acct && !acct->reg_wanted)
-			ev.u.reg.state = ECHOSDK_REG_UNREGISTERED;
+			ev.u.reg.state = MEDUT_REG_UNREGISTERED;
 		else
 			ev.u.reg.state = acct
 			        ? bsdk_account_reg_fail_state(acct, ev.u.reg.error)
-			        : ECHOSDK_REG_FAILED;
+			        : MEDUT_REG_FAILED;
 
 		if (acct) {
 			acct->reg_state  = ev.u.reg.state;
@@ -445,7 +445,7 @@ static void bevent_handler(enum bevent_ev bev,
 			 * Outside the queued-event allocation below as well: a
 			 * failed alloc costs one event, it must not cost the
 			 * recovery. */
-			if (ev.u.reg.error != ECHOSDK_ERR_AUTH)
+			if (ev.u.reg.error != MEDUT_ERR_AUTH)
 				bsdk_account_schedule_retry(acct);
 
 			/* schedule_retry() has just reported this same reconnect,
@@ -457,7 +457,7 @@ static void bevent_handler(enum bevent_ev bev,
 		}
 
 		/* Enqueue via a queued_event so the string lives long enough */
-		struct echosdk_queued_event *qev = bsdk_qev_alloc();
+		struct medut_queued_event *qev = bsdk_qev_alloc();
 		if (qev) {
 			if (reason)
 				str_ncpy(qev->buf, reason, sizeof(qev->buf));
@@ -470,11 +470,11 @@ static void bevent_handler(enum bevent_ev bev,
 	}
 
 	case BEVENT_UNREGISTERING:
-		ev.type        = ECHOSDK_EV_REG_STATE;
-		ev.u.reg.state = ECHOSDK_REG_UNREGISTERING;
+		ev.type        = MEDUT_EV_REG_STATE;
+		ev.u.reg.state = MEDUT_REG_UNREGISTERING;
 		ev.u.reg.account = acct;
 		if (acct) {
-			acct->reg_state    = ECHOSDK_REG_UNREGISTERING;
+			acct->reg_state    = MEDUT_REG_UNREGISTERING;
 			acct->reconnecting = false;
 			(void)bsdk_account_reg_ev_prepare(acct, &ev);
 		}
@@ -484,18 +484,18 @@ static void bevent_handler(enum bevent_ev bev,
 		/* An incoming call inherits no account headers: those exist to be
 		 * put on requests we originate, and this dialog's requests were
 		 * originated by the peer. */
-		struct echosdk_call *new_lc =
-			bsdk_call_wrap_new(bc, acct, ECHOSDK_CALL_RINGING, false);
+		struct medut_call *new_lc =
+			bsdk_call_wrap_new(bc, acct, MEDUT_CALL_RINGING, false);
 		if (!new_lc) { post = false; break; }
 
-		struct echosdk_queued_event *qev = bsdk_qev_alloc();
+		struct medut_queued_event *qev = bsdk_qev_alloc();
 		if (!qev) {
 			bsdk_call_unregister(new_lc);
 			mem_deref(new_lc);
 			post = false;
 			break;
 		}
-		qev->ev.type = ECHOSDK_EV_INCOMING_CALL;
+		qev->ev.type = MEDUT_EV_INCOMING_CALL;
 		qev->ev.u.incoming.account = acct;
 		qev->ev.u.incoming.call    = new_lc;
 		/* Pack strings into buf: from_uri\0display_name\0 */
@@ -527,11 +527,11 @@ static void bevent_handler(enum bevent_ev bev,
 	case BEVENT_CALL_PROGRESS:   /* 183 w/ SDP — alerting, early media may
 	                              * already be flowing, so the consumer needs
 	                              * the same signal as a plain 180. */
-		ev.type = ECHOSDK_EV_CALL_STATE;
+		ev.type = MEDUT_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;
 		ev.u.call_state.account = acct;
-		ev.u.call_state.state   = ECHOSDK_CALL_RINGING;
-		if (lc) lc->state = ECHOSDK_CALL_RINGING;
+		ev.u.call_state.state   = MEDUT_CALL_RINGING;
+		if (lc) lc->state = MEDUT_CALL_RINGING;
 		break;
 
 	/* Outgoing only: the 2xx to our INVITE, reported before its SDP answer
@@ -542,12 +542,12 @@ static void bevent_handler(enum bevent_ev bev,
 		break;
 
 	case BEVENT_CALL_ESTABLISHED:
-		ev.type = ECHOSDK_EV_CALL_STATE;
+		ev.type = MEDUT_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;
 		ev.u.call_state.account = acct;
-		ev.u.call_state.state   = ECHOSDK_CALL_ESTABLISHED;
+		ev.u.call_state.state   = MEDUT_CALL_ESTABLISHED;
 		if (lc) {
-			lc->state            = ECHOSDK_CALL_ESTABLISHED;
+			lc->state            = MEDUT_CALL_ESTABLISHED;
 			lc->stats_call_start = tmr_jiffies();
 			/* The call is up — the setup watchdog has nothing left to
 			 * guard against. */
@@ -564,7 +564,7 @@ static void bevent_handler(enum bevent_ev bev,
 
 	case BEVENT_CALL_CLOSED: {
 		const char *reason = bevent_get_text(event);
-		ev.type = ECHOSDK_EV_CALL_STATE;
+		ev.type = MEDUT_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;
 		ev.u.call_state.account = acct;
 
@@ -591,24 +591,24 @@ static void bevent_handler(enum bevent_ev bev,
 		 *
 		 * A real socket death on an established call is then also reported as
 		 * ENDED.  That is the right trade: the call is over either way, and the
-		 * transport itself is covered by REG_STATE and ECHOSDK_EV_NETWORK, which
+		 * transport itself is covered by REG_STATE and MEDUT_EV_NETWORK, which
 		 * a plain hangup never touches. */
 		bool peer_hangup = is_transport_err && lc &&
-		                   lc->state == ECHOSDK_CALL_ESTABLISHED;
+		                   lc->state == MEDUT_CALL_ESTABLISHED;
 
 		if (scode == 487)
-			ev.u.call_state.state = ECHOSDK_CALL_CANCELLED;
+			ev.u.call_state.state = MEDUT_CALL_CANCELLED;
 		else if (peer_hangup)
-			ev.u.call_state.state = ECHOSDK_CALL_ENDED;
+			ev.u.call_state.state = MEDUT_CALL_ENDED;
 		else if (scode >= 400 || is_transport_err)
-			ev.u.call_state.state = ECHOSDK_CALL_FAILED;
+			ev.u.call_state.state = MEDUT_CALL_FAILED;
 		else
-			ev.u.call_state.state = ECHOSDK_CALL_ENDED;
+			ev.u.call_state.state = MEDUT_CALL_ENDED;
 
 		ev.u.call_state.error = bsdk_sip_call_error(scode);
-		if (ev.u.call_state.error == ECHOSDK_OK &&
+		if (ev.u.call_state.error == MEDUT_OK &&
 		    is_transport_err && !peer_hangup)
-			ev.u.call_state.error = ECHOSDK_ERR_TRANSPORT;
+			ev.u.call_state.error = MEDUT_ERR_TRANSPORT;
 
 		if (lc) {
 			bsdk_stats_collect_final(lc);  /* must be before bc = NULL */
@@ -617,7 +617,7 @@ static void bevent_handler(enum bevent_ev bev,
 			bsdk_call_unregister(lc);
 		}
 
-		struct echosdk_queued_event *qev = bsdk_qev_alloc();
+		struct medut_queued_event *qev = bsdk_qev_alloc();
 		if (qev) {
 			memcpy(&qev->ev, &ev, sizeof(ev));
 			if (peer_hangup) {
@@ -658,20 +658,20 @@ static void bevent_handler(enum bevent_ev bev,
 	}
 
 	case BEVENT_CALL_HOLD:
-		ev.type = ECHOSDK_EV_CALL_STATE;
+		ev.type = MEDUT_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;
 		ev.u.call_state.account = acct;
-		ev.u.call_state.state   = ECHOSDK_CALL_HELD;
-		if (lc) lc->state = ECHOSDK_CALL_HELD;
+		ev.u.call_state.state   = MEDUT_CALL_HELD;
+		if (lc) lc->state = MEDUT_CALL_HELD;
 		break;
 
 	case BEVENT_CALL_RESUME:
-		ev.type = ECHOSDK_EV_CALL_STATE;
+		ev.type = MEDUT_EV_CALL_STATE;
 		ev.u.call_state.call    = lc;
 		ev.u.call_state.account = acct;
-		ev.u.call_state.state   = ECHOSDK_CALL_ESTABLISHED;
+		ev.u.call_state.state   = MEDUT_CALL_ESTABLISHED;
 		if (lc) {
-			lc->state = ECHOSDK_CALL_ESTABLISHED;
+			lc->state = MEDUT_CALL_ESTABLISHED;
 			bsdk_netmon_call_refreshable(lc);
 		}
 		break;
@@ -680,7 +680,7 @@ static void bevent_handler(enum bevent_ev bev,
 	case BEVENT_CALL_DTMF_END: {
 		const char *txt = bevent_get_text(event);
 		if (!txt || !txt[0]) { post = false; break; }
-		ev.type = ECHOSDK_EV_CALL_DTMF;
+		ev.type = MEDUT_EV_CALL_DTMF;
 		ev.u.dtmf.call  = lc;
 		ev.u.dtmf.digit = txt[0];
 		break;
@@ -712,19 +712,19 @@ static void bevent_handler(enum bevent_ev bev,
 
 	case BEVENT_CALL_TRANSFER_FAILED: {
 		/* A refused REFER leaves the call ESTABLISHED — baresip does not
-		 * close it, and reporting ECHOSDK_CALL_FAILED here did: consumers
+		 * close it, and reporting MEDUT_CALL_FAILED here did: consumers
 		 * treat that state as terminal and drop their call handle, so a
 		 * blind transfer to a busy or unknown extension silently destroyed
 		 * the live call the user was still talking on.  Report the transfer
 		 * outcome instead and leave lc->state alone. */
 		const char *reason = bevent_get_text(event);
-		ev.type = ECHOSDK_EV_TRANSFER_FAILED;
+		ev.type = MEDUT_EV_TRANSFER_FAILED;
 		ev.u.transfer_failed.call    = lc;
 		ev.u.transfer_failed.account = acct;
 		ev.u.transfer_failed.reason  = NULL;
 
 		if (reason) {
-			struct echosdk_queued_event *qev = bsdk_qev_alloc();
+			struct medut_queued_event *qev = bsdk_qev_alloc();
 			if (qev) {
 				memcpy(&qev->ev, &ev, sizeof(ev));
 				str_ncpy(qev->buf, reason, sizeof(qev->buf));
@@ -745,18 +745,18 @@ static void bevent_handler(enum bevent_ev bev,
 	 * "unhandled" log below — an unexplained drop reads as a gap in the
 	 * mapping, and CALL_RTCP alone fires every few seconds of every call.
 	 *
-	 *   OUTGOING  fires inside ua_connect(), before echosdk_call_invite()
+	 *   OUTGOING  fires inside ua_connect(), before medut_call_invite()
 	 *             has built its wrapper, so there is no call handle to
 	 *             report yet.  The invite returns the handle in state
 	 *             CALLING instead.
 	 *   RTPESTAB  first RTP packet; MEDIA_STATS and the audio-level events
 	 *             already cover live media.
 	 *   RTCP      periodic report; stats.c samples the same counters off
-	 *             its own timer for ECHOSDK_EV_MEDIA_STATS.
+	 *             its own timer for MEDUT_EV_MEDIA_STATS.
 	 *   MENC      media-encryption progress; the SDK reports the outcome
 	 *             through the call state and SDP negotiation events.
 	 *   CREATE    a UA was allocated, which the caller already knows:
-	 *             echosdk_account_create() returned it the handle.
+	 *             medut_account_create() returned it the handle.
 	 */
 	case BEVENT_CALL_MENC:
 		/* Not posted, but netmon wants to know: a migration held back
@@ -782,7 +782,7 @@ static void bevent_handler(enum bevent_ev bev,
 		 * is indistinguishable from one that never fired, which is how
 		 * FALLBACK_OK above cost a day: the stack was registered and the
 		 * app could not tell. */
-		debug("EchoSDK: unhandled baresip event %s (%d)\n",
+		debug("Medut: unhandled baresip event %s (%d)\n",
 		      bevent_str(bev), (int)bev);
 		post = false;
 		break;
@@ -814,7 +814,7 @@ void bsdk_event_close(void)
 
 	/* Signal the event thread to drain and exit.
 	 *
-	 * Guarded because this also runs from echosdk_init()'s failure path,
+	 * Guarded because this also runs from medut_init()'s failure path,
 	 * which unwinds every subsystem whether or not it got as far as being
 	 * started.  Joining a thrd_t that was never assigned is undefined and in
 	 * practice segfaults, so an SDK that failed to initialise crashed the
@@ -832,12 +832,12 @@ void bsdk_event_close(void)
 	/* Free any remaining queued events */
 	struct le *le, *le_tmp;
 	LIST_FOREACH_SAFE(&g_bsdk.ev_queue, le, le_tmp) {
-		struct echosdk_queued_event *qev = le->data;
+		struct medut_queued_event *qev = le->data;
 		list_unlink(&qev->le);
 		mem_deref(qev);
 	}
 
-	/* Keep the counter with the list.  echosdk_init() re-zeroes it, so this
+	/* Keep the counter with the list.  medut_init() re-zeroes it, so this
 	 * is belt-and-braces today, but a stale non-zero length here would make
 	 * a re-initialised SDK think its empty queue was already full and drop
 	 * every event forever. */

@@ -1,4 +1,4 @@
-/* EchoSDK-patched: bound on one DTLS handshake, and how many times it may be
+/* Medut-patched: bound on one DTLS handshake, and how many times it may be
  * restarted before we accept that the peer is not going to answer.
  *
  * The first bound is much shorter than the rest, because the first thing that
@@ -15,13 +15,13 @@
  * the point where OpenSSL's own backoff has cost more than a fresh association
  * would.  Later attempts back off: by then the evidence points at a path that
  * is not going to carry DTLS at all, and hammering it buys nothing. */
-#define ECHOSDK_DTLS_HANDSHAKE_MS       1200
-#define ECHOSDK_DTLS_HANDSHAKE_LATER_MS 2500
-#define ECHOSDK_DTLS_MAX_RESTARTS          4
+#define MEDUT_DTLS_HANDSHAKE_MS       1200
+#define MEDUT_DTLS_HANDSHAKE_LATER_MS 2500
+#define MEDUT_DTLS_MAX_RESTARTS          4
 
 struct dtls_srtp {
 	struct comp compv[2];
-	struct tmr tmr_hs;      /* EchoSDK-patched: handshake deadline */
-	struct sa raddr_rtp;    /* EchoSDK-patched: kept for a restart */
-	struct sa raddr_rtcp;   /* EchoSDK-patched: kept for a restart */
-	unsigned hs_restarts;   /* EchoSDK-patched: restarts spent */
+	struct tmr tmr_hs;      /* Medut-patched: handshake deadline */
+	struct sa raddr_rtp;    /* Medut-patched: kept for a restart */
+	struct sa raddr_rtcp;   /* Medut-patched: kept for a restart */
+	unsigned hs_restarts;   /* Medut-patched: restarts spent */

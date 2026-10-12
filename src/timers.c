@@ -1,5 +1,5 @@
 /**
- * @file timers.c  Map echosdk_config_t timer/TOS/TLS fields → conf_config()
+ * @file timers.c  Map medut_config_t timer/TOS/TLS fields → conf_config()
  *
  * Called from core.c after baresip_init() and before ua_init().
  * Only fields that baresip exposes in struct config are set here.
@@ -8,7 +8,7 @@
  */
 
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Defaults for a bound left at 0.  Fixed keeps baresip's own {100, 200}:
  * a fixed buffer holds its min, and 40 ms would be too shallow to hold. */
@@ -19,11 +19,11 @@ enum {
 	JB_FIXED_MAX_MS    = 200,
 };
 
-void bsdk_jbuf_configure(echosdk_jbuf_type_t type, uint32_t min_ms,
+void bsdk_jbuf_configure(medut_jbuf_type_t type, uint32_t min_ms,
                          uint32_t max_ms)
 {
 	struct config *c = conf_config();
-	const bool fixed = (type == ECHOSDK_JBUF_FIXED);
+	const bool fixed = (type == MEDUT_JBUF_FIXED);
 
 	if (!min_ms)
 		min_ms = fixed ? JB_FIXED_MIN_MS : JB_ADAPTIVE_MIN_MS;
@@ -37,7 +37,7 @@ void bsdk_jbuf_configure(echosdk_jbuf_type_t type, uint32_t min_ms,
 	c->avt.audio.jbuf_del.max = max_ms;
 }
 
-void bsdk_timers_configure(const echosdk_config_t *cfg)
+void bsdk_timers_configure(const medut_config_t *cfg)
 {
 	struct config *c = conf_config();
 

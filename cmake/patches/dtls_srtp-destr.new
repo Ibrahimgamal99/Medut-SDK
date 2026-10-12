@@ -1,6 +1,6 @@
 	struct dtls_srtp *st = arg;
 	size_t i;
 
-	tmr_cancel(&st->tmr_hs);  /* EchoSDK-patched: it closes over `st` */
+	tmr_cancel(&st->tmr_hs);  /* Medut-patched: it closes over `st` */
 
 	for (i=0; i<2; i++) {

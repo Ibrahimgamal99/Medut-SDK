@@ -3,7 +3,7 @@
  *                  make or receive one call.
  *
  * Build (Linux):
- *   g++ -std=c++17 quickstart.cpp echosdk.so -I. -o quickstart
+ *   g++ -std=c++17 quickstart.cpp medut.so -I. -o quickstart
  *
  * Usage:
  *   ./quickstart account.json                          # receive mode
@@ -12,8 +12,8 @@
  *   ./quickstart alice@pbx.example.com secret bob@...  # legacy CLI mode (dial)
  *
  * Debug:
- *   ECHOSDK_DEBUG_INIT=1 ./quickstart account.json     # verbose init/shutdown trace
- *   $env:ECHOSDK_DEBUG_INIT=1; .\quickstart.exe ...    # PowerShell equivalent
+ *   MEDUT_DEBUG_INIT=1 ./quickstart account.json     # verbose init/shutdown trace
+ *   $env:MEDUT_DEBUG_INIT=1; .\quickstart.exe ...    # PowerShell equivalent
  *
  * Minimal JSON account config (account.json):
  * {
@@ -43,7 +43,7 @@
  *   "rel100":         "enabled"                       // "disabled" | "enabled" | "required"
  */
 
-#include "../echosdk.hpp"
+#include "../medut.hpp"
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  define NOMINMAX
@@ -68,7 +68,7 @@
  * Live in-call timer
  *
  * Talk time is kept on a steady_clock here rather than read from
- * echosdk_ev_media_stats_t::call_duration_ms: that figure only advances once
+ * medut_ev_media_stats_t::call_duration_ms: that figure only advances once
  * per stats_interval_ms and is not produced at all when stats are disabled, so
  * a clock built on it moves in jumps.  The SDK's figure is the one
  * to report; this one is the one to watch.
@@ -286,7 +286,7 @@ static JsonValue load_json_file(const std::string& path) {
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Helper: safely extract a C string from a std::string that must outlive the
- * echosdk_account_config_t that references it.
+ * medut_account_config_t that references it.
  * ═══════════════════════════════════════════════════════════════════════════ */
 static const char* cstr_or_null(const std::string& s) {
     return s.empty() ? nullptr : s.c_str();
@@ -309,49 +309,49 @@ struct AccountConfig {
     bool        enabled     = true;
     int         server_port = 0;
 
-    echosdk_transport_t    transport   = ECHOSDK_TRANSPORT_WSS;
-    echosdk_media_enc_t    media_enc   = ECHOSDK_MEDIA_ENC_DTLS_SRTP;
+    medut_transport_t    transport   = MEDUT_TRANSPORT_WSS;
+    medut_media_enc_t    media_enc   = MEDUT_MEDIA_ENC_DTLS_SRTP;
     bool                   ice_enabled = true;
     bool                   rtcp_mux    = false;
     bool                   rtcp_mux_set = false;
     bool                   verify_tls  = true;
-    echosdk_100rel_mode_t  rel100      = ECHOSDK_100REL_DISABLED;
-    echosdk_dtmf_mode_t    dtmf_mode   = ECHOSDK_DTMF_RFC4733;
+    medut_100rel_mode_t  rel100      = MEDUT_100REL_DISABLED;
+    medut_dtmf_mode_t    dtmf_mode   = MEDUT_DTMF_RFC4733;
 
     /* ── the C struct; populated by build() ── */
-    echosdk_account_config_t acfg{};
+    medut_account_config_t acfg{};
 
     /* ── parse a transport string ── */
-    static echosdk_transport_t parse_transport(const std::string& s) {
-        if (s == "udp") return ECHOSDK_TRANSPORT_UDP;
-        if (s == "tcp") return ECHOSDK_TRANSPORT_TCP;
-        if (s == "tls") return ECHOSDK_TRANSPORT_TLS;
-        if (s == "ws")  return ECHOSDK_TRANSPORT_WS;
-        if (s == "wss") return ECHOSDK_TRANSPORT_WSS;
+    static medut_transport_t parse_transport(const std::string& s) {
+        if (s == "udp") return MEDUT_TRANSPORT_UDP;
+        if (s == "tcp") return MEDUT_TRANSPORT_TCP;
+        if (s == "tls") return MEDUT_TRANSPORT_TLS;
+        if (s == "ws")  return MEDUT_TRANSPORT_WS;
+        if (s == "wss") return MEDUT_TRANSPORT_WSS;
         throw std::runtime_error("unknown transport: " + s);
     }
 
     /* ── parse a media_enc string ── */
-    static echosdk_media_enc_t parse_media_enc(const std::string& s) {
-        if (s == "none")      return ECHOSDK_MEDIA_ENC_NONE;
-        if (s == "sdes")      return ECHOSDK_MEDIA_ENC_SDES;
-        if (s == "dtls_srtp") return ECHOSDK_MEDIA_ENC_DTLS_SRTP;
+    static medut_media_enc_t parse_media_enc(const std::string& s) {
+        if (s == "none")      return MEDUT_MEDIA_ENC_NONE;
+        if (s == "sdes")      return MEDUT_MEDIA_ENC_SDES;
+        if (s == "dtls_srtp") return MEDUT_MEDIA_ENC_DTLS_SRTP;
         throw std::runtime_error("unknown media_enc: " + s);
     }
 
     /* ── parse a 100rel string ── */
-    static echosdk_100rel_mode_t parse_100rel(const std::string& s) {
-        if (s == "disabled") return ECHOSDK_100REL_DISABLED;
-        if (s == "enabled")  return ECHOSDK_100REL_ENABLED;
-        if (s == "required") return ECHOSDK_100REL_REQUIRED;
+    static medut_100rel_mode_t parse_100rel(const std::string& s) {
+        if (s == "disabled") return MEDUT_100REL_DISABLED;
+        if (s == "enabled")  return MEDUT_100REL_ENABLED;
+        if (s == "required") return MEDUT_100REL_REQUIRED;
         throw std::runtime_error("unknown rel100 value: " + s);
     }
 
     /* ── parse a dtmf_mode string ── */
-    static echosdk_dtmf_mode_t parse_dtmf_mode(const std::string& s) {
-        if (s == "rfc4733")  return ECHOSDK_DTMF_RFC4733;
-        if (s == "sip_info") return ECHOSDK_DTMF_SIP_INFO;
-        if (s == "auto")     return ECHOSDK_DTMF_AUTO;
+    static medut_dtmf_mode_t parse_dtmf_mode(const std::string& s) {
+        if (s == "rfc4733")  return MEDUT_DTMF_RFC4733;
+        if (s == "sip_info") return MEDUT_DTMF_SIP_INFO;
+        if (s == "auto")     return MEDUT_DTMF_AUTO;
         throw std::runtime_error("unknown dtmf_mode value: " + s);
     }
 
@@ -370,8 +370,8 @@ struct AccountConfig {
 
         server_url   = "wss://" + host + ":443/";
         display_name = (at != std::string::npos) ? u.substr(0, at) : u;
-        transport    = ECHOSDK_TRANSPORT_WSS;
-        media_enc    = ECHOSDK_MEDIA_ENC_DTLS_SRTP;
+        transport    = MEDUT_TRANSPORT_WSS;
+        media_enc    = MEDUT_MEDIA_ENC_DTLS_SRTP;
         ice_enabled  = true;
         stun_server  = "stun:stun.l.google.com:19302";
         verify_tls   = true;
@@ -400,7 +400,7 @@ struct AccountConfig {
 
         {
             std::string t = str("transport");
-            transport = t.empty() ? ECHOSDK_TRANSPORT_WSS : parse_transport(t);
+            transport = t.empty() ? MEDUT_TRANSPORT_WSS : parse_transport(t);
         }
         server_url   = str("server_url");
         server_host  = str("server_host");
@@ -409,7 +409,7 @@ struct AccountConfig {
 
         {
             std::string m = str("media_enc");
-            media_enc = m.empty() ? ECHOSDK_MEDIA_ENC_DTLS_SRTP : parse_media_enc(m);
+            media_enc = m.empty() ? MEDUT_MEDIA_ENC_DTLS_SRTP : parse_media_enc(m);
         }
         ice_enabled  = flag("ice_enabled", true);
         {
@@ -424,12 +424,12 @@ struct AccountConfig {
 
         {
             std::string r = str("rel100");
-            rel100 = r.empty() ? ECHOSDK_100REL_DISABLED : parse_100rel(r);
+            rel100 = r.empty() ? MEDUT_100REL_DISABLED : parse_100rel(r);
         }
 
         {
             std::string d = str("dtmf_mode");
-            dtmf_mode = d.empty() ? ECHOSDK_DTMF_RFC4733 : parse_dtmf_mode(d);
+            dtmf_mode = d.empty() ? MEDUT_DTMF_RFC4733 : parse_dtmf_mode(d);
         }
 
         /* extra_headers object */
@@ -501,21 +501,21 @@ struct AccountConfig {
 
     void dump() const {
         auto tf = [](bool v){ return v ? "true" : "false"; };
-        auto transport_name = [](echosdk_transport_t t) -> const char* {
+        auto transport_name = [](medut_transport_t t) -> const char* {
             switch(t) {
-                case ECHOSDK_TRANSPORT_UDP: return "udp";
-                case ECHOSDK_TRANSPORT_TCP: return "tcp";
-                case ECHOSDK_TRANSPORT_TLS: return "tls";
-                case ECHOSDK_TRANSPORT_WS:  return "ws";
-                case ECHOSDK_TRANSPORT_WSS: return "wss";
+                case MEDUT_TRANSPORT_UDP: return "udp";
+                case MEDUT_TRANSPORT_TCP: return "tcp";
+                case MEDUT_TRANSPORT_TLS: return "tls";
+                case MEDUT_TRANSPORT_WS:  return "ws";
+                case MEDUT_TRANSPORT_WSS: return "wss";
                 default: return "?";
             }
         };
-        auto enc_name = [](echosdk_media_enc_t e) -> const char* {
+        auto enc_name = [](medut_media_enc_t e) -> const char* {
             switch(e) {
-                case ECHOSDK_MEDIA_ENC_NONE:      return "none";
-                case ECHOSDK_MEDIA_ENC_SDES:      return "sdes";
-                case ECHOSDK_MEDIA_ENC_DTLS_SRTP: return "dtls_srtp";
+                case MEDUT_MEDIA_ENC_NONE:      return "none";
+                case MEDUT_MEDIA_ENC_SDES:      return "sdes";
+                case MEDUT_MEDIA_ENC_DTLS_SRTP: return "dtls_srtp";
                 default: return "?";
             }
         };
@@ -557,14 +557,14 @@ struct AccountConfig {
  * Media stats printer
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-static void print_stats(const echosdk_ev_media_stats_t& s)
+static void print_stats(const medut_ev_media_stats_t& s)
 {
     /* Nothing to say before the codec is negotiated: the panel would read
      * "? 0 kHz ch=0" with a flush count from a buffer that has carried no
      * media.  The first real tick follows within stats_interval_ms. */
     if (!s.codec_name) return;
 
-    const char* method = (s.mos_method == ECHOSDK_MOS_EMODEL) ? "E-model" : "simplified";
+    const char* method = (s.mos_method == MEDUT_MOS_EMODEL) ? "E-model" : "simplified";
     std::cout
     << "┌─ Media Stats ─────────────────────────────────\n"
     << "│  Codec     : " << (s.codec_name ? s.codec_name : "?")
@@ -605,17 +605,17 @@ static void print_stats(const echosdk_ev_media_stats_t& s)
 /* ═══════════════════════════════════════════════════════════════════════════
  * Audio device listing
  * ═══════════════════════════════════════════════════════════════════════════ */
-static void print_devices(EchoSDK::SDK& sdk)
+static void print_devices(Medut::SDK& sdk)
 {
-    echosdk_audio_device_t devs[32];
-    int n = echosdk_audio_list_input_devices(devs, 32);
+    medut_audio_device_t devs[32];
+    int n = medut_audio_list_input_devices(devs, 32);
     if (n > 0) {
         std::cout << "Input devices (" << n << "):\n";
         for (int i = 0; i < n; i++)
             std::cout << "  [" << i << "] " << devs[i].name
             << (devs[i].is_default ? "  *default*" : "") << "\n";
     }
-    n = echosdk_audio_list_output_devices(devs, 32);
+    n = medut_audio_list_output_devices(devs, 32);
     if (n > 0) {
         std::cout << "Output devices (" << n << "):\n";
         for (int i = 0; i < n; i++)
@@ -702,10 +702,10 @@ int main(int argc, char* argv[])
     bool                    call_established = false;
     bool                    call_done        = false;
     bool                    incoming_call    = false;
-    EchoSDK::Call           active_call;
+    Medut::Call           active_call;
 
     /* ── SDK setup ────────────────────────────────────────────────────── */
-    EchoSDK::SDK sdk;
+    Medut::SDK sdk;
     sdk.config().log_level         = 0;  /* errors only; 3 = debug for audio troubleshooting */
     sdk.config().trace_sip         = false;
     sdk.config().prefer_ipv6       = false;
@@ -715,41 +715,41 @@ int main(int argc, char* argv[])
     /* Desktop audio.  WebRTC AEC3 cancels echo while both sides talk; on a
      * build or machine without it, init falls back to the half-duplex
      * suppressor.  A raw laptop mic also wants noise suppression and AGC. */
-    sdk.config().aec_mode          = ECHOSDK_AEC_WEBRTC;
+    sdk.config().aec_mode          = MEDUT_AEC_WEBRTC;
     sdk.config().ns                = true;
     sdk.config().agc               = true;
-    sdk.config().audio_codecs[0]   = ECHOSDK_CODEC_OPUS;
-    sdk.config().audio_codecs[1]   = ECHOSDK_CODEC_PCMU;
-    sdk.config().audio_codecs[2]   = ECHOSDK_CODEC_PCMA;
-    sdk.config().audio_codecs[3]   = ECHOSDK_CODEC_G722;
+    sdk.config().audio_codecs[0]   = MEDUT_CODEC_OPUS;
+    sdk.config().audio_codecs[1]   = MEDUT_CODEC_PCMU;
+    sdk.config().audio_codecs[2]   = MEDUT_CODEC_PCMA;
+    sdk.config().audio_codecs[3]   = MEDUT_CODEC_G722;
     sdk.config().audio_codec_count = 4;
 
-    sdk.on_event([&](const echosdk_event_t& ev) {
+    sdk.on_event([&](const medut_event_t& ev) {
         switch (ev.type) {
 
-            case ECHOSDK_EV_REG_STATE:
-                if (ev.u.reg.state == ECHOSDK_REG_REGISTERED) {
+            case MEDUT_EV_REG_STATE:
+                if (ev.u.reg.state == MEDUT_REG_REGISTERED) {
                     std::cout << "Registered OK.\n";
                     std::lock_guard<std::mutex> lk(mtx);
                     registered = true;
                     reg_ok     = true;
                     cv.notify_one();
-                } else if (ev.u.reg.state == ECHOSDK_REG_RECONNECTING) {
+                } else if (ev.u.reg.state == MEDUT_REG_RECONNECTING) {
                     /* Transient — the SDK is retrying by itself, so report it
                      * and keep waiting rather than unblocking main(). */
                     const char* detail = ev.u.reg.error_str
                         ? ev.u.reg.error_str
-                        : echosdk_strerror(ev.u.reg.error);
+                        : medut_strerror(ev.u.reg.error);
                     std::cout << "Reconnecting: " << detail;
                     if (ev.u.reg.retry_attempt)
                         std::cout << " (attempt " << ev.u.reg.retry_attempt
                                   << " in " << ev.u.reg.retry_delay_ms
                                   << " ms)";
                     std::cout << "\n";
-                } else if (ev.u.reg.state == ECHOSDK_REG_FAILED) {
+                } else if (ev.u.reg.state == MEDUT_REG_FAILED) {
                     const char* detail = ev.u.reg.error_str
                         ? ev.u.reg.error_str
-                        : echosdk_strerror(ev.u.reg.error);
+                        : medut_strerror(ev.u.reg.error);
                     std::cerr << "Registration failed: " << detail << "\n";
                     std::lock_guard<std::mutex> lk(mtx);
                     registered = true; /* unblock main */
@@ -757,20 +757,20 @@ int main(int argc, char* argv[])
                 }
                 break;
 
-            case ECHOSDK_EV_INCOMING_CALL:
+            case MEDUT_EV_INCOMING_CALL:
                 std::cout << "\n=== Incoming call from "
                 << (ev.u.incoming.from_uri ? ev.u.incoming.from_uri : "unknown")
                 << " ===\n"
                 << "Press 'a' + Enter to answer, 'r' + Enter to reject\n";
                 {
                     std::lock_guard<std::mutex> lk(mtx);
-                    active_call   = EchoSDK::Call(ev.u.incoming.call);
+                    active_call   = Medut::Call(ev.u.incoming.call);
                     incoming_call = true;
                     cv.notify_one();
                 }
                 break;
 
-            case ECHOSDK_EV_CALL_STATE: {
+            case MEDUT_EV_CALL_STATE: {
                 static const char* kStateNames[] = {
                     "CALLING","RINGING","ESTABLISHED","HELD","ENDED","CANCELLED","FAILED"
                 };
@@ -780,21 +780,21 @@ int main(int argc, char* argv[])
                     os << "Call state: " << sname << " (" << si << ")";
                     if (ev.u.call_state.reason && ev.u.call_state.reason[0])
                         os << "  reason=\"" << ev.u.call_state.reason << "\"";
-                    if (ev.u.call_state.error != ECHOSDK_OK)
+                    if (ev.u.call_state.error != MEDUT_OK)
                         os << "  error=" << ev.u.call_state.error;
                     os << "\n";
                 });
 
-                if (ev.u.call_state.state == ECHOSDK_CALL_ESTABLISHED) {
+                if (ev.u.call_state.state == MEDUT_CALL_ESTABLISHED) {
                     /* Talk time starts when the far end answers, not when we
                      * dialled — that is the number a user expects to see. */
                     status::start_timer();
                     std::lock_guard<std::mutex> lk(mtx);
                     call_established = true;
                     cv.notify_one();
-                } else if (ev.u.call_state.state == ECHOSDK_CALL_ENDED  ||
-                    ev.u.call_state.state == ECHOSDK_CALL_FAILED ||
-                    ev.u.call_state.state == ECHOSDK_CALL_CANCELLED) {
+                } else if (ev.u.call_state.state == MEDUT_CALL_ENDED  ||
+                    ev.u.call_state.state == MEDUT_CALL_FAILED ||
+                    ev.u.call_state.state == MEDUT_CALL_CANCELLED) {
                     long long talked = status::stop_timer();
                     if (talked >= 0)
                         status::say_line("Call ended after " +
@@ -806,7 +806,7 @@ int main(int argc, char* argv[])
                     break;
             }
 
-            case ECHOSDK_EV_TRANSFER_REQUEST: {
+            case MEDUT_EV_TRANSFER_REQUEST: {
                 std::cout << "=== Transfer request: REFER to "
                 << (ev.u.transfer_req.refer_to_uri ? ev.u.transfer_req.refer_to_uri : "?")
                 << (ev.u.transfer_req.has_replaces ? "  [attended]" : "  [blind]") << "\n";
@@ -814,19 +814,19 @@ int main(int argc, char* argv[])
                  * what happened, and only accept/reject sends one.  Accepting
                  * keeps the new call linked to this one so the SDK reports the
                  * outcome; hanging up and dialling would not. */
-                echosdk_call_handle_t moved = nullptr;
-                if (echosdk_call_transfer_accept(ev.u.transfer_req.call, &moved)
-                    == ECHOSDK_OK) {
+                medut_call_handle_t moved = nullptr;
+                if (medut_call_transfer_accept(ev.u.transfer_req.call, &moved)
+                    == MEDUT_OK) {
                     std::cout << "    following the transfer\n";
                 }
                 else {
-                    echosdk_call_transfer_reject(ev.u.transfer_req.call,
+                    medut_call_transfer_reject(ev.u.transfer_req.call,
                                                  603, "Declined");
                 }
                 break;
             }
 
-            case ECHOSDK_EV_MEDIA_STATS:
+            case MEDUT_EV_MEDIA_STATS:
                 /* The SDK polls every 2 s (stats_interval_ms) because FEC,
                  * bitrate adaptation and quality alerts all run off that
                  * tick; print every third one to keep the console readable. */
@@ -834,13 +834,13 @@ int main(int argc, char* argv[])
                     print_stats(ev.u.stats);
                 break;
 
-            case ECHOSDK_EV_LOG:
+            case MEDUT_EV_LOG:
                 if (ev.u.log.message)
                     std::cerr << "[sdk] " << ev.u.log.message;
             break;
 
-            case ECHOSDK_EV_SIP_TRACE:
-                std::cout << (ev.u.sip_trace.dir == ECHOSDK_MEDIA_DIR_TX ? ">>>\n" : "<<<\n")
+            case MEDUT_EV_SIP_TRACE:
+                std::cout << (ev.u.sip_trace.dir == MEDUT_MEDIA_DIR_TX ? ">>>\n" : "<<<\n")
                 << ev.u.sip_trace.raw_message << "\n---\n";
                 break;
 
@@ -853,10 +853,10 @@ int main(int argc, char* argv[])
 
     /* Optional per-account tuning */
     for (const auto& kv : cfg.extra_headers)
-        echosdk_account_add_header(account.handle(), kv.first.c_str(), kv.second.c_str());
+        medut_account_add_header(account.handle(), kv.first.c_str(), kv.second.c_str());
 
-    if (cfg.rel100 != ECHOSDK_100REL_DISABLED)
-        echosdk_account_set_100rel(account.handle(), cfg.rel100);
+    if (cfg.rel100 != MEDUT_100REL_DISABLED)
+        medut_account_set_100rel(account.handle(), cfg.rel100);
 
     account.register_account();
 

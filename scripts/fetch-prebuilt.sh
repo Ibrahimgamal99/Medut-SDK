@@ -14,7 +14,7 @@
 # it as a git dependency gets whatever is committed — not whatever CI last
 # built. CI uploads the xcframework as an artifact, but nothing commits it
 # back, so the two drift silently. That drift has already shipped once: the
-# committed libechosdk.so predated the baresdk_* -> echosdk_* rename and
+# committed libmedut.so predated the baresdk_* -> medut_* rename and
 # exported none of the symbols ffi_bindings.dart looks up, so apps built,
 # installed, and then failed at the first SDK call.
 #
@@ -33,7 +33,7 @@ RUN_ID=""
 WAIT=0
 EXPLICIT=0
 
-IOS_DEST="${ROOT}/bindings/flutter/ios/Frameworks/EchoSDK.xcframework"
+IOS_DEST="${ROOT}/bindings/flutter/ios/Frameworks/Medut.xcframework"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -106,7 +106,7 @@ trap 'rm -rf "${TMP}"' EXIT
 # ---------------------------------------------------------------------------
 # iOS — the artifact holds the framework's *contents* (the workflow's upload
 # path ends in "/"), so the destination directory has to supply the
-# EchoSDK.xcframework name itself.
+# Medut.xcframework name itself.
 # ---------------------------------------------------------------------------
 echo "=== iOS: ios-xcframework ==="
 gh run download "${RUN_ID}" -n ios-xcframework -D "${TMP}/ios"
@@ -121,15 +121,15 @@ mv "${TMP}/ios" "${IOS_DEST}"
 # The framework binary must stay executable. actions/upload-artifact has
 # historically dropped the exec bit, and git tracks it — a 644 binary is a
 # broken framework that looks fine in a diff.
-find "${IOS_DEST}" -name EchoSDK -type f -exec chmod 755 {} +
+find "${IOS_DEST}" -name Medut -type f -exec chmod 755 {} +
 
-SLICES=$(find "${IOS_DEST}" -name EchoSDK -type f | wc -l | tr -d ' ')
+SLICES=$(find "${IOS_DEST}" -name Medut -type f | wc -l | tr -d ' ')
 if [ "${SLICES}" -lt 2 ]; then
   echo "ERROR: expected device + simulator slices, found ${SLICES}" >&2
   exit 1
 fi
 echo "  ${SLICES} slices:"
-find "${IOS_DEST}" -name EchoSDK -type f | while read -r BIN; do
+find "${IOS_DEST}" -name Medut -type f | while read -r BIN; do
   echo "    $(basename "$(dirname "$(dirname "${BIN}")")")"
 done
 
@@ -144,16 +144,16 @@ done
 while read -r BIN; do
   SLICE="$(basename "$(dirname "$(dirname "${BIN}")")")"
   if command -v nm >/dev/null && nm -gU "${BIN}" >/dev/null 2>&1; then
-    N=$(nm -gU "${BIN}" | grep -c ' _echosdk_' || true)
+    N=$(nm -gU "${BIN}" | grep -c ' _medut_' || true)
   else
-    N=$(strings -a "${BIN}" 2>/dev/null | grep -c '^_\?echosdk_' || true)
+    N=$(strings -a "${BIN}" 2>/dev/null | grep -c '^_\?medut_' || true)
   fi
   if [ "${N}" -lt 40 ]; then
-    echo "ERROR: ios/${SLICE}: only ${N} echosdk_* symbols" >&2
+    echo "ERROR: ios/${SLICE}: only ${N} medut_* symbols" >&2
     exit 1
   fi
-  echo "  ios/${SLICE}: ${N} echosdk_* symbols"
-done < <(find "${IOS_DEST}" -name EchoSDK -type f)
+  echo "  ios/${SLICE}: ${N} medut_* symbols"
+done < <(find "${IOS_DEST}" -name Medut -type f)
 
 echo ""
 echo "Synced from run ${RUN_ID} (${SHA:0:12}). Review and commit:"

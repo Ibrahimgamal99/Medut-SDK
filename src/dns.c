@@ -19,7 +19,7 @@
 
 #include <string.h>
 #include <stdlib.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* ── DNS client ────────────────────────────────────────────────────────── */
 
@@ -33,7 +33,7 @@ static struct dnsc *g_dnsc;   /* borrowed from baresip network — not owned */
 /* ── Internal types ────────────────────────────────────────────────────── */
 
 struct bsdk_dns_target {
-	echosdk_transport_t transport;
+	medut_transport_t transport;
 	char                host[256];
 	uint16_t            port;
 	uint16_t            priority;
@@ -48,12 +48,12 @@ struct bsdk_dns_result {
 
 struct srv_slot {
 	char                name[256];   /* SRV qname, e.g. _sip._udp.example.com */
-	echosdk_transport_t transport;
+	medut_transport_t transport;
 };
 
 struct dns_lookup {
 	char                domain[256];
-	echosdk_transport_t transport_hint;
+	medut_transport_t transport_hint;
 	uint16_t            port_hint;   /* 0 = no explicit port in URI */
 
 	int                 pending;     /* in-flight DNS queries */
@@ -70,42 +70,42 @@ struct dns_lookup {
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 
-static echosdk_transport_t transport_from_naptr_service(const char *svc)
+static medut_transport_t transport_from_naptr_service(const char *svc)
 {
 	if (!svc)
-		return (echosdk_transport_t)-1;
+		return (medut_transport_t)-1;
 	/* RFC 3263 §4.1 service field values */
-	if (!str_casecmp(svc, "SIPS+D2T")) return ECHOSDK_TRANSPORT_TLS;
-	if (!str_casecmp(svc, "SIP+D2T"))  return ECHOSDK_TRANSPORT_TCP;
-	if (!str_casecmp(svc, "SIP+D2U"))  return ECHOSDK_TRANSPORT_UDP;
-	if (!str_casecmp(svc, "SIPS+D2W")) return ECHOSDK_TRANSPORT_WSS;
-	if (!str_casecmp(svc, "SIP+D2W"))  return ECHOSDK_TRANSPORT_WS;
-	return (echosdk_transport_t)-1;
+	if (!str_casecmp(svc, "SIPS+D2T")) return MEDUT_TRANSPORT_TLS;
+	if (!str_casecmp(svc, "SIP+D2T"))  return MEDUT_TRANSPORT_TCP;
+	if (!str_casecmp(svc, "SIP+D2U"))  return MEDUT_TRANSPORT_UDP;
+	if (!str_casecmp(svc, "SIPS+D2W")) return MEDUT_TRANSPORT_WSS;
+	if (!str_casecmp(svc, "SIP+D2W"))  return MEDUT_TRANSPORT_WS;
+	return (medut_transport_t)-1;
 }
 
-static uint16_t default_port_for_transport(echosdk_transport_t t)
+static uint16_t default_port_for_transport(medut_transport_t t)
 {
 	switch (t) {
-	case ECHOSDK_TRANSPORT_TLS: return 5061;
+	case MEDUT_TRANSPORT_TLS: return 5061;
 	/* WebSocket defaults, as in bsdk_parse_server_url. */
-	case ECHOSDK_TRANSPORT_WS:  return 80;
-	case ECHOSDK_TRANSPORT_WSS: return 443;
+	case MEDUT_TRANSPORT_WS:  return 80;
+	case MEDUT_TRANSPORT_WSS: return 443;
 	default:                    return 5060;
 	}
 }
 
-static const char *srv_prefix_for_transport(echosdk_transport_t t)
+static const char *srv_prefix_for_transport(medut_transport_t t)
 {
 	switch (t) {
-	case ECHOSDK_TRANSPORT_TLS: return "_sips._tcp.";
-	case ECHOSDK_TRANSPORT_TCP: return "_sip._tcp.";
-	case ECHOSDK_TRANSPORT_WS:  return "_sip._tcp.";
-	case ECHOSDK_TRANSPORT_WSS: return "_sips._tcp.";
+	case MEDUT_TRANSPORT_TLS: return "_sips._tcp.";
+	case MEDUT_TRANSPORT_TCP: return "_sip._tcp.";
+	case MEDUT_TRANSPORT_WS:  return "_sip._tcp.";
+	case MEDUT_TRANSPORT_WSS: return "_sips._tcp.";
 	default:                    return "_sip._udp.";
 	}
 }
 
-static void add_result(struct dns_lookup *lk, echosdk_transport_t t,
+static void add_result(struct dns_lookup *lk, medut_transport_t t,
                         const char *host, uint16_t port,
                         uint16_t pri, uint16_t weight)
 {
@@ -164,7 +164,7 @@ static void lookup_finish(struct dns_lookup *lk)
 
 struct srv_ctx {
 	struct dns_lookup  *lk;
-	echosdk_transport_t transport;
+	medut_transport_t transport;
 };
 
 static void srv_handler(int err, const struct dnshdr *hdr,
@@ -173,7 +173,7 @@ static void srv_handler(int err, const struct dnshdr *hdr,
 {
 	struct srv_ctx    *sc = arg;
 	struct dns_lookup *lk = sc->lk;
-	echosdk_transport_t t = sc->transport;
+	medut_transport_t t = sc->transport;
 	bool found = false;
 
 	(void)hdr; (void)authl; (void)addl;
@@ -231,7 +231,7 @@ static void naptr_handler(int err, const struct dnshdr *hdr,
 			    str_casecmp(rr->rdata.naptr.flags, "S") != 0)
 				continue;
 
-			echosdk_transport_t t =
+			medut_transport_t t =
 				transport_from_naptr_service(rr->rdata.naptr.services);
 			if ((int)t == -1)
 				continue;
@@ -310,7 +310,7 @@ int bsdk_dns_init(void)
 	 * We borrow this pointer — it is owned and freed by baresip. */
 	g_dnsc = net_dnsc(baresip_network());
 	if (!g_dnsc) {
-		warning("EchoSDK/dns: no DNS client available from baresip network\n");
+		warning("Medut/dns: no DNS client available from baresip network\n");
 		return ENOENT;
 	}
 	return 0;
@@ -338,7 +338,7 @@ void bsdk_dns_close(void)
  * @return 0 on success (done_h will fire), or errno on immediate failure
  */
 int bsdk_dns_resolve(const char *domain,
-                     echosdk_transport_t transport_hint,
+                     medut_transport_t transport_hint,
                      uint16_t port_hint,
                      bsdk_dns_done_h *done_h, void *arg)
 {
@@ -403,7 +403,7 @@ int bsdk_dns_result_err(const struct bsdk_dns_result *res)
 }
 
 int bsdk_dns_result_get(const struct bsdk_dns_result *res, size_t idx,
-                        echosdk_transport_t *transport,
+                        medut_transport_t *transport,
                         char *host, size_t host_sz, uint16_t *port)
 {
 	const struct bsdk_dns_target *t;

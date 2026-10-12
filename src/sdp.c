@@ -1,5 +1,5 @@
 /**
- * @file sdp.c  SDP offer/answer capture → ECHOSDK_EV_SDP_NEGOTIATION
+ * @file sdp.c  SDP offer/answer capture → MEDUT_EV_SDP_NEGOTIATION
  *
  * Called from event.c for BEVENT_CALL_LOCAL_SDP and BEVENT_CALL_REMOTE_SDP.
  * Tracks when both local and remote SDP have been exchanged, then fires a
@@ -9,7 +9,7 @@
  * another event.
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 void bsdk_sdp_handle_event(enum bevent_ev ev, struct bevent *event)
 {
@@ -17,7 +17,7 @@ void bsdk_sdp_handle_event(enum bevent_ev ev, struct bevent *event)
 	if (!bc)
 		return;
 
-	struct echosdk_call *lc = bsdk_call_find(bc);
+	struct medut_call *lc = bsdk_call_find(bc);
 	if (!lc)
 		return;
 
@@ -45,16 +45,16 @@ void bsdk_sdp_handle_event(enum bevent_ev ev, struct bevent *event)
 	/* Determine crypto from per-account config (accounts may differ) */
 	const char *crypto;
 	switch (lc->acct ? lc->acct->cfg.media_enc : g_bsdk.cfg.media_enc) {
-	case ECHOSDK_MEDIA_ENC_SDES:       crypto = "SDES";      break;
-	case ECHOSDK_MEDIA_ENC_DTLS_SRTP:  crypto = "DTLS-SRTP"; break;
+	case MEDUT_MEDIA_ENC_SDES:       crypto = "SDES";      break;
+	case MEDUT_MEDIA_ENC_DTLS_SRTP:  crypto = "DTLS-SRTP"; break;
 	default:                           crypto = "NONE";       break;
 	}
 
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
-	qev->ev.type       = ECHOSDK_EV_SDP_NEGOTIATION;
+	qev->ev.type       = MEDUT_EV_SDP_NEGOTIATION;
 	qev->ev.u.sdp.call = lc;
 
 	/* Pack small strings into the inline buffer */

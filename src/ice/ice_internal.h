@@ -1,5 +1,5 @@
 /**
- * @file ice_internal.h  echo-ice: EchoSDK's own ICE agent (private header)
+ * @file ice_internal.h  medut-ice: Medut's own ICE agent (private header)
  *
  * Replaces baresip's `ice` media-NAT module and src/ice_shim.c with an agent
  * shaped like libwebrtc's: RFC 7675 consent freshness, continual connectivity
@@ -21,8 +21,8 @@
  * for RTP; it reads only the mutex-guarded icea_txsel snapshot.
  */
 
-#ifndef ECHOSDK_ICE_INTERNAL_H
-#define ECHOSDK_ICE_INTERNAL_H
+#ifndef MEDUT_ICE_INTERNAL_H
+#define MEDUT_ICE_INTERNAL_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -104,8 +104,8 @@ extern "C" {
 
 /* ── Enums ───────────────────────────────────────────────────────────────── */
 
-/* Mirrors RTCIceConnectionState.  The public echosdk_ice_state_t (added to
- * echosdk.h at the flip) uses identical values; ice_mod.c asserts that. */
+/* Mirrors RTCIceConnectionState.  The public medut_ice_state_t (added to
+ * medut.h at the flip) uses identical values; ice_mod.c asserts that. */
 enum icea_state {
 	ICEA_STATE_NEW = 0,
 	ICEA_STATE_GATHERING,
@@ -500,4 +500,4 @@ void icea_debugf(const struct icea_conf *conf, const char *fmt, ...);
 }
 #endif
 
-#endif /* ECHOSDK_ICE_INTERNAL_H */
+#endif /* MEDUT_ICE_INTERNAL_H */

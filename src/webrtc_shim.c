@@ -1,8 +1,8 @@
-/* Lazy-loads libwebrtc-audio-processing-1 via dlopen so echosdk.so has no
+/* Lazy-loads libwebrtc-audio-processing-1 via dlopen so medut.so has no
  * hard DT_NEEDED entry for it.  If the library is absent at runtime,
  * AudioProcessingBuilder::Create returns NULL and bsdk_webrtc_lib_available()
  * says so at init, so the SDK falls back to its own suppressor instead.
- * Only built with ECHOSDK_WITH_WEBRTC_AEC (webrtc_apm.cpp is the one caller).
+ * Only built with MEDUT_WITH_WEBRTC_AEC (webrtc_apm.cpp is the one caller).
  *
  * Only the SONAME found at build time is loaded.  webrtc_apm.cpp is compiled
  * against that version's headers, and an older .so has a different vtable
@@ -12,7 +12,7 @@
  * webrtc_apm.o alone, and exported they would also intercept the library's
  * own internal calls to the same symbols.
  */
-#ifdef ECHOSDK_HAS_WEBRTC_AEC
+#ifdef MEDUT_HAS_WEBRTC_AEC
 
 #include <dlfcn.h>
 #include <pthread.h>
@@ -20,8 +20,8 @@
 #include <stddef.h>
 #include "webrtc_apm.h"
 
-#ifndef ECHOSDK_WEBRTC_SONAME
-#error "ECHOSDK_WEBRTC_SONAME must name the library the headers came from"
+#ifndef MEDUT_WEBRTC_SONAME
+#error "MEDUT_WEBRTC_SONAME must name the library the headers came from"
 #endif
 
 #define SHIM __attribute__((visibility("hidden")))
@@ -35,7 +35,7 @@ static pthread_once_t s_once = PTHREAD_ONCE_INIT;
 
 static void load_lib(void)
 {
-	s_lib = dlopen(ECHOSDK_WEBRTC_SONAME, RTLD_NOW | RTLD_LOCAL);
+	s_lib = dlopen(MEDUT_WEBRTC_SONAME, RTLD_NOW | RTLD_LOCAL);
 }
 
 static void *get_sym(const char *sym)
@@ -75,4 +75,4 @@ SHIM void *webrtc_apb_create(void *self)
 	return f ? f(self) : NULL;
 }
 
-#endif /* ECHOSDK_HAS_WEBRTC_AEC */
+#endif /* MEDUT_HAS_WEBRTC_AEC */

@@ -1,5 +1,5 @@
 /**
- * @file test_ice_pair.c  echo-ice: pair formation, pruning, unfreezing
+ * @file test_ice_pair.c  medut-ice: pair formation, pruning, unfreezing
  *
  * Build: make -C test/unit test_ice_pair && ./test/unit/test_ice_pair
  */

@@ -3,7 +3,7 @@
 #include <stdarg.h>
 
 // Force old glibc symbol versions — target glibc >= 2.2.5
-// This file should be compiled and linked into echosdk.so
+// This file should be compiled and linked into medut.so
 
 // ── Strategy ────────────────────────────────────────────────────────────────
 // On glibc 2.38+, headers redirect fscanf → __isoc23_fscanf, strtol →
@@ -12,7 +12,7 @@
 //
 // We provide definitions of __isoc23_* that delegate to the old ABI via
 // .symver aliases.  The version script keeps them local (not exported) so they
-// only satisfy the undefined refs from inside echosdk.a without polluting the
+// only satisfy the undefined refs from inside medut.a without polluting the
 // global namespace or intercepting calls from other libraries.
 
 __asm__(".symver __old_vfscanf,vfscanf@GLIBC_2.2.5");

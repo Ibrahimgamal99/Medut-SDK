@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <re.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 /* ── Android CA bundle ───────────────────────────────────────────────────────
  *
@@ -80,7 +80,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 	fclose(out);
 
 	if (!written) {
-		warning("EchoSDK: no Android system CAs found; TLS server "
+		warning("Medut: no Android system CAs found; TLS server "
 		        "verification will fail unless ca_cert_path is set\n");
 		return NULL;
 	}

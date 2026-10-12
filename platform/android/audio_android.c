@@ -8,7 +8,7 @@
  * or AEC bypass if baresip's aaudio module proves insufficient.
  */
 
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {

@@ -10,7 +10,7 @@
  * select, then call re_cancel() so the loop exits on the next iteration.
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 static void wakeup_handler(int id, void *data, void *arg)
 {

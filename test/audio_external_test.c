@@ -1,7 +1,7 @@
 /**
  * @file audio_external_test.c  Gate test for the app-owned audio device
  *
- * Covers the parts of echosdk_audio_use_external() that only exist once the
+ * Covers the parts of medut_audio_use_external() that only exist once the
  * whole stack is up, and that a unit test on audio_external.c alone cannot
  * see:
  *
@@ -24,7 +24,7 @@
  *   gcc -fsanitize=address -g -O1 -std=gnu11 \
  *       -Iinclude -Idist/linux/x86_64/include -Idist/linux/x86_64/include/re \
  *       test/audio_external_test.c \
- *       -Wl,--whole-archive dist/linux/x86_64/echosdk.a -Wl,--no-whole-archive \
+ *       -Wl,--whole-archive dist/linux/x86_64/medut.a -Wl,--no-whole-archive \
  *       -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl -lstdc++ -lpulse \
  *       -o test/audio_external_test && ./test/audio_external_test
  *
@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 /* White-box on purpose: the alternative to reading back what the SDK told
  * baresip is a live peer to negotiate a codec with. */
@@ -55,18 +55,18 @@ static int g_fail = 0;
 
 /* Borrowed delivery (the default): nothing to release, and nothing here cares
  * what the events say — the handler exists only so init() has one. */
-static void ev_handler(const echosdk_event_t *ev, void *ud)
+static void ev_handler(const medut_event_t *ev, void *ud)
 {
 	(void)ev; (void)ud;
 }
 
 static int start_sdk(void)
 {
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 	cfg.log_level = 3;
 	cfg.event_cb  = ev_handler;
-	return echosdk_init(&cfg);
+	return medut_init(&cfg);
 }
 
 static const char *src_mod(void)
@@ -85,16 +85,16 @@ int main(void)
 
 	/* ── 1. Refused before init ──────────────────────────────────────── */
 
-	err = echosdk_audio_use_external(true);
-	CHECK(err == ECHOSDK_ERR_STATE,
-	      "use_external before init: expected ECHOSDK_ERR_STATE (%d), got %d\n",
-	      ECHOSDK_ERR_STATE, err);
+	err = medut_audio_use_external(true);
+	CHECK(err == MEDUT_ERR_STATE,
+	      "use_external before init: expected MEDUT_ERR_STATE (%d), got %d\n",
+	      MEDUT_ERR_STATE, err);
 
 	/* ── 2. The switch reaches baresip both ways ─────────────────────── */
 
 	err = start_sdk();
 	if (err) {
-		printf("FATAL: echosdk_init: %s (%d)\n", echosdk_strerror(err), err);
+		printf("FATAL: medut_init: %s (%d)\n", medut_strerror(err), err);
 		return 1;
 	}
 
@@ -105,7 +105,7 @@ int main(void)
 	CHECK(strcmp(platform_mod, "external") != 0,
 	      "the SDK-owned device must be the default, got '%s'\n", platform_mod);
 
-	err = echosdk_audio_use_external(true);
+	err = medut_audio_use_external(true);
 	CHECK(err == 0, "use_external(true): %d\n", err);
 	CHECK(strcmp(src_mod(), "external") == 0,
 	      "capture module: expected 'external', got '%s'\n", src_mod());
@@ -117,12 +117,12 @@ int main(void)
 	      "the 'external' playback driver must be registered\n");
 
 	/* No call is up, so there is no device open behind it yet. */
-	CHECK(!echosdk_audio_external_is_active(),
+	CHECK(!medut_audio_external_is_active(),
 	      "is_active must be false with no call\n");
-	CHECK(echosdk_audio_external_format(NULL, NULL, NULL) == ENODEV,
+	CHECK(medut_audio_external_format(NULL, NULL, NULL) == ENODEV,
 	      "format must report ENODEV before a call has media\n");
 
-	err = echosdk_audio_use_external(false);
+	err = medut_audio_use_external(false);
 	CHECK(err == 0, "use_external(false): %d\n", err);
 	CHECK(strcmp(src_mod(), platform_mod) == 0,
 	      "capture module: expected '%s' back, got '%s'\n",
@@ -130,12 +130,12 @@ int main(void)
 
 	/* ── 3. It survives a restart ────────────────────────────────────── */
 
-	echosdk_shutdown();
+	medut_shutdown();
 
 	err = start_sdk();
 	if (err) {
-		printf("FATAL: echosdk_init after shutdown: %s (%d)\n",
-		       echosdk_strerror(err), err);
+		printf("FATAL: medut_init after shutdown: %s (%d)\n",
+		       medut_strerror(err), err);
 		return 1;
 	}
 
@@ -144,7 +144,7 @@ int main(void)
 	CHECK(auplay_find(baresip_auplayl(), "external") != NULL,
 	      "the playback driver must be re-registered after a restart\n");
 
-	err = echosdk_audio_use_external(true);
+	err = medut_audio_use_external(true);
 	CHECK(err == 0, "use_external(true) after restart: %d\n", err);
 	CHECK(strcmp(src_mod(), "external") == 0,
 	      "capture module after restart: got '%s'\n", src_mod());
@@ -163,7 +163,7 @@ int main(void)
 	      "restart, got %d (ENOENT means it was never re-registered)\n", err);
 	mem_deref(st);
 
-	echosdk_shutdown();
+	medut_shutdown();
 
 	printf("audio_external_test: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail ? 1 : 0;

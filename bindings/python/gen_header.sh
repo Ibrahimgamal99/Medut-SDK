@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Regenerate bindings/python/echo_sdk/_echosdk_clean.h from include/echosdk.h.
+# Regenerate bindings/python/medut/_medut_clean.h from include/medut.h.
 #
 # This lives in its own script so that every caller shares one pipeline and
 # they cannot drift. Today the only caller is bindings/python/build.sh; a
 # wheel-publishing CI job used to be the second, and its near-copy was missing
-# ECHOSDK_NO_PACKED_ENUM — see below for what that costs. Keep new callers
+# MEDUT_NO_PACKED_ENUM — see below for what that costs. Keep new callers
 # invoking this script rather than inlining the preprocessor command.
 #
-# Usage: gen_header.sh [<input echosdk.h> [<output _echosdk_clean.h>]]
+# Usage: gen_header.sh [<input medut.h> [<output _medut_clean.h>]]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-INPUT="${1:-${ROOT}/include/echosdk.h}"
-OUTPUT="${2:-${SCRIPT_DIR}/echo_sdk/_echosdk_clean.h}"
+INPUT="${1:-${ROOT}/include/medut.h}"
+OUTPUT="${2:-${SCRIPT_DIR}/medut/_medut_clean.h}"
 
-# ECHOSDK_NO_PACKED_ENUM is required, not cosmetic.  echosdk_aec_mode_t is a
+# MEDUT_NO_PACKED_ENUM is required, not cosmetic.  medut_aec_mode_t is a
 # packed (1-byte) enum in the real ABI, and -D'__attribute__(x)=' below strips
 # the packed attribute — so cffi widens the field to 4 bytes and every struct
 # member after cfg.aec_mode lands at the wrong offset.  The total size can
 # still match by padding coincidence, which is why the struct_size check in
-# echosdk_init() does not catch it.  The define selects the uint8_t typedef
+# medut_init() does not catch it.  The define selects the uint8_t typedef
 # that preserves the layout, the same way bindings/flutter/ffigen.yaml does.
 gcc -E \
-    -DECHOSDK_NO_PACKED_ENUM=1 \
+    -DMEDUT_NO_PACKED_ENUM=1 \
     -D'__extension__=' \
     -D'__attribute__(x)=' \
     -D'__restrict=' \

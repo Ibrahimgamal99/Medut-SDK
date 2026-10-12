@@ -7,19 +7,19 @@
  * boundary itself, from whatever the platform gives it (AudioRecord/AudioTrack,
  * AVAudioEngine, a WebRTC AudioDeviceModule, a test file):
  *
- *   app capture thread   --> echosdk_audio_external_push()  --> encoder --> RTP
- *   app playback thread  <-- echosdk_audio_external_pull()  <-- decoder <-- RTP
+ *   app capture thread   --> medut_audio_external_push()  --> encoder --> RTP
+ *   app playback thread  <-- medut_audio_external_pull()  <-- decoder <-- RTP
  *
  * That is the whole contract.  push() is what the far end hears; pull() is what
  * the local user hears.  Both are S16LE interleaved at the call's negotiated
- * rate and channel count, which echosdk_audio_external_format() reports once a
+ * rate and channel count, which medut_audio_external_format() reports once a
  * call has media.
  *
  * Threading
  * ─────────
  * push()/pull() are meant to be called from the app's own realtime audio
  * threads and are safe to call concurrently with each other.  They must not be
- * called from inside a EchoSDK event callback: both take the lock that the
+ * called from inside a Medut event callback: both take the lock that the
  * device teardown path also takes, and the callback thread may be the one
  * running that teardown.  Neither call blocks on the network or allocates on
  * the steady-state path.
@@ -41,7 +41,7 @@
 #include <string.h>
 #include <re.h>
 #include <rem.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Capture backlog before the oldest audio is dropped.  The app pushes on its
  * own clock and the encoder drains on the call's; a little slack absorbs the
@@ -177,7 +177,7 @@ static int ext_src_alloc(struct ausrc_st **stp, const struct ausrc *as,
 	return err;
 }
 
-int echosdk_audio_external_push(const int16_t *pcm, size_t nsamp)
+int medut_audio_external_push(const int16_t *pcm, size_t nsamp)
 {
 	struct auframe af;
 	int err;
@@ -287,7 +287,7 @@ static int ext_play_alloc(struct auplay_st **stp, const struct auplay *ap,
 	return 0;
 }
 
-int echosdk_audio_external_pull(int16_t *pcm, size_t nsamp)
+int medut_audio_external_pull(int16_t *pcm, size_t nsamp)
 {
 	struct auframe af;
 
@@ -324,7 +324,7 @@ int echosdk_audio_external_pull(int16_t *pcm, size_t nsamp)
 
 /* ── Negotiated format ──────────────────────────────────────────────────── */
 
-int echosdk_audio_external_format(uint32_t *srate, uint8_t *ch, uint32_t *ptime)
+int medut_audio_external_format(uint32_t *srate, uint8_t *ch, uint32_t *ptime)
 {
 	struct ausrc_st  *src;
 	struct auplay_st *play;
@@ -357,7 +357,7 @@ int echosdk_audio_external_format(uint32_t *srate, uint8_t *ch, uint32_t *ptime)
 	return err;
 }
 
-bool echosdk_audio_external_is_active(void)
+bool medut_audio_external_is_active(void)
 {
 	bool active;
 

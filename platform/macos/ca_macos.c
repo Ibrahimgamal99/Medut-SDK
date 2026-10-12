@@ -21,7 +21,7 @@
 #include <unistd.h>
 #include <Security/Security.h>
 #include <re.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 /* Longest anchor DER is ~2KB; 8KB leaves room and keeps this off the heap. */
 #define BSDK_MAX_DER 8192
@@ -99,7 +99,7 @@ fallback:
 	if (!access(sysfile, R_OK))
 		return sysfile;
 
-	warning("EchoSDK: no macOS trust anchors found; TLS server "
+	warning("Medut: no macOS trust anchors found; TLS server "
 	        "verification will fail unless ca_cert_path is set\n");
 	return NULL;
 }

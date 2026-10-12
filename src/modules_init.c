@@ -9,13 +9,13 @@
  * (controlled by cmake/modules-desktop.cmake or modules-mobile.cmake).
  */
 
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Common modules present in both desktop and mobile profiles.
  *
  * Deliberately excluded:
  *   "account" — reads ~/.baresip/accounts from disk; SDK creates all
- *               accounts programmatically via echosdk_account_create()
+ *               accounts programmatically via medut_account_create()
  *   "contact" — reads ~/.baresip/contacts from disk (template contains
  *               sip:user@domain;presence=p2p which triggers spurious
  *               SUBSCRIBE dialogs); contacts are added via the API
@@ -39,7 +39,7 @@ static const char *COMMON_MODULES[] = {
 	"dtls_srtp",
 	"stun",
 	"turn",
-	/* "ice": replaced by EchoSDK's own agent (src/ice/), registered from
+	/* "ice": replaced by Medut's own agent (src/ice/), registered from
 	 * bsdk_ice_module_init() rather than loaded as a baresip module. */
 	"mwi",
 	"presence",
@@ -57,24 +57,24 @@ static const char *DESKTOP_EXTRA[] = {
 };
 
 /* Platform audio module selected at compile time */
-#if defined(ECHOSDK_AUDIO_OPENSLES)
+#if defined(MEDUT_AUDIO_OPENSLES)
 /* Android: OpenSLES works on every supported API level (minSdk 24).
- * The preferred driver is EchoSDK's own "sles_vc" (voice-communication
+ * The preferred driver is Medut's own "sles_vc" (voice-communication
  * preset → platform AEC/NS); modules_init() falls back to loading the
  * stock "opensles" module when sles_vc fails to initialize.
  * aaudio needs API >= 26 and is not compiled in — see CMakeLists.txt. */
 static const char *PLATFORM_AUDIO[] = { "opensles", NULL };
-#elif defined(ECHOSDK_AUDIO_AAUDIO)
+#elif defined(MEDUT_AUDIO_AAUDIO)
 static const char *PLATFORM_AUDIO[] = { "aaudio", NULL };
-#elif defined(ECHOSDK_AUDIO_AUDIOUNIT)
+#elif defined(MEDUT_AUDIO_AUDIOUNIT)
 /* iOS: audiounit covers capture + playback (VoiceProcessingIO = HW AEC).
  * avcapture (video) is deliberately not compiled — see CMakeLists.txt. */
 static const char *PLATFORM_AUDIO[] = { "audiounit", NULL };
-#elif defined(ECHOSDK_AUDIO_COREAUDIO)
+#elif defined(MEDUT_AUDIO_COREAUDIO)
 static const char *PLATFORM_AUDIO[] = { "coreaudio", NULL };
-#elif defined(ECHOSDK_AUDIO_WASAPI)
+#elif defined(MEDUT_AUDIO_WASAPI)
 static const char *PLATFORM_AUDIO[] = { "wasapi", NULL };
-#elif defined(ECHOSDK_AUDIO_PULSE)
+#elif defined(MEDUT_AUDIO_PULSE)
 static const char *PLATFORM_AUDIO[] = { "pulse", NULL };
 #else
 static const char *PLATFORM_AUDIO[] = { NULL };
@@ -87,7 +87,7 @@ static void load_list(const char **list)
 	for (int i = 0; list[i]; i++) {
 		int err = module_load(".", list[i]);
 		if (err && err != EALREADY)
-			warning("EchoSDK: module '%s': %m\n", list[i], err);
+			warning("Medut: module '%s': %m\n", list[i], err);
 	}
 }
 
@@ -116,13 +116,13 @@ void bsdk_platform_voice_path_report(bool active)
 	s_voice_path_reported = true;
 
 	if (!active)
-		warning("EchoSDK: recorder is not on the voice-communication "
+		warning("Medut: recorder is not on the voice-communication "
 		        "path: no platform AEC/NS under us\n");
 	bsdk_ap_log_chain("recorder");
 }
 
 /* The device module the platform would use on its own, remembered so
- * echosdk_audio_use_external(false) can put it back. */
+ * medut_audio_use_external(false) can put it back. */
 static char s_platform_audio_mod[32];
 
 const char *bsdk_platform_audio_mod(void)
@@ -139,12 +139,12 @@ int modules_init(void)
 
 	load_list(COMMON_MODULES);
 
-#if defined(ECHOSDK_PROFILE_DESKTOP)
+#if defined(MEDUT_PROFILE_DESKTOP)
 	load_list(DESKTOP_EXTRA);
 #endif
 
-#if defined(ECHOSDK_AUDIO_OPENSLES)
-	/* Prefer EchoSDK's voice-communication OpenSLES driver (platform
+#if defined(MEDUT_AUDIO_OPENSLES)
+	/* Prefer Medut's voice-communication OpenSLES driver (platform
 	 * AEC/NS); fall back to the stock opensles module on failure. */
 	if (bsdk_sles_vc_init() == 0) {
 		audio_mod = "sles_vc";
@@ -164,7 +164,7 @@ int modules_init(void)
 	load_list(PLATFORM_AUDIO);
 #endif
 
-#if defined(ECHOSDK_AUDIO_AUDIOUNIT)
+#if defined(MEDUT_AUDIO_AUDIOUNIT)
 	/* iOS: audiounit's I/O unit is VoiceProcessingIO, Apple's voice
 	 * processing (AEC, NS, AGC).  (The define is only set for iOS — a macOS
 	 * build gets coreaudio, which is not echo-cancelled.)  Only if the
@@ -174,9 +174,9 @@ int modules_init(void)
 #endif
 
 	/* Always available, never automatic: the app opts in with
-	 * echosdk_audio_use_external(true). */
+	 * medut_audio_use_external(true). */
 	if (bsdk_audio_external_init())
-		warning("EchoSDK: app-owned audio device unavailable\n");
+		warning("Medut: app-owned audio device unavailable\n");
 
 	if (audio_mod)
 		str_ncpy(s_platform_audio_mod, audio_mod,
@@ -193,7 +193,7 @@ int modules_init(void)
 		         sizeof(cfg->audio.src_mod));
 		str_ncpy(cfg->audio.play_mod, audio_mod,
 		         sizeof(cfg->audio.play_mod));
-#if defined(ECHOSDK_AUDIO_WASAPI)
+#if defined(MEDUT_AUDIO_WASAPI)
 		/* wasapi src/play accept either a real endpoint ID or the literal
 		 * string "default" — an empty device name makes IMMDeviceEnumerator_
 		 * GetDevice("") fail with E_INVALIDARG and the audio thread bails

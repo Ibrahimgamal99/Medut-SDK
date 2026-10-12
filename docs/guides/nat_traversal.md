@@ -22,7 +22,7 @@ When your SIP device is behind a NAT router, the IP address and port in the SDP 
 STUN discovers your public IP:port mapping. Works when the NAT is **not symmetric** (i.e., the same mapping is used for all destinations).
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri          = "alice@pbx.example.com",
     .password     = "secret",
     .ice_enabled  = true,
@@ -39,7 +39,7 @@ STUN alone is sufficient for most home/office routers with full-cone or address-
 ICE tries multiple candidate addresses (host, server-reflexive via STUN, relay via TURN) and picks the best working pair.
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri          = "alice@pbx.example.com",
     .password     = "secret",
     .ice_enabled  = true,
@@ -58,7 +58,7 @@ TURN relays media through a server when direct connectivity fails (symmetric NAT
 When both `stun_server` and `turn_server` are set, TURN takes priority as the active ICE server (TURN includes STUN-equivalent discovery). Set only `stun_server` when you don't have a TURN server.
 
 ```c
-echosdk_account_config_t cfg = {
+medut_account_config_t cfg = {
     .uri          = "alice@pbx.example.com",
     .password     = "secret",
     .ice_enabled  = true,
@@ -121,7 +121,7 @@ fingerprint
 ### Pattern 4: WebRTC browser interop (ICE + DTLS-SRTP + TURN)
 
 ```c
-.media_enc    = ECHOSDK_MEDIA_ENC_DTLS_SRTP,
+.media_enc    = MEDUT_MEDIA_ENC_DTLS_SRTP,
 .ice_enabled  = true,
 .stun_server  = "stun:stun.l.google.com:19302",
 .turn_server  = "turn:turn.example.com:3478",
@@ -135,26 +135,25 @@ fingerprint
 and what the bindings' `IceServer` / `ice_servers` map to:
 
 ```c
-echosdk_ice_server_t servers[] = {
+medut_ice_server_t servers[] = {
     { "stun:stun.l.google.com:19302", NULL, NULL },
     { "stun:stun1.l.google.com:19302", NULL, NULL },
     { "turn:turn.example.com:3478?transport=udp", "user", "pass" },
 };
 cfg.ice_servers          = servers;
 cfg.ice_server_count     = 3;
-cfg.ice_transport_policy = ECHOSDK_ICE_TRANSPORT_ALL;
+cfg.ice_transport_policy = MEDUT_ICE_TRANSPORT_ALL;
 ```
 
 Every entry is resolved and asked on every gather — the first offer and the
 re-gather of each ICE restart — and the list is read again at each restart,
-so `echosdk_account_set_ice_servers()` with fresh TURN credentials reaches the
+so `medut_account_set_ice_servers()` with fresh TURN credentials reaches the
 next handover without touching the call. When both forms are set the list
-wins; when only the legacy fields are set, both of them are used (TURN first)
-rather than TURN shadowing STUN.
+wins; when only the legacy fields are set, both of them are used (TURN first).
 
-`ECHOSDK_ICE_TRANSPORT_RELAY` is the browser's `iceTransportPolicy: "relay"`:
+`MEDUT_ICE_TRANSPORT_RELAY` is the browser's `iceTransportPolicy: "relay"`:
 only relayed candidates are offered or accepted, and a call whose TURN
-allocation fails ends at once with `ECHOSDK_ERR_TIMEOUT` instead of carrying
+allocation fails ends at once with `MEDUT_ERR_TIMEOUT` instead of carrying
 on over a direct path the deployment forbids.
 
 TURN over UDP, TCP and TLS are all gathered from. Put the TCP/TLS entry on
@@ -211,7 +210,7 @@ address the peer will not accept.
 The SDK re-offers when ICE settles on an address that was never signalled:
 
 ```
-EchoSDK/ice: selected local candidate 41.33.94.42:62417 was never signalled
+Medut/ice: selected local candidate 41.33.94.42:62417 was never signalled
              (offered 213.212.207.242:62417) — re-offering so the peer accepts our media
 ```
 

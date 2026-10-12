@@ -1,18 +1,18 @@
 /**
  * @file audio_external_jni.c  JNI entry points for the app-owned audio device
  *
- * Lets Android code drive echosdk_audio_external_push()/pull() directly from a
+ * Lets Android code drive medut_audio_external_push()/pull() directly from a
  * realtime audio thread, without going through Dart.  That routing matters:
  * the loop has a 10–20 ms deadline per frame, and a managed-runtime GC pause
  * on the capture path is a dropped frame with nowhere to catch it.  Dart flips
  * the mode and reads the format; Kotlin moves the samples.
  *
- * The entry points live in libechosdk.so rather than in a separate shim so
+ * The entry points live in libmedut.so rather than in a separate shim so
  * that consuming this needs no NDK toolchain in the host app — the Flutter
  * plugin ships a prebuilt .so and has no native build of its own.
  *
- * The Java class is deliberately `dev.echosdk.ExternalAudio`, not anything
- * under `dev.echosdk.flutter`: this is a plain Android binding, and a Flutter
+ * The Java class is deliberately `dev.medut.ExternalAudio`, not anything
+ * under `dev.medut.flutter`: this is a plain Android binding, and a Flutter
  * package name compiled into the core would be wrong for every other consumer.
  *
  * PCM crosses as a direct ByteBuffer so there is no copy and no allocation per
@@ -23,9 +23,9 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "echosdk.h"
+#include "medut.h"
 
-#define JNI_FN(name) JNICALL Java_dev_echosdk_ExternalAudio_##name
+#define JNI_FN(name) JNICALL Java_dev_medut_ExternalAudio_##name
 
 /* Byte length of a direct buffer, or -1 if it is not one.  A non-direct buffer
  * has no stable address to hand C, and silently treating that as an error the
@@ -43,7 +43,7 @@ JNIEXPORT jint JNI_FN(nativeUseExternal)(JNIEnv *env, jclass cls,
                                          jboolean enable)
 {
 	(void)env; (void)cls;
-	return echosdk_audio_use_external(enable == JNI_TRUE);
+	return medut_audio_use_external(enable == JNI_TRUE);
 }
 
 /**
@@ -61,7 +61,7 @@ JNIEXPORT jint JNI_FN(nativePush)(JNIEnv *env, jclass cls, jobject buf,
 		return EINVAL;
 
 	const int16_t *pcm = (*env)->GetDirectBufferAddress(env, buf);
-	return echosdk_audio_external_push(pcm, (size_t)nsamp);
+	return medut_audio_external_push(pcm, (size_t)nsamp);
 }
 
 /**
@@ -79,7 +79,7 @@ JNIEXPORT jint JNI_FN(nativePull)(JNIEnv *env, jclass cls, jobject buf,
 		return EINVAL;
 
 	int16_t *pcm = (*env)->GetDirectBufferAddress(env, buf);
-	return echosdk_audio_external_pull(pcm, (size_t)nsamp);
+	return medut_audio_external_pull(pcm, (size_t)nsamp);
 }
 
 /**
@@ -99,7 +99,7 @@ JNIEXPORT jint JNI_FN(nativeFormat)(JNIEnv *env, jclass cls, jintArray out)
 	if (!out || (*env)->GetArrayLength(env, out) < 3)
 		return EINVAL;
 
-	err = echosdk_audio_external_format(&srate, &ch, &ptime);
+	err = medut_audio_external_format(&srate, &ch, &ptime);
 	if (err)
 		return err;
 
@@ -114,7 +114,7 @@ JNIEXPORT jint JNI_FN(nativeFormat)(JNIEnv *env, jclass cls, jintArray out)
 JNIEXPORT jboolean JNI_FN(nativeIsActive)(JNIEnv *env, jclass cls)
 {
 	(void)env; (void)cls;
-	return echosdk_audio_external_is_active() ? JNI_TRUE : JNI_FALSE;
+	return medut_audio_external_is_active() ? JNI_TRUE : JNI_FALSE;
 }
 
 /**
@@ -126,5 +126,5 @@ JNIEXPORT void JNI_FN(nativeSetVoicePath)(JNIEnv *env, jclass cls,
                                           jboolean active)
 {
 	(void)env; (void)cls;
-	echosdk_audio_external_set_voice_path(active == JNI_TRUE);
+	medut_audio_external_set_voice_path(active == JNI_TRUE);
 }

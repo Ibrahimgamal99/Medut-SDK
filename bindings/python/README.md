@@ -1,11 +1,11 @@
-# EchoSDK
+# Medut
 
-There was no production-ready VoIP SDK for Python — if you wanted SIP calling, you had to wrap C libraries yourself or glue together low-level tools. EchoSDK fixes that.
+There was no production-ready VoIP SDK for Python — if you wanted SIP calling, you had to wrap C libraries yourself or glue together low-level tools. Medut fixes that.
 
-Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [EchoSDK](https://github.com/NawyRE/echo-sdk), built on [baresip](https://github.com/baresip/baresip) + [libre](https://github.com/baresip/re).
+Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [Medut](https://github.com/Ibrahimgamal99/Medut-SDK), built on [baresip](https://github.com/baresip/baresip) + [libre](https://github.com/baresip/re).
 
 ```bash
-pip install echo-sdk
+pip install medut
 ```
 ---
 
@@ -35,7 +35,7 @@ sudo dnf install openssl-libs pulseaudio-libs         # Fedora/RHEL
 sudo pacman -S openssl libpulse                       # Arch
 ```
 
-> `import EchoSDK` prints the exact install command if either is missing.  
+> `import Medut` prints the exact install command if either is missing.  
 > `libwebrtc-audio-processing-1` is optional — enables `AEC_WEBRTC` full-duplex mode; the SDK works without it.
 
 **Windows** — only the [Visual C++ Redistributable 2015–2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) required. OpenSSL, zlib, and opus are statically embedded.
@@ -44,7 +44,7 @@ sudo pacman -S openssl libpulse                       # Arch
 ## Quick start
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 # Receive calls
 sdk.configure(log_level=1)
@@ -108,7 +108,7 @@ sdk.set_jitter_buffer(20, 200)
 
 ```python
 # WebRTC full-duplex AEC — configure before first account (desktop only, opt-in build)
-sdk.configure(aec_mode=2)   # 2 = WEBRTC; requires cmake -DECHOSDK_WITH_WEBRTC_AEC=ON
+sdk.configure(aec_mode=2)   # 2 = WEBRTC; requires cmake -DMEDUT_WITH_WEBRTC_AEC=ON
 ```
 
 ---

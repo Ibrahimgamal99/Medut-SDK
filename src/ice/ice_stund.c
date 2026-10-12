@@ -1,5 +1,5 @@
 /**
- * @file ice_stund.c  echo-ice: the STUN server side of connectivity checks
+ * @file ice_stund.c  medut-ice: the STUN server side of connectivity checks
  *
  * RFC 8445 §7.3.  A Binding Request from the peer is verified against
  * *our* password (the request's MESSAGE-INTEGRITY is keyed on the
@@ -20,7 +20,7 @@
 #include "ice_internal.h"
 
 
-static const char sw[] = "EchoSDK echo-ice";
+static const char sw[] = "Medut medut-ice";
 
 
 /* Does the USERNAME of this request name our ufrag? */

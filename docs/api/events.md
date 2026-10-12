@@ -1,6 +1,6 @@
 # Events reference
 
-All events are delivered via the `event_cb` you set in `echosdk_config_t`. The callback is called from the **event dispatch thread** (not `re_main`) so you may call EchoSDK APIs from inside it.
+All events are delivered via the `event_cb` you set in `medut_config_t`. The callback is called from the **event dispatch thread** (not `re_main`) so you may call Medut APIs from inside it.
 
 Event payloads are in the `ev->u` union — access the member matching `ev->type`.
 
@@ -9,7 +9,7 @@ Event payloads are in the `ev->u` union — access the member matching `ev->type
 Events are dispatched via `@sdk.on(name)` decorators. Every handler receives a single event object with a `.type` string and type-specific fields:
 
 ```python
-import echo_sdk as sdk
+import medut as sdk
 
 @sdk.on("registered")
 def _(ev):
@@ -67,8 +67,8 @@ State fields use strings instead of integer constants:
 
 ---
 
-## ECHOSDK_EV_LOG
-**`ev->u.log`** — `echosdk_ev_log_t`
+## MEDUT_EV_LOG
+**`ev->u.log`** — `medut_ev_log_t`
 
 Emitted for every internal log message at or below `cfg.log_level`.
 
@@ -78,16 +78,16 @@ Emitted for every internal log message at or below `cfg.log_level`.
 
 ---
 
-## ECHOSDK_EV_REG_STATE
-**`ev->u.reg`** — `echosdk_ev_reg_state_t`
+## MEDUT_EV_REG_STATE
+**`ev->u.reg`** — `medut_ev_reg_state_t`
 
 Fires on every registration state change.
 
 | Field | Type | Description |
 |---|---|---|
 | `account` | handle | The account that changed state |
-| `state` | `echosdk_reg_state_t` | `UNREGISTERED`, `REGISTERING`, `REGISTERED`, `RECONNECTING`, `FAILED`, `UNREGISTERING` |
-| `error` | `echosdk_error_t` | `ECHOSDK_OK` when `REGISTERED` |
+| `state` | `medut_reg_state_t` | `UNREGISTERED`, `REGISTERING`, `REGISTERED`, `RECONNECTING`, `FAILED`, `UNREGISTERING` |
+| `error` | `medut_error_t` | `MEDUT_OK` when `REGISTERED` |
 | `error_str` | `const char *` | Human-readable error; NULL on OK |
 | `retry_attempt` | `uint32_t` | How many retries so far |
 | `retry_delay_ms` | `uint32_t` | Next retry in this many ms |
@@ -98,7 +98,7 @@ dialog:
 | State | Meaning | What the app does |
 |---|---|---|
 | `RECONNECTING` | The registration is down and the SDK is getting it back itself — a retry armed after a timeout or 5xx, a keepalive probe the proxy stopped answering, a network handover (Wi-Fi ↔ cellular, VPN, dock). | Show "Reconnecting…". Nothing else. |
-| `FAILED` | The SDK has stopped trying: `ECHOSDK_ERR_AUTH`, an exhausted `reg_retry_max_attempts`, or a retry the app cancelled. | Surface it — new credentials, or `echosdk_account_retry_now()`. |
+| `FAILED` | The SDK has stopped trying: `MEDUT_ERR_AUTH`, an exhausted `reg_retry_max_attempts`, or a retry the app cancelled. | Surface it — new credentials, or `medut_account_retry_now()`. |
 
 A recovery reports `RECONNECTING` once and stays there for every attempt it
 makes, ending at `REGISTERED` or `FAILED`; it does not flip back to
@@ -109,10 +109,10 @@ to render.
 
 ---
 
-## ECHOSDK_EV_INCOMING_CALL
-**`ev->u.incoming`** — `echosdk_ev_incoming_call_t`
+## MEDUT_EV_INCOMING_CALL
+**`ev->u.incoming`** — `medut_ev_incoming_call_t`
 
-Fires when a new INVITE is received. Call `echosdk_call_answer()` or `echosdk_call_hangup()`.
+Fires when a new INVITE is received. Call `medut_call_answer()` or `medut_call_hangup()`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -123,8 +123,8 @@ Fires when a new INVITE is received. Call `echosdk_call_answer()` or `echosdk_ca
 
 ---
 
-## ECHOSDK_EV_CALL_STATE
-**`ev->u.call_state`** — `echosdk_ev_call_state_t`
+## MEDUT_EV_CALL_STATE
+**`ev->u.call_state`** — `medut_ev_call_state_t`
 
 Fires on every call state transition.
 
@@ -144,12 +144,12 @@ Fires on every call state transition.
 > normal hangup reaches the SDK looking exactly like a dead socket
 > (`"Connection reset by peer [104]"`). The SDK therefore treats a transport
 > error on a call that had reached `ESTABLISHED` as a remote hangup and reports
-> `ENDED` with `reason = "Remote hangup"` and `error = ECHOSDK_OK`.
+> `ENDED` with `reason = "Remote hangup"` and `error = MEDUT_OK`.
 >
 > A consequence worth knowing: a genuine mid-call transport failure is also
 > reported as `ENDED`. The two are indistinguishable at this layer, and the call
 > is over either way — the transport itself is covered by `REG_STATE` and
-> `ECHOSDK_EV_NETWORK`, which a plain hangup never touches.
+> `MEDUT_EV_NETWORK`, which a plain hangup never touches.
 >
 > Errors *before* answer are unaffected: 486, 603 and every other 4xx/5xx/6xx
 > still arrive as `FAILED` with the SIP reason phrase intact.
@@ -158,14 +158,14 @@ Fires on every call state transition.
 |---|---|---|
 | `account` | handle | Owning account |
 | `call` | handle | The call |
-| `state` | `echosdk_call_state_t` | New state |
-| `error` | `echosdk_error_t` | Error code when FAILED |
+| `state` | `medut_call_state_t` | New state |
+| `error` | `medut_error_t` | Error code when FAILED |
 | `reason` | `const char *` | SIP reason phrase, `"Remote hangup"` for a peer BYE, or NULL |
 
 ---
 
-## ECHOSDK_EV_CALL_DTMF
-**`ev->u.dtmf`** — `echosdk_ev_call_dtmf_t`
+## MEDUT_EV_CALL_DTMF
+**`ev->u.dtmf`** — `medut_ev_call_dtmf_t`
 
 DTMF digit received via RFC 4733.
 
@@ -176,8 +176,8 @@ DTMF digit received via RFC 4733.
 
 ---
 
-## ECHOSDK_EV_SDP_NEGOTIATION
-**`ev->u.sdp`** — `echosdk_ev_sdp_negotiation_t`
+## MEDUT_EV_SDP_NEGOTIATION
+**`ev->u.sdp`** — `medut_ev_sdp_negotiation_t`
 
 Emitted after SDP offer/answer exchange (when `cfg.trace_sdp_diff = true`).
 
@@ -193,14 +193,14 @@ Emitted after SDP offer/answer exchange (when `cfg.trace_sdp_diff = true`).
 
 ---
 
-## ECHOSDK_EV_SIP_TRACE
-**`ev->u.sip_trace`** — `echosdk_ev_sip_trace_t`
+## MEDUT_EV_SIP_TRACE
+**`ev->u.sip_trace`** — `medut_ev_sip_trace_t`
 
 Raw SIP message (when `cfg.trace_sip = true`).
 
 | Field | Type | Description |
 |---|---|---|
-| `dir` | `echosdk_media_dir_t` | `TX` or `RX` |
+| `dir` | `medut_media_dir_t` | `TX` or `RX` |
 | `transport` | `const char *` | `"UDP"`, `"TCP"`, `"TLS"`, `"WS"`, `"WSS"` |
 | `remote_addr` | `const char *` | `"1.2.3.4:5060"` |
 | `raw_message` | `const char *` | Full SIP message text |
@@ -208,10 +208,10 @@ Raw SIP message (when `cfg.trace_sip = true`).
 
 ---
 
-## ECHOSDK_EV_MEDIA_STATS
-**`ev->u.stats`** — `echosdk_ev_media_stats_t`
+## MEDUT_EV_MEDIA_STATS
+**`ev->u.stats`** — `medut_ev_media_stats_t`
 
-Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchronously by `echosdk_call_get_stats()`. All RTCP-dependent fields are zero until the first RTCP exchange — packet counters and bandwidth are available immediately.
+Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchronously by `medut_call_get_stats()`. All RTCP-dependent fields are zero until the first RTCP exchange — packet counters and bandwidth are available immediately.
 
 **Packet counters**
 
@@ -281,7 +281,7 @@ Periodic RTCP stats (rate set by `cfg.stats_interval_ms`). Also returned synchro
 | `mos_cq` | `float` | TX-path conversational quality — `mos_lq` minus the delay impairment, so always ≤ `mos_lq` |
 | `mos_lq_rx` | `float` | RX-path listening quality (far end → you), scored on **effective** loss: network loss plus jitter-buffer discards |
 | `mos_cq_rx` | `float` | RX-path conversational quality |
-| `mos_method` | `echosdk_mos_method_t` | `EMODEL` or `SIMPLIFIED` |
+| `mos_method` | `medut_mos_method_t` | `EMODEL` or `SIMPLIFIED` |
 
 See [Observability → MOS methods](observability.md#mos-methods) for the formulas.
 
@@ -322,8 +322,8 @@ See [Observability → MOS methods](observability.md#mos-methods) for the formul
 
 ---
 
-## ECHOSDK_EV_REGISTRAR_WARNING
-**`ev->u.reg_warn`** — `echosdk_ev_registrar_warning_t`
+## MEDUT_EV_REGISTRAR_WARNING
+**`ev->u.reg_warn`** — `medut_ev_registrar_warning_t`
 
 Non-fatal warning from the registrar (e.g. `Warning:` header).
 
@@ -333,16 +333,16 @@ Non-fatal warning from the registrar (e.g. `Warning:` header).
 
 ---
 
-## ECHOSDK_EV_TRANSFER_REQUEST
-**`ev->u.transfer_req`** — `echosdk_ev_transfer_req_t`
+## MEDUT_EV_TRANSFER_REQUEST
+**`ev->u.transfer_req`** — `medut_ev_transfer_req_t`
 
 Incoming REFER request — the peer is asking you to transfer this call.
 
 **This event requires an answer.** A REFER creates an implicit subscription
 (RFC 3515), and the transferor waits for a final `message/sipfrag` NOTIFY saying
 what became of it. The SDK sends the `202 Accepted` and `100 Trying`, then hands
-the decision to you. Call exactly one of `echosdk_call_transfer_accept()` or
-`echosdk_call_transfer_reject()` on `call`; ignoring the event leaves the far end
+the decision to you. Call exactly one of `medut_call_transfer_accept()` or
+`medut_call_transfer_reject()` on `call`; ignoring the event leaves the far end
 waiting out its 60-second subscription.
 
 Do not follow a transfer by hanging up and dialling `refer_to_uri` — the new call
@@ -359,8 +359,8 @@ is then unrelated to the REFER and the subscription is never answered. See
 
 ---
 
-## ECHOSDK_EV_TRANSFER_FAILED
-**`ev->u.transfer_failed`** — `echosdk_ev_transfer_failed_t`
+## MEDUT_EV_TRANSFER_FAILED
+**`ev->u.transfer_failed`** — `medut_ev_transfer_failed_t`
 
 An *outgoing* REFER was refused. The call is **still established** — a refused
 transfer is not a call failure, and the stack does not close the leg. Resume the
@@ -368,7 +368,7 @@ caller (they are usually on hold) and report the reason; do not hang up.
 
 There is no matching success event: an accepted REFER hands the call to the
 transfer target and closes our leg, which arrives as
-`ECHOSDK_EV_CALL_STATE` / `ECHOSDK_CALL_ENDED`.
+`MEDUT_EV_CALL_STATE` / `MEDUT_CALL_ENDED`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -378,8 +378,8 @@ transfer target and closes our leg, which arrives as
 
 ---
 
-## ECHOSDK_EV_MWI
-**`ev->u.mwi`** — `echosdk_ev_mwi_t`
+## MEDUT_EV_MWI
+**`ev->u.mwi`** — `medut_ev_mwi_t`
 
 Voicemail notification (NOTIFY from MWI subscription).
 
@@ -395,8 +395,8 @@ Voicemail notification (NOTIFY from MWI subscription).
 
 ---
 
-## ECHOSDK_EV_MESSAGE
-**`ev->u.msg`** — `echosdk_ev_message_t`
+## MEDUT_EV_MESSAGE
+**`ev->u.msg`** — `medut_ev_message_t`
 
 Incoming SIP MESSAGE (out-of-dialog instant message).
 
@@ -409,8 +409,8 @@ Incoming SIP MESSAGE (out-of-dialog instant message).
 
 ---
 
-## ECHOSDK_EV_PRESENCE_STATE
-**`ev->u.presence`** — `echosdk_ev_presence_state_t`
+## MEDUT_EV_PRESENCE_STATE
+**`ev->u.presence`** — `medut_ev_presence_state_t`
 
 Buddy presence changed (received via SUBSCRIBE/NOTIFY).
 
@@ -418,24 +418,24 @@ Buddy presence changed (received via SUBSCRIBE/NOTIFY).
 |---|---|
 | `account` | handle |
 | `target_uri` | `const char *` |
-| `status` | `echosdk_presence_status_t`: `UNKNOWN`, `OPEN`, `CLOSED`, `BUSY` |
+| `status` | `medut_presence_status_t`: `UNKNOWN`, `OPEN`, `CLOSED`, `BUSY` |
 
-## ECHOSDK_EV_NETWORK
-**`ev->u.network`** — `echosdk_ev_network_t`
+## MEDUT_EV_NETWORK
+**`ev->u.network`** — `medut_ev_network_t`
 
 Progress of a network handover (Wi-Fi ↔ 4G/5G, VPN up/down, dock/undock).
 See [Network handover](../guides/network_handover.md) for the full sequence.
 
 | Field | Type |
 |---|---|
-| `event` | `echosdk_net_event_t` — see stage table below |
+| `event` | `medut_net_event_t` — see stage table below |
 | `call` | handle — `CALL_*` stages only, else NULL |
 | `account` | handle — `REREGISTERING` only, else NULL |
 | `local_addr` | `const char *` — new local IP, `""` when unknown |
 | `attempt` / `max_attempts` | `uint32_t` — retry counter, e.g. "3/6" |
 | `elapsed_ms` | `uint32_t` — on `CALL_MIGRATED`, how long audio was interrupted |
 | `ice` | `bool` — the call has a live ICE media-NAT; it is migrated with an ICE restart |
-| `error` | `echosdk_error_t` — `ECHOSDK_OK` unless a `*_FAILED` stage |
+| `error` | `medut_error_t` — `MEDUT_OK` unless a `*_FAILED` stage |
 
 Stages: `CHANGE_DETECTED`, `DOWN`, `UP`, `TRANSPORT_RESET`, `REREGISTERING`,
 `CALL_MIGRATING`, `CALL_MIGRATE_ACCEPTED`, `CALL_MIGRATED`,
@@ -465,14 +465,14 @@ The call is not ended. Where a pair had been validated by an earlier ICE
 generation the SDK holds the stream on it, so audio usually survives a failed
 restart; the event says the *new* path was never proven, not that the call is
 silent. Treat it as a prompt to check whether audio is actually flowing (the
-`ECHOSDK_QUALITY_MEDIA_STALL` alert answers that) rather than as a reason to
+`MEDUT_QUALITY_MEDIA_STALL` alert answers that) rather than as a reason to
 hang up. It is emitted once per failed ICE generation, so a call that restarts
 twice can emit it twice.
 
 ---
 
-## ECHOSDK_EV_QUALITY_ALERT
-**`ev->u.quality_alert`** — `echosdk_ev_quality_alert_t`
+## MEDUT_EV_QUALITY_ALERT
+**`ev->u.quality_alert`** — `medut_ev_quality_alert_t`
 
 Fired when a quality metric crosses one of the configured thresholds, and
 again when it crosses back. Edge-triggered, so a call that stays bad produces
@@ -481,7 +481,7 @@ one alert, not one per stats tick.
 | Field | Type | Description |
 |---|---|---|
 | `call` | handle | The affected call |
-| `issue` | `echosdk_quality_issue_t` | `MOS`, `LOSS`, `JITTER`, `RTT`, `MEDIA_STALL` |
+| `issue` | `medut_quality_issue_t` | `MOS`, `LOSS`, `JITTER`, `RTT`, `MEDIA_STALL` |
 | `value` | `float` | The metric that crossed |
 | `threshold` | `float` | The threshold it crossed |
 | `recovering` | `bool` | true = the value came back across |
@@ -493,23 +493,23 @@ arriving. `value` is the stall duration in ms. It is deliberately non-fatal;
 `cfg.rtp_timeout_s` is the setting that ends such a call instead. See
 [Degraded links](../guides/degraded_links.md).
 
-## `ECHOSDK_EV_ICE_STATE`
+## `MEDUT_EV_ICE_STATE`
 
 Emitted whenever the ICE liveness of a call's media path changes — the
 agent's own verdict from its connectivity checks and RFC 7675 consent, not an
-inference from RTP.  Payload `echosdk_ev_ice_state_t`:
+inference from RTP.  Payload `medut_ev_ice_state_t`:
 
 | Field | Meaning |
 |---|---|
 | `call` | the call |
-| `state`, `prev` | `echosdk_ice_state_t`: `NEW → GATHERING → CHECKING → CONNECTED → COMPLETED`; `DISCONNECTED` while the selected pair stops answering or receiving but checks continue; `FAILED` once every pair has timed out and nothing is left to gather |
+| `state`, `prev` | `medut_ice_state_t`: `NEW → GATHERING → CHECKING → CONNECTED → COMPLETED`; `DISCONNECTED` while the selected pair stops answering or receiving but checks continue; `FAILED` once every pair has timed out and nothing is left to gather |
 | `generation` | ICE restarts so far (1 = the initial session) |
 | `local_type`, `remote_type` | candidate types of the selected pair (`host`, `srflx`, `prflx`, `relay`) |
 | `local_addr`, `remote_addr` | the selected pair as `ip:port`, `""` until one is selected |
 | `rtt_ms` | STUN round trip on the selected pair |
-| `error` | `ECHOSDK_ERR_TIMEOUT` on `FAILED`, else `ECHOSDK_OK` |
+| `error` | `MEDUT_ERR_TIMEOUT` on `FAILED`, else `MEDUT_OK` |
 
-The same view is on every `ECHOSDK_EV_MEDIA_STATS` tick as `ice_state`,
+The same view is on every `MEDUT_EV_MEDIA_STATS` tick as `ice_state`,
 `ice_local_type` / `ice_remote_type`, `ice_local_addr` / `ice_remote_addr`,
 `ice_rtt_ms` and `ice_generation`, so a quality readout can show the path
 without tracking the event stream.  On an ICE call `remote_addr` is the
@@ -517,4 +517,4 @@ selected remote candidate; on a plain-RTP call it is the signalled peer.
 
 `FAILED` never ends the call: where a pair was validated earlier the stream is
 still held on it and audio usually survives; redialling is the app's decision.
-`echosdk_call_ice_state()` returns the current value from any thread.
+`medut_call_ice_state()` returns the current value from any thread.

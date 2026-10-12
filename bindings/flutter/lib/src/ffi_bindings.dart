@@ -4,121 +4,121 @@
 // ignore_for_file: type=lint
 import 'dart:ffi' as ffi;
 
-/// Auto-generated Dart FFI bindings for EchoSDK.
-class EchoSDKBindings {
+/// Auto-generated Dart FFI bindings for Medut.
+class MedutBindings {
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
       _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
-  EchoSDKBindings(ffi.DynamicLibrary dynamicLibrary)
+  MedutBindings(ffi.DynamicLibrary dynamicLibrary)
       : _lookup = dynamicLibrary.lookup;
 
   /// The symbols are looked up with [lookup].
-  EchoSDKBindings.fromLookup(
+  MedutBindings.fromLookup(
       ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
           lookup)
       : _lookup = lookup;
 
-  ffi.Pointer<ffi.Char> echosdk_version() {
-    return _echosdk_version();
+  ffi.Pointer<ffi.Char> medut_version() {
+    return _medut_version();
   }
 
-  late final _echosdk_versionPtr =
+  late final _medut_versionPtr =
       _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Char> Function()>>(
-          'echosdk_version');
-  late final _echosdk_version =
-      _echosdk_versionPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
+          'medut_version');
+  late final _medut_version =
+      _medut_versionPtr.asFunction<ffi.Pointer<ffi.Char> Function()>();
 
-  ffi.Pointer<ffi.Char> echosdk_strerror(
+  ffi.Pointer<ffi.Char> medut_strerror(
     int err,
   ) {
-    return _echosdk_strerror(
+    return _medut_strerror(
       err,
     );
   }
 
-  late final _echosdk_strerrorPtr =
+  late final _medut_strerrorPtr =
       _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Char> Function(ffi.Int)>>(
-          'echosdk_strerror');
-  late final _echosdk_strerror =
-      _echosdk_strerrorPtr.asFunction<ffi.Pointer<ffi.Char> Function(int)>();
+          'medut_strerror');
+  late final _medut_strerror =
+      _medut_strerrorPtr.asFunction<ffi.Pointer<ffi.Char> Function(int)>();
 
   /// Release an event delivered with cfg.deliver_owned_events = true.
   /// Must be called exactly once per delivered event; may be called from any
   /// thread, at any time after delivery.  No-op on NULL.  Passing an event
   /// that was NOT delivered in owned mode is undefined behavior.
-  void echosdk_event_release(
-    ffi.Pointer<echosdk_event_t> ev,
+  void medut_event_release(
+    ffi.Pointer<medut_event_t> ev,
   ) {
-    return _echosdk_event_release(
+    return _medut_event_release(
       ev,
     );
   }
 
-  late final _echosdk_event_releasePtr = _lookup<
-          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<echosdk_event_t>)>>(
-      'echosdk_event_release');
-  late final _echosdk_event_release = _echosdk_event_releasePtr
-      .asFunction<void Function(ffi.Pointer<echosdk_event_t>)>();
+  late final _medut_event_releasePtr = _lookup<
+          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<medut_event_t>)>>(
+      'medut_event_release');
+  late final _medut_event_release = _medut_event_releasePtr
+      .asFunction<void Function(ffi.Pointer<medut_event_t>)>();
 
   /// Zero-fill cfg and set version/struct_size correctly. Call before populating.
-  void echosdk_config_init(
-    ffi.Pointer<echosdk_config_t> cfg,
+  void medut_config_init(
+    ffi.Pointer<medut_config_t> cfg,
   ) {
-    return _echosdk_config_init(
+    return _medut_config_init(
       cfg,
     );
   }
 
-  late final _echosdk_config_initPtr = _lookup<
-          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<echosdk_config_t>)>>(
-      'echosdk_config_init');
-  late final _echosdk_config_init = _echosdk_config_initPtr
-      .asFunction<void Function(ffi.Pointer<echosdk_config_t>)>();
+  late final _medut_config_initPtr = _lookup<
+          ffi.NativeFunction<ffi.Void Function(ffi.Pointer<medut_config_t>)>>(
+      'medut_config_init');
+  late final _medut_config_init = _medut_config_initPtr
+      .asFunction<void Function(ffi.Pointer<medut_config_t>)>();
 
-  /// Initialize the EchoSDK stack. Call once per process before any other API.
+  /// Initialize the Medut stack. Call once per process before any other API.
   /// Spawns re_main thread and event dispatch thread internally.
-  /// Returns ECHOSDK_OK or a negative ECHOSDK_ERR_* code.
-  int echosdk_init(
-    ffi.Pointer<echosdk_config_t> cfg,
+  /// Returns MEDUT_OK or a negative MEDUT_ERR_* code.
+  int medut_init(
+    ffi.Pointer<medut_config_t> cfg,
   ) {
-    return _echosdk_init(
+    return _medut_init(
       cfg,
     );
   }
 
-  late final _echosdk_initPtr = _lookup<
-          ffi.NativeFunction<ffi.Int Function(ffi.Pointer<echosdk_config_t>)>>(
-      'echosdk_init');
-  late final _echosdk_init = _echosdk_initPtr
-      .asFunction<int Function(ffi.Pointer<echosdk_config_t>)>();
+  late final _medut_initPtr = _lookup<
+          ffi.NativeFunction<ffi.Int Function(ffi.Pointer<medut_config_t>)>>(
+      'medut_init');
+  late final _medut_init = _medut_initPtr
+      .asFunction<int Function(ffi.Pointer<medut_config_t>)>();
 
-  /// True while the stack is initialized (between a successful echosdk_init()
-  /// and echosdk_shutdown()).  Thread-safe.
+  /// True while the stack is initialized (between a successful medut_init()
+  /// and medut_shutdown()).  Thread-safe.
   ///
   /// The stack lives in the process, not in the caller's runtime.  A host that
   /// can lose and rebuild its own runtime while the process stays alive — an
   /// Android headless Flutter engine tearing down the Dart isolate between push
   /// wakeups, a re-loaded plugin/scripting VM — comes back to a stack that is
-  /// still up and still registered.  Calling echosdk_init() again then returns
-  /// ECHOSDK_ERR_ALREADY; the correct recovery is to re-point the event sink at
-  /// the new runtime with echosdk_set_event_handler() and re-discover the live
-  /// accounts and calls with echosdk_account_foreach() / echosdk_call_foreach().
-  bool echosdk_is_initialized() {
-    return _echosdk_is_initialized();
+  /// still up and still registered.  Calling medut_init() again then returns
+  /// MEDUT_ERR_ALREADY; the correct recovery is to re-point the event sink at
+  /// the new runtime with medut_set_event_handler() and re-discover the live
+  /// accounts and calls with medut_account_foreach() / medut_call_foreach().
+  bool medut_is_initialized() {
+    return _medut_is_initialized();
   }
 
-  late final _echosdk_is_initializedPtr =
+  late final _medut_is_initializedPtr =
       _lookup<ffi.NativeFunction<ffi.Bool Function()>>(
-          'echosdk_is_initialized');
-  late final _echosdk_is_initialized =
-      _echosdk_is_initializedPtr.asFunction<bool Function()>();
+          'medut_is_initialized');
+  late final _medut_is_initialized =
+      _medut_is_initializedPtr.asFunction<bool Function()>();
 
   /// Re-point the event sink at a new callback on an already-initialized stack.
   ///
   /// Use when the process outlives the consumer that installed cfg.event_cb (see
-  /// echosdk_is_initialized()).  Once this returns the old callback is neither
+  /// medut_is_initialized()).  Once this returns the old callback is neither
   /// running nor reachable — a delivery already inside it is waited out — so the
   /// caller may free it immediately (close a Dart NativeCallable, unload a
   /// plugin).  Calling from inside the event callback skips that wait and returns
@@ -129,9 +129,9 @@ class EchoSDKBindings {
   /// consumer was gone is dropped, including an INVITE that arrived during the
   /// gap.  Recover the resulting state, not the missed events: the call itself is
   /// still live in the stack, so a reattaching consumer enumerates
-  /// echosdk_call_foreach() and reads echosdk_call_get_state() to find a call
-  /// still RINGING, and echosdk_account_foreach() /
-  /// echosdk_account_get_reg_state() for registration state.
+  /// medut_call_foreach() and reads medut_call_get_state() to find a call
+  /// still RINGING, and medut_account_foreach() /
+  /// medut_account_get_reg_state() for registration state.
   ///
   /// @param cb                    New callback; NULL parks delivery (events keep
   /// being dequeued and dropped, never queued up)
@@ -140,121 +140,121 @@ class EchoSDKBindings {
   /// contract as cfg.deliver_owned_events.  A
   /// handler installed with true MUST release every
   /// event it receives.
-  /// @return ECHOSDK_OK, or ECHOSDK_ERR_STATE if the stack is not initialized
-  int echosdk_set_event_handler(
-    echosdk_event_cb_t cb,
+  /// @return MEDUT_OK, or MEDUT_ERR_STATE if the stack is not initialized
+  int medut_set_event_handler(
+    medut_event_cb_t cb,
     ffi.Pointer<ffi.Void> userdata,
     bool deliver_owned_events,
   ) {
-    return _echosdk_set_event_handler(
+    return _medut_set_event_handler(
       cb,
       userdata,
       deliver_owned_events,
     );
   }
 
-  late final _echosdk_set_event_handlerPtr = _lookup<
+  late final _medut_set_event_handlerPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_event_cb_t, ffi.Pointer<ffi.Void>,
-              ffi.Bool)>>('echosdk_set_event_handler');
-  late final _echosdk_set_event_handler =
-      _echosdk_set_event_handlerPtr.asFunction<
-          int Function(echosdk_event_cb_t, ffi.Pointer<ffi.Void>, bool)>();
+          ffi.Int Function(medut_event_cb_t, ffi.Pointer<ffi.Void>,
+              ffi.Bool)>>('medut_set_event_handler');
+  late final _medut_set_event_handler =
+      _medut_set_event_handlerPtr.asFunction<
+          int Function(medut_event_cb_t, ffi.Pointer<ffi.Void>, bool)>();
 
   /// Tear down the stack. Blocks until all internal threads have exited.
   /// All active accounts and calls are forcibly terminated first.
-  void echosdk_shutdown() {
-    return _echosdk_shutdown();
+  void medut_shutdown() {
+    return _medut_shutdown();
   }
 
-  late final _echosdk_shutdownPtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function()>>('echosdk_shutdown');
-  late final _echosdk_shutdown =
-      _echosdk_shutdownPtr.asFunction<void Function()>();
+  late final _medut_shutdownPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function()>>('medut_shutdown');
+  late final _medut_shutdown =
+      _medut_shutdownPtr.asFunction<void Function()>();
 
-  /// Create a SIP account. Does NOT register — call echosdk_account_register().
-  /// Thread-safe; may be called from any thread after echosdk_init().
-  int echosdk_account_create(
-    ffi.Pointer<echosdk_account_config_t> cfg,
-    ffi.Pointer<echosdk_account_handle_t> out,
+  /// Create a SIP account. Does NOT register — call medut_account_register().
+  /// Thread-safe; may be called from any thread after medut_init().
+  int medut_account_create(
+    ffi.Pointer<medut_account_config_t> cfg,
+    ffi.Pointer<medut_account_handle_t> out,
   ) {
-    return _echosdk_account_create(
+    return _medut_account_create(
       cfg,
       out,
     );
   }
 
-  late final _echosdk_account_createPtr = _lookup<
+  late final _medut_account_createPtr = _lookup<
           ffi.NativeFunction<
-              ffi.Int Function(ffi.Pointer<echosdk_account_config_t>,
-                  ffi.Pointer<echosdk_account_handle_t>)>>(
-      'echosdk_account_create');
-  late final _echosdk_account_create = _echosdk_account_createPtr.asFunction<
-      int Function(ffi.Pointer<echosdk_account_config_t>,
-          ffi.Pointer<echosdk_account_handle_t>)>();
+              ffi.Int Function(ffi.Pointer<medut_account_config_t>,
+                  ffi.Pointer<medut_account_handle_t>)>>(
+      'medut_account_create');
+  late final _medut_account_create = _medut_account_createPtr.asFunction<
+      int Function(ffi.Pointer<medut_account_config_t>,
+          ffi.Pointer<medut_account_handle_t>)>();
 
   /// Destroy account and all associated calls. Unregisters first if registered.
-  void echosdk_account_destroy(
-    echosdk_account_handle_t acct,
+  void medut_account_destroy(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_destroy(
+    return _medut_account_destroy(
       acct,
     );
   }
 
-  late final _echosdk_account_destroyPtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function(echosdk_account_handle_t)>>(
-          'echosdk_account_destroy');
-  late final _echosdk_account_destroy = _echosdk_account_destroyPtr
-      .asFunction<void Function(echosdk_account_handle_t)>();
+  late final _medut_account_destroyPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(medut_account_handle_t)>>(
+          'medut_account_destroy');
+  late final _medut_account_destroy = _medut_account_destroyPtr
+      .asFunction<void Function(medut_account_handle_t)>();
 
-  /// Begin registration. Fires ECHOSDK_EV_REG_STATE events on state changes.
+  /// Begin registration. Fires MEDUT_EV_REG_STATE events on state changes.
   /// REGISTERING → REGISTERED on success; a failure the SDK will retry reports
-  /// ECHOSDK_REG_RECONNECTING, and only a failure it has given up on reports
-  /// ECHOSDK_REG_FAILED.
-  int echosdk_account_register(
-    echosdk_account_handle_t acct,
+  /// MEDUT_REG_RECONNECTING, and only a failure it has given up on reports
+  /// MEDUT_REG_FAILED.
+  int medut_account_register(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_register(
+    return _medut_account_register(
       acct,
     );
   }
 
-  late final _echosdk_account_registerPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_account_handle_t)>>(
-          'echosdk_account_register');
-  late final _echosdk_account_register = _echosdk_account_registerPtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_registerPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_account_handle_t)>>(
+          'medut_account_register');
+  late final _medut_account_register = _medut_account_registerPtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
   /// Unregister (sends REGISTER with Expires: 0).
-  int echosdk_account_unregister(
-    echosdk_account_handle_t acct,
+  int medut_account_unregister(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_unregister(
+    return _medut_account_unregister(
       acct,
     );
   }
 
-  late final _echosdk_account_unregisterPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_account_handle_t)>>(
-          'echosdk_account_unregister');
-  late final _echosdk_account_unregister = _echosdk_account_unregisterPtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_unregisterPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_account_handle_t)>>(
+          'medut_account_unregister');
+  late final _medut_account_unregister = _medut_account_unregisterPtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
   /// Override the retry policy for this account. Takes effect on the next retry.
-  /// Overrides the global reg_retry_* fields in echosdk_config_t for this account only.
+  /// Overrides the global reg_retry_* fields in medut_config_t for this account only.
   /// @param initial_ms   First retry delay in ms (e.g. 2000)
   /// @param max_ms       Maximum retry delay cap in ms (e.g. 300000)
   /// @param backoff      Delay multiplier per attempt (e.g. 2.0)
   /// @param max_attempts Max attempts before giving up; 0 = retry forever
-  int echosdk_account_set_retry_policy(
-    echosdk_account_handle_t acct,
+  int medut_account_set_retry_policy(
+    medut_account_handle_t acct,
     int initial_ms,
     int max_ms,
     double backoff,
     int max_attempts,
   ) {
-    return _echosdk_account_set_retry_policy(
+    return _medut_account_set_retry_policy(
       acct,
       initial_ms,
       max_ms,
@@ -263,48 +263,48 @@ class EchoSDKBindings {
     );
   }
 
-  late final _echosdk_account_set_retry_policyPtr = _lookup<
+  late final _medut_account_set_retry_policyPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t, ffi.Uint32, ffi.Uint32,
-              ffi.Float, ffi.Uint32)>>('echosdk_account_set_retry_policy');
-  late final _echosdk_account_set_retry_policy =
-      _echosdk_account_set_retry_policyPtr.asFunction<
-          int Function(echosdk_account_handle_t, int, int, double, int)>();
+          ffi.Int Function(medut_account_handle_t, ffi.Uint32, ffi.Uint32,
+              ffi.Float, ffi.Uint32)>>('medut_account_set_retry_policy');
+  late final _medut_account_set_retry_policy =
+      _medut_account_set_retry_policyPtr.asFunction<
+          int Function(medut_account_handle_t, int, int, double, int)>();
 
   /// Cancel a pending retry timer and reset the attempt counter.
   /// The app has taken over, so the recovery stops being the SDK's: an account
   /// that was RECONNECTING reports FAILED once the retry is cancelled — leaving
   /// it on "Reconnecting…" would promise an attempt that is never coming.
-  /// Call echosdk_account_register() to restart.
-  int echosdk_account_cancel_retry(
-    echosdk_account_handle_t acct,
+  /// Call medut_account_register() to restart.
+  int medut_account_cancel_retry(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_cancel_retry(
+    return _medut_account_cancel_retry(
       acct,
     );
   }
 
-  late final _echosdk_account_cancel_retryPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_account_handle_t)>>(
-          'echosdk_account_cancel_retry');
-  late final _echosdk_account_cancel_retry = _echosdk_account_cancel_retryPtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_cancel_retryPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_account_handle_t)>>(
+          'medut_account_cancel_retry');
+  late final _medut_account_cancel_retry = _medut_account_cancel_retryPtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
   /// Skip the current backoff delay and re-register immediately.
   /// Resets the attempt counter. No-op if the account is not in a retry loop.
-  int echosdk_account_retry_now(
-    echosdk_account_handle_t acct,
+  int medut_account_retry_now(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_retry_now(
+    return _medut_account_retry_now(
       acct,
     );
   }
 
-  late final _echosdk_account_retry_nowPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_account_handle_t)>>(
-          'echosdk_account_retry_now');
-  late final _echosdk_account_retry_now = _echosdk_account_retry_nowPtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_retry_nowPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_account_handle_t)>>(
+          'medut_account_retry_now');
+  late final _medut_account_retry_now = _medut_account_retry_nowPtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
   /// Replace the account's STUN/TURN server list and transport policy.
   ///
@@ -314,13 +314,13 @@ class EchoSDKBindings {
   /// re-creating the account.  `count` 0 clears the per-account list, so the
   /// global list and then the legacy single-server fields apply again.  The
   /// array is copied; the caller keeps ownership of its memory.
-  int echosdk_account_set_ice_servers(
-    echosdk_account_handle_t acct,
-    ffi.Pointer<echosdk_ice_server_t> servers,
+  int medut_account_set_ice_servers(
+    medut_account_handle_t acct,
+    ffi.Pointer<medut_ice_server_t> servers,
     int count,
     int policy,
   ) {
-    return _echosdk_account_set_ice_servers(
+    return _medut_account_set_ice_servers(
       acct,
       servers,
       count,
@@ -328,17 +328,17 @@ class EchoSDKBindings {
     );
   }
 
-  late final _echosdk_account_set_ice_serversPtr = _lookup<
+  late final _medut_account_set_ice_serversPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int Function(
-              echosdk_account_handle_t,
-              ffi.Pointer<echosdk_ice_server_t>,
+              medut_account_handle_t,
+              ffi.Pointer<medut_ice_server_t>,
               ffi.Uint32,
-              ffi.Int32)>>('echosdk_account_set_ice_servers');
-  late final _echosdk_account_set_ice_servers =
-      _echosdk_account_set_ice_serversPtr.asFunction<
-          int Function(echosdk_account_handle_t,
-              ffi.Pointer<echosdk_ice_server_t>, int, int)>();
+              ffi.Int32)>>('medut_account_set_ice_servers');
+  late final _medut_account_set_ice_servers =
+      _medut_account_set_ice_serversPtr.asFunction<
+          int Function(medut_account_handle_t,
+              ffi.Pointer<medut_ice_server_t>, int, int)>();
 
   /// Update the push token for an account at runtime (e.g. on OS token rotation).
   ///
@@ -346,37 +346,37 @@ class EchoSDKBindings {
   /// REGISTER is sent immediately unless the account is mid-call, mid-transaction,
   /// or in retry backoff — in those cases the update is deferred to the next
   /// natural re-registration.  Callers that need the token applied before the
-  /// next call should wait for ECHOSDK_EV_CALL_STATE ENDED first.
+  /// next call should wait for MEDUT_EV_CALL_STATE ENDED first.
   ///
   /// Pass NULL to clear push params and re-register without pn-* Contact params.
   ///
   /// @param acct        Account handle (must have push_provider set in config)
   /// @param push_token  New device token string, or NULL to clear
-  /// @return ECHOSDK_OK on success, ECHOSDK_ERR_STATE if account has no UA yet
-  int echosdk_account_set_push_token(
-    echosdk_account_handle_t acct,
+  /// @return MEDUT_OK on success, MEDUT_ERR_STATE if account has no UA yet
+  int medut_account_set_push_token(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> push_token,
   ) {
-    return _echosdk_account_set_push_token(
+    return _medut_account_set_push_token(
       acct,
       push_token,
     );
   }
 
-  late final _echosdk_account_set_push_tokenPtr = _lookup<
+  late final _medut_account_set_push_tokenPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t,
-              ffi.Pointer<ffi.Char>)>>('echosdk_account_set_push_token');
-  late final _echosdk_account_set_push_token =
-      _echosdk_account_set_push_tokenPtr.asFunction<
-          int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_account_handle_t,
+              ffi.Pointer<ffi.Char>)>>('medut_account_set_push_token');
+  late final _medut_account_set_push_token =
+      _medut_account_set_push_tokenPtr.asFunction<
+          int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>)>();
 
   /// Add a custom SIP header that is sent on REGISTER requests only.
   ///
   /// Use this for vendor push schemes that use non-standard headers (e.g.
   /// "X-Push-Token", "X-Apple-Push-Bundle-Id") on hosted servers where you
   /// cannot configure server-side push dispatch.  Unlike
-  /// echosdk_account_add_header(), this header is NOT included on INVITE,
+  /// medut_account_add_header(), this header is NOT included on INVITE,
   /// BYE, or REFER — the token is not leaked to call peers.
   ///
   /// Multiple calls accumulate headers.  The list is append-only for the
@@ -384,209 +384,209 @@ class EchoSDKBindings {
   ///
   /// @param name   Header field name  (e.g. "X-Push-Token")
   /// @param value  Header field value (e.g. "a1b2c3...")
-  int echosdk_account_add_register_header(
-    echosdk_account_handle_t acct,
+  int medut_account_add_register_header(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> name,
     ffi.Pointer<ffi.Char> value,
   ) {
-    return _echosdk_account_add_register_header(
+    return _medut_account_add_register_header(
       acct,
       name,
       value,
     );
   }
 
-  late final _echosdk_account_add_register_headerPtr = _lookup<
+  late final _medut_account_add_register_headerPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('echosdk_account_add_register_header');
-  late final _echosdk_account_add_register_header =
-      _echosdk_account_add_register_headerPtr.asFunction<
-          int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
+          ffi.Int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>)>>('medut_account_add_register_header');
+  late final _medut_account_add_register_header =
+      _medut_account_add_register_headerPtr.asFunction<
+          int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
               ffi.Pointer<ffi.Char>)>();
 
   /// Add a custom SIP header to all outgoing requests for this account.
   /// @param name   Header field name  (e.g. "X-Tenant-Id")
   /// @param value  Header field value (e.g. "12345")
-  int echosdk_account_add_header(
-    echosdk_account_handle_t acct,
+  int medut_account_add_header(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> name,
     ffi.Pointer<ffi.Char> value,
   ) {
-    return _echosdk_account_add_header(
+    return _medut_account_add_header(
       acct,
       name,
       value,
     );
   }
 
-  late final _echosdk_account_add_headerPtr = _lookup<
+  late final _medut_account_add_headerPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('echosdk_account_add_header');
-  late final _echosdk_account_add_header =
-      _echosdk_account_add_headerPtr.asFunction<
-          int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
+          ffi.Int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>)>>('medut_account_add_header');
+  late final _medut_account_add_header =
+      _medut_account_add_headerPtr.asFunction<
+          int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
               ffi.Pointer<ffi.Char>)>();
 
   /// Subscribe to presence state changes for a contact (SUBSCRIBE/NOTIFY).
-  /// Presence updates are delivered via ECHOSDK_EV_PRESENCE_STATE events.
+  /// Presence updates are delivered via MEDUT_EV_PRESENCE_STATE events.
   /// @param target_uri  SIP URI of the contact to subscribe to
-  /// @return ECHOSDK_OK on success, or negative error code
-  int echosdk_account_subscribe_presence(
-    echosdk_account_handle_t acct,
+  /// @return MEDUT_OK on success, or negative error code
+  int medut_account_subscribe_presence(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> target_uri,
   ) {
-    return _echosdk_account_subscribe_presence(
+    return _medut_account_subscribe_presence(
       acct,
       target_uri,
     );
   }
 
-  late final _echosdk_account_subscribe_presencePtr = _lookup<
+  late final _medut_account_subscribe_presencePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t,
-              ffi.Pointer<ffi.Char>)>>('echosdk_account_subscribe_presence');
-  late final _echosdk_account_subscribe_presence =
-      _echosdk_account_subscribe_presencePtr.asFunction<
-          int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_account_handle_t,
+              ffi.Pointer<ffi.Char>)>>('medut_account_subscribe_presence');
+  late final _medut_account_subscribe_presence =
+      _medut_account_subscribe_presencePtr.asFunction<
+          int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>)>();
 
   /// Unsubscribe from presence state changes for a contact.
   /// @param target_uri  SIP URI of the contact to unsubscribe from
-  /// @return ECHOSDK_OK on success, or negative error code
-  int echosdk_account_unsubscribe_presence(
-    echosdk_account_handle_t acct,
+  /// @return MEDUT_OK on success, or negative error code
+  int medut_account_unsubscribe_presence(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> target_uri,
   ) {
-    return _echosdk_account_unsubscribe_presence(
+    return _medut_account_unsubscribe_presence(
       acct,
       target_uri,
     );
   }
 
-  late final _echosdk_account_unsubscribe_presencePtr = _lookup<
+  late final _medut_account_unsubscribe_presencePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t,
-              ffi.Pointer<ffi.Char>)>>('echosdk_account_unsubscribe_presence');
-  late final _echosdk_account_unsubscribe_presence =
-      _echosdk_account_unsubscribe_presencePtr.asFunction<
-          int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_account_handle_t,
+              ffi.Pointer<ffi.Char>)>>('medut_account_unsubscribe_presence');
+  late final _medut_account_unsubscribe_presence =
+      _medut_account_unsubscribe_presencePtr.asFunction<
+          int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>)>();
 
   /// Iterate all live accounts. Safe to call from any thread.
   /// Do not create or destroy accounts from inside fn.
   ///
-  /// Together with echosdk_account_get_aor() this lets a consumer that lost its
+  /// Together with medut_account_get_aor() this lets a consumer that lost its
   /// own handles — a rebuilt runtime attaching to a stack that is still up, see
-  /// echosdk_is_initialized() — re-derive them instead of creating duplicates.
-  void echosdk_account_foreach(
-    echosdk_account_iter_fn fn,
+  /// medut_is_initialized() — re-derive them instead of creating duplicates.
+  void medut_account_foreach(
+    medut_account_iter_fn fn,
     ffi.Pointer<ffi.Void> arg,
   ) {
-    return _echosdk_account_foreach(
+    return _medut_account_foreach(
       fn,
       arg,
     );
   }
 
-  late final _echosdk_account_foreachPtr = _lookup<
+  late final _medut_account_foreachPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Void Function(echosdk_account_iter_fn,
-              ffi.Pointer<ffi.Void>)>>('echosdk_account_foreach');
-  late final _echosdk_account_foreach = _echosdk_account_foreachPtr.asFunction<
-      void Function(echosdk_account_iter_fn, ffi.Pointer<ffi.Void>)>();
+          ffi.Void Function(medut_account_iter_fn,
+              ffi.Pointer<ffi.Void>)>>('medut_account_foreach');
+  late final _medut_account_foreach = _medut_account_foreachPtr.asFunction<
+      void Function(medut_account_iter_fn, ffi.Pointer<ffi.Void>)>();
 
   /// Write the account's AOR ("sip:user@host") into buf as a NUL-terminated
   /// string.  Identifies an account handle obtained from
-  /// echosdk_account_foreach().
-  /// @return ECHOSDK_OK, ECHOSDK_ERR_INVAL on bad args, or ECHOSDK_ERR_NOMEM
+  /// medut_account_foreach().
+  /// @return MEDUT_OK, MEDUT_ERR_INVAL on bad args, or MEDUT_ERR_NOMEM
   /// if buf is too small (buf is left empty).
-  int echosdk_account_get_aor(
-    echosdk_account_handle_t acct,
+  int medut_account_get_aor(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> buf,
     int sz,
   ) {
-    return _echosdk_account_get_aor(
+    return _medut_account_get_aor(
       acct,
       buf,
       sz,
     );
   }
 
-  late final _echosdk_account_get_aorPtr = _lookup<
+  late final _medut_account_get_aorPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
-              ffi.Size)>>('echosdk_account_get_aor');
-  late final _echosdk_account_get_aor = _echosdk_account_get_aorPtr.asFunction<
-      int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>, int)>();
+          ffi.Int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Size)>>('medut_account_get_aor');
+  late final _medut_account_get_aor = _medut_account_get_aorPtr.asFunction<
+      int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>, int)>();
 
-  /// Current registration state, as last reported by ECHOSDK_EV_REG_STATE.
+  /// Current registration state, as last reported by MEDUT_EV_REG_STATE.
   /// Useful on a cold start or after re-attaching, where no event has been seen
-  /// yet.  Can return ECHOSDK_REG_RECONNECTING — see the enum.
-  int echosdk_account_get_reg_state(
-    echosdk_account_handle_t acct,
+  /// yet.  Can return MEDUT_REG_RECONNECTING — see the enum.
+  int medut_account_get_reg_state(
+    medut_account_handle_t acct,
   ) {
-    return _echosdk_account_get_reg_state(
+    return _medut_account_get_reg_state(
       acct,
     );
   }
 
-  late final _echosdk_account_get_reg_statePtr =
-      _lookup<ffi.NativeFunction<ffi.Int32 Function(echosdk_account_handle_t)>>(
-          'echosdk_account_get_reg_state');
-  late final _echosdk_account_get_reg_state = _echosdk_account_get_reg_statePtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_get_reg_statePtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(medut_account_handle_t)>>(
+          'medut_account_get_reg_state');
+  late final _medut_account_get_reg_state = _medut_account_get_reg_statePtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
-  /// Initiate an outgoing call. Returns immediately; fires ECHOSDK_EV_CALL_STATE
+  /// Initiate an outgoing call. Returns immediately; fires MEDUT_EV_CALL_STATE
   /// CALLING, then RINGING, then ESTABLISHED (or FAILED).
-  int echosdk_call_invite(
-    echosdk_account_handle_t acct,
+  int medut_call_invite(
+    medut_account_handle_t acct,
     ffi.Pointer<ffi.Char> uri,
-    ffi.Pointer<echosdk_call_handle_t> out,
+    ffi.Pointer<medut_call_handle_t> out,
   ) {
-    return _echosdk_call_invite(
+    return _medut_call_invite(
       acct,
       uri,
       out,
     );
   }
 
-  late final _echosdk_call_invitePtr = _lookup<
+  late final _medut_call_invitePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
-              ffi.Pointer<echosdk_call_handle_t>)>>('echosdk_call_invite');
-  late final _echosdk_call_invite = _echosdk_call_invitePtr.asFunction<
-      int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
-          ffi.Pointer<echosdk_call_handle_t>)>();
+          ffi.Int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Pointer<medut_call_handle_t>)>>('medut_call_invite');
+  late final _medut_call_invite = _medut_call_invitePtr.asFunction<
+      int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
+          ffi.Pointer<medut_call_handle_t>)>();
 
-  /// Answer an incoming call (received via ECHOSDK_EV_INCOMING_CALL).
-  int echosdk_call_answer(
-    echosdk_call_handle_t call,
+  /// Answer an incoming call (received via MEDUT_EV_INCOMING_CALL).
+  int medut_call_answer(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_answer(
+    return _medut_call_answer(
       call,
     );
   }
 
-  late final _echosdk_call_answerPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_call_handle_t)>>(
-          'echosdk_call_answer');
-  late final _echosdk_call_answer =
-      _echosdk_call_answerPtr.asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_answerPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_call_handle_t)>>(
+          'medut_call_answer');
+  late final _medut_call_answer =
+      _medut_call_answerPtr.asFunction<int Function(medut_call_handle_t)>();
 
   /// Terminate a call with BYE.
-  int echosdk_call_hangup(
-    echosdk_call_handle_t call,
+  int medut_call_hangup(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_hangup(
+    return _medut_call_hangup(
       call,
     );
   }
 
-  late final _echosdk_call_hangupPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_call_handle_t)>>(
-          'echosdk_call_hangup');
-  late final _echosdk_call_hangup =
-      _echosdk_call_hangupPtr.asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_hangupPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_call_handle_t)>>(
+          'medut_call_hangup');
+  late final _medut_call_hangup =
+      _medut_call_hangupPtr.asFunction<int Function(medut_call_handle_t)>();
 
   /// Terminate a call with an explicit SIP status code.
   /// For an unanswered incoming call this sends the given final response
@@ -594,129 +594,129 @@ class EchoSDKBindings {
   /// dialog is ended as usual (the code applies where the SIP state allows).
   /// @param scode   SIP status code, e.g. 486 or 603. 0 = default behavior.
   /// @param reason  Reason phrase; NULL = derived from scode.
-  int echosdk_call_reject(
-    echosdk_call_handle_t call,
+  int medut_call_reject(
+    medut_call_handle_t call,
     int scode,
     ffi.Pointer<ffi.Char> reason,
   ) {
-    return _echosdk_call_reject(
+    return _medut_call_reject(
       call,
       scode,
       reason,
     );
   }
 
-  late final _echosdk_call_rejectPtr = _lookup<
+  late final _medut_call_rejectPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t, ffi.Uint16,
-              ffi.Pointer<ffi.Char>)>>('echosdk_call_reject');
-  late final _echosdk_call_reject = _echosdk_call_rejectPtr.asFunction<
-      int Function(echosdk_call_handle_t, int, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_call_handle_t, ffi.Uint16,
+              ffi.Pointer<ffi.Char>)>>('medut_call_reject');
+  late final _medut_call_reject = _medut_call_rejectPtr.asFunction<
+      int Function(medut_call_handle_t, int, ffi.Pointer<ffi.Char>)>();
 
   /// Put call on hold (re-INVITE with sendonly).
-  int echosdk_call_hold(
-    echosdk_call_handle_t call,
+  int medut_call_hold(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_hold(
+    return _medut_call_hold(
       call,
     );
   }
 
-  late final _echosdk_call_holdPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_call_handle_t)>>(
-          'echosdk_call_hold');
-  late final _echosdk_call_hold =
-      _echosdk_call_holdPtr.asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_holdPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_call_handle_t)>>(
+          'medut_call_hold');
+  late final _medut_call_hold =
+      _medut_call_holdPtr.asFunction<int Function(medut_call_handle_t)>();
 
   /// Resume a held call (re-INVITE with sendrecv).
-  int echosdk_call_resume(
-    echosdk_call_handle_t call,
+  int medut_call_resume(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_resume(
+    return _medut_call_resume(
       call,
     );
   }
 
-  late final _echosdk_call_resumePtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_call_handle_t)>>(
-          'echosdk_call_resume');
-  late final _echosdk_call_resume =
-      _echosdk_call_resumePtr.asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_resumePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_call_handle_t)>>(
+          'medut_call_resume');
+  late final _medut_call_resume =
+      _medut_call_resumePtr.asFunction<int Function(medut_call_handle_t)>();
 
   /// Return true if the call is currently on local hold.
-  bool echosdk_call_is_held(
-    echosdk_call_handle_t call,
+  bool medut_call_is_held(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_is_held(
+    return _medut_call_is_held(
       call,
     );
   }
 
-  late final _echosdk_call_is_heldPtr =
-      _lookup<ffi.NativeFunction<ffi.Bool Function(echosdk_call_handle_t)>>(
-          'echosdk_call_is_held');
-  late final _echosdk_call_is_held = _echosdk_call_is_heldPtr
-      .asFunction<bool Function(echosdk_call_handle_t)>();
+  late final _medut_call_is_heldPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(medut_call_handle_t)>>(
+          'medut_call_is_held');
+  late final _medut_call_is_held = _medut_call_is_heldPtr
+      .asFunction<bool Function(medut_call_handle_t)>();
 
   /// Send DTMF digit via RFC 4733 RTP events. digit: '0'-'9', '*', '#', 'A'-'D'.
-  int echosdk_call_send_dtmf(
-    echosdk_call_handle_t call,
+  int medut_call_send_dtmf(
+    medut_call_handle_t call,
     int digit,
   ) {
-    return _echosdk_call_send_dtmf(
+    return _medut_call_send_dtmf(
       call,
       digit,
     );
   }
 
-  late final _echosdk_call_send_dtmfPtr = _lookup<
+  late final _medut_call_send_dtmfPtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Char)>>(
-      'echosdk_call_send_dtmf');
-  late final _echosdk_call_send_dtmf = _echosdk_call_send_dtmfPtr
-      .asFunction<int Function(echosdk_call_handle_t, int)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Char)>>(
+      'medut_call_send_dtmf');
+  late final _medut_call_send_dtmf = _medut_call_send_dtmfPtr
+      .asFunction<int Function(medut_call_handle_t, int)>();
 
   /// Blind transfer via REFER.
-  int echosdk_call_transfer(
-    echosdk_call_handle_t call,
+  int medut_call_transfer(
+    medut_call_handle_t call,
     ffi.Pointer<ffi.Char> uri,
   ) {
-    return _echosdk_call_transfer(
+    return _medut_call_transfer(
       call,
       uri,
     );
   }
 
-  late final _echosdk_call_transferPtr = _lookup<
+  late final _medut_call_transferPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t,
-              ffi.Pointer<ffi.Char>)>>('echosdk_call_transfer');
-  late final _echosdk_call_transfer = _echosdk_call_transferPtr
-      .asFunction<int Function(echosdk_call_handle_t, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_call_handle_t,
+              ffi.Pointer<ffi.Char>)>>('medut_call_transfer');
+  late final _medut_call_transfer = _medut_call_transferPtr
+      .asFunction<int Function(medut_call_handle_t, ffi.Pointer<ffi.Char>)>();
 
   /// Add a custom SIP header to a specific call/dialog.
   /// Headers are applied to subsequent re-INVITEs, BYE, and REFER messages
   /// within this dialog. Must be called while the call is active.
   /// @param name   Header field name  (e.g. "X-Call-Id")
   /// @param value  Header field value (e.g. "12345")
-  int echosdk_call_add_header(
-    echosdk_call_handle_t call,
+  int medut_call_add_header(
+    medut_call_handle_t call,
     ffi.Pointer<ffi.Char> name,
     ffi.Pointer<ffi.Char> value,
   ) {
-    return _echosdk_call_add_header(
+    return _medut_call_add_header(
       call,
       name,
       value,
     );
   }
 
-  late final _echosdk_call_add_headerPtr = _lookup<
+  late final _medut_call_add_headerPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t, ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('echosdk_call_add_header');
-  late final _echosdk_call_add_header = _echosdk_call_add_headerPtr.asFunction<
-      int Function(echosdk_call_handle_t, ffi.Pointer<ffi.Char>,
+          ffi.Int Function(medut_call_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>)>>('medut_call_add_header');
+  late final _medut_call_add_header = _medut_call_add_headerPtr.asFunction<
+      int Function(medut_call_handle_t, ffi.Pointer<ffi.Char>,
           ffi.Pointer<ffi.Char>)>();
 
   /// Attended transfer: send REFER w/ Replaces on call_a, bridging it to call_b.
@@ -724,7 +724,7 @@ class EchoSDKBindings {
   /// consultation call whose dialog info is embedded in Replaces.
   /// /
   /// /**
-  /// Follow an incoming REFER (see ECHOSDK_EV_TRANSFER_REQUEST).
+  /// Follow an incoming REFER (see MEDUT_EV_TRANSFER_REQUEST).
   ///
   /// Places the call to the Refer-To target and links it to `call`, so the SDK
   /// reports the outcome to the transferor automatically: `NOTIFY 200 OK` when
@@ -737,31 +737,31 @@ class EchoSDKBindings {
   /// The original call is left up; end it when the new one connects, or keep both
   /// and let the user choose. On success `*out` receives the new call handle.
   ///
-  /// @return ECHOSDK_OK, ECHOSDK_ERR_INVAL for a NULL handle,
-  /// ECHOSDK_ERR_STATE when no transfer is pending on this call, or a
+  /// @return MEDUT_OK, MEDUT_ERR_INVAL for a NULL handle,
+  /// MEDUT_ERR_STATE when no transfer is pending on this call, or a
   /// positive errno if the call could not be placed (the transferor is
   /// sent the failure NOTIFY in that case).
-  int echosdk_call_transfer_accept(
-    echosdk_call_handle_t call,
-    ffi.Pointer<echosdk_call_handle_t> out,
+  int medut_call_transfer_accept(
+    medut_call_handle_t call,
+    ffi.Pointer<medut_call_handle_t> out,
   ) {
-    return _echosdk_call_transfer_accept(
+    return _medut_call_transfer_accept(
       call,
       out,
     );
   }
 
-  late final _echosdk_call_transfer_acceptPtr = _lookup<
+  late final _medut_call_transfer_acceptPtr = _lookup<
           ffi.NativeFunction<
               ffi.Int Function(
-                  echosdk_call_handle_t, ffi.Pointer<echosdk_call_handle_t>)>>(
-      'echosdk_call_transfer_accept');
-  late final _echosdk_call_transfer_accept =
-      _echosdk_call_transfer_acceptPtr.asFunction<
+                  medut_call_handle_t, ffi.Pointer<medut_call_handle_t>)>>(
+      'medut_call_transfer_accept');
+  late final _medut_call_transfer_accept =
+      _medut_call_transfer_acceptPtr.asFunction<
           int Function(
-              echosdk_call_handle_t, ffi.Pointer<echosdk_call_handle_t>)>();
+              medut_call_handle_t, ffi.Pointer<medut_call_handle_t>)>();
 
-  /// Refuse an incoming REFER (see ECHOSDK_EV_TRANSFER_REQUEST).
+  /// Refuse an incoming REFER (see MEDUT_EV_TRANSFER_REQUEST).
   ///
   /// Sends the terminating NOTIFY so the transferor stops waiting, and leaves
   /// this call established — the user is still on the line.
@@ -770,121 +770,121 @@ class EchoSDKBindings {
   /// answer for "the user said no"; 486 for "busy".
   /// @param reason  Reason phrase, or NULL for "Declined".
   ///
-  /// @return ECHOSDK_OK, ECHOSDK_ERR_INVAL for a NULL handle or an out-of-range
-  /// status, or ECHOSDK_ERR_STATE when no transfer is pending.
-  int echosdk_call_transfer_reject(
-    echosdk_call_handle_t call,
+  /// @return MEDUT_OK, MEDUT_ERR_INVAL for a NULL handle or an out-of-range
+  /// status, or MEDUT_ERR_STATE when no transfer is pending.
+  int medut_call_transfer_reject(
+    medut_call_handle_t call,
     int scode,
     ffi.Pointer<ffi.Char> reason,
   ) {
-    return _echosdk_call_transfer_reject(
+    return _medut_call_transfer_reject(
       call,
       scode,
       reason,
     );
   }
 
-  late final _echosdk_call_transfer_rejectPtr = _lookup<
+  late final _medut_call_transfer_rejectPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t, ffi.Uint16,
-              ffi.Pointer<ffi.Char>)>>('echosdk_call_transfer_reject');
-  late final _echosdk_call_transfer_reject =
-      _echosdk_call_transfer_rejectPtr.asFunction<
-          int Function(echosdk_call_handle_t, int, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_call_handle_t, ffi.Uint16,
+              ffi.Pointer<ffi.Char>)>>('medut_call_transfer_reject');
+  late final _medut_call_transfer_reject =
+      _medut_call_transfer_rejectPtr.asFunction<
+          int Function(medut_call_handle_t, int, ffi.Pointer<ffi.Char>)>();
 
-  int echosdk_call_attended_transfer(
-    echosdk_call_handle_t call_a,
-    echosdk_call_handle_t call_b,
+  int medut_call_attended_transfer(
+    medut_call_handle_t call_a,
+    medut_call_handle_t call_b,
   ) {
-    return _echosdk_call_attended_transfer(
+    return _medut_call_attended_transfer(
       call_a,
       call_b,
     );
   }
 
-  late final _echosdk_call_attended_transferPtr = _lookup<
+  late final _medut_call_attended_transferPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t,
-              echosdk_call_handle_t)>>('echosdk_call_attended_transfer');
-  late final _echosdk_call_attended_transfer =
-      _echosdk_call_attended_transferPtr.asFunction<
-          int Function(echosdk_call_handle_t, echosdk_call_handle_t)>();
+          ffi.Int Function(medut_call_handle_t,
+              medut_call_handle_t)>>('medut_call_attended_transfer');
+  late final _medut_call_attended_transfer =
+      _medut_call_attended_transferPtr.asFunction<
+          int Function(medut_call_handle_t, medut_call_handle_t)>();
 
   /// Iterate all active calls. Safe to call from any thread.
-  void echosdk_call_foreach(
-    echosdk_call_iter_fn fn,
+  void medut_call_foreach(
+    medut_call_iter_fn fn,
     ffi.Pointer<ffi.Void> arg,
   ) {
-    return _echosdk_call_foreach(
+    return _medut_call_foreach(
       fn,
       arg,
     );
   }
 
-  late final _echosdk_call_foreachPtr = _lookup<
+  late final _medut_call_foreachPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Void Function(echosdk_call_iter_fn,
-              ffi.Pointer<ffi.Void>)>>('echosdk_call_foreach');
-  late final _echosdk_call_foreach = _echosdk_call_foreachPtr
-      .asFunction<void Function(echosdk_call_iter_fn, ffi.Pointer<ffi.Void>)>();
+          ffi.Void Function(medut_call_iter_fn,
+              ffi.Pointer<ffi.Void>)>>('medut_call_foreach');
+  late final _medut_call_foreach = _medut_call_foreachPtr
+      .asFunction<void Function(medut_call_iter_fn, ffi.Pointer<ffi.Void>)>();
 
   /// The account this call belongs to, or NULL if it has none.
-  echosdk_account_handle_t echosdk_call_get_account(
-    echosdk_call_handle_t call,
+  medut_account_handle_t medut_call_get_account(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_get_account(
+    return _medut_call_get_account(
       call,
     );
   }
 
-  late final _echosdk_call_get_accountPtr = _lookup<
+  late final _medut_call_get_accountPtr = _lookup<
       ffi.NativeFunction<
-          echosdk_account_handle_t Function(
-              echosdk_call_handle_t)>>('echosdk_call_get_account');
-  late final _echosdk_call_get_account = _echosdk_call_get_accountPtr
-      .asFunction<echosdk_account_handle_t Function(echosdk_call_handle_t)>();
+          medut_account_handle_t Function(
+              medut_call_handle_t)>>('medut_call_get_account');
+  late final _medut_call_get_account = _medut_call_get_accountPtr
+      .asFunction<medut_account_handle_t Function(medut_call_handle_t)>();
 
-  /// Current call state. Returns ECHOSDK_CALL_ENDED for a NULL handle.
-  int echosdk_call_get_state(
-    echosdk_call_handle_t call,
+  /// Current call state. Returns MEDUT_CALL_ENDED for a NULL handle.
+  int medut_call_get_state(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_get_state(
+    return _medut_call_get_state(
       call,
     );
   }
 
-  late final _echosdk_call_get_statePtr =
-      _lookup<ffi.NativeFunction<ffi.Int32 Function(echosdk_call_handle_t)>>(
-          'echosdk_call_get_state');
-  late final _echosdk_call_get_state = _echosdk_call_get_statePtr
-      .asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_get_statePtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(medut_call_handle_t)>>(
+          'medut_call_get_state');
+  late final _medut_call_get_state = _medut_call_get_statePtr
+      .asFunction<int Function(medut_call_handle_t)>();
 
-  /// The call's current ICE liveness state (see echosdk_ice_state_t).  Safe from
-  /// any thread; ECHOSDK_ICE_NEW for a call without ICE or before gathering.
-  int echosdk_call_ice_state(
-    echosdk_call_handle_t call,
+  /// The call's current ICE liveness state (see medut_ice_state_t).  Safe from
+  /// any thread; MEDUT_ICE_NEW for a call without ICE or before gathering.
+  int medut_call_ice_state(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_ice_state(
+    return _medut_call_ice_state(
       call,
     );
   }
 
-  late final _echosdk_call_ice_statePtr =
-      _lookup<ffi.NativeFunction<ffi.Int32 Function(echosdk_call_handle_t)>>(
-          'echosdk_call_ice_state');
-  late final _echosdk_call_ice_state = _echosdk_call_ice_statePtr
-      .asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_ice_statePtr =
+      _lookup<ffi.NativeFunction<ffi.Int32 Function(medut_call_handle_t)>>(
+          'medut_call_ice_state');
+  late final _medut_call_ice_state = _medut_call_ice_statePtr
+      .asFunction<int Function(medut_call_handle_t)>();
 
   /// Send a SIP MESSAGE (instant message) out of dialog.
   /// content_type defaults to "text/plain" if NULL.
-  /// Fires ECHOSDK_EV_MESSAGE on the remote end when received.
-  int echosdk_message_send(
-    echosdk_account_handle_t account,
+  /// Fires MEDUT_EV_MESSAGE on the remote end when received.
+  int medut_message_send(
+    medut_account_handle_t account,
     ffi.Pointer<ffi.Char> to_uri,
     ffi.Pointer<ffi.Char> body,
     ffi.Pointer<ffi.Char> content_type,
   ) {
-    return _echosdk_message_send(
+    return _medut_message_send(
       account,
       to_uri,
       body,
@@ -892,55 +892,55 @@ class EchoSDKBindings {
     );
   }
 
-  late final _echosdk_message_sendPtr = _lookup<
+  late final _medut_message_sendPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int Function(
-              echosdk_account_handle_t,
+              medut_account_handle_t,
               ffi.Pointer<ffi.Char>,
               ffi.Pointer<ffi.Char>,
-              ffi.Pointer<ffi.Char>)>>('echosdk_message_send');
-  late final _echosdk_message_send = _echosdk_message_sendPtr.asFunction<
-      int Function(echosdk_account_handle_t, ffi.Pointer<ffi.Char>,
+              ffi.Pointer<ffi.Char>)>>('medut_message_send');
+  late final _medut_message_send = _medut_message_sendPtr.asFunction<
+      int Function(medut_account_handle_t, ffi.Pointer<ffi.Char>,
           ffi.Pointer<ffi.Char>, ffi.Pointer<ffi.Char>)>();
 
   /// Publish presence status for the account (PUBLISH request).
-  /// Fires ECHOSDK_EV_PRESENCE_STATE on subscribed watchers.
-  int echosdk_account_publish_presence(
-    echosdk_account_handle_t account,
+  /// Fires MEDUT_EV_PRESENCE_STATE on subscribed watchers.
+  int medut_account_publish_presence(
+    medut_account_handle_t account,
     int status,
   ) {
-    return _echosdk_account_publish_presence(
+    return _medut_account_publish_presence(
       account,
       status,
     );
   }
 
-  late final _echosdk_account_publish_presencePtr = _lookup<
+  late final _medut_account_publish_presencePtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t,
-              ffi.Int32)>>('echosdk_account_publish_presence');
-  late final _echosdk_account_publish_presence =
-      _echosdk_account_publish_presencePtr
-          .asFunction<int Function(echosdk_account_handle_t, int)>();
+          ffi.Int Function(medut_account_handle_t,
+              ffi.Int32)>>('medut_account_publish_presence');
+  late final _medut_account_publish_presence =
+      _medut_account_publish_presencePtr
+          .asFunction<int Function(medut_account_handle_t, int)>();
 
   /// Set the RFC 3262 100rel mode for an account.
-  /// Must be called before echosdk_call_invite / echosdk_call_answer.
-  int echosdk_account_set_100rel(
-    echosdk_account_handle_t account,
+  /// Must be called before medut_call_invite / medut_call_answer.
+  int medut_account_set_100rel(
+    medut_account_handle_t account,
     int mode,
   ) {
-    return _echosdk_account_set_100rel(
+    return _medut_account_set_100rel(
       account,
       mode,
     );
   }
 
-  late final _echosdk_account_set_100relPtr = _lookup<
+  late final _medut_account_set_100relPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_account_handle_t,
-              ffi.Int32)>>('echosdk_account_set_100rel');
-  late final _echosdk_account_set_100rel = _echosdk_account_set_100relPtr
-      .asFunction<int Function(echosdk_account_handle_t, int)>();
+          ffi.Int Function(medut_account_handle_t,
+              ffi.Int32)>>('medut_account_set_100rel');
+  late final _medut_account_set_100rel = _medut_account_set_100relPtr
+      .asFunction<int Function(medut_account_handle_t, int)>();
 
   /// Hand the microphone and speaker to the app.
   ///
@@ -949,13 +949,13 @@ class EchoSDKBindings {
   /// PCM itself, from whatever the platform gives it (AudioRecord/AudioTrack,
   /// AVAudioEngine, a WebRTC AudioDeviceModule, a file):
   ///
-  /// app capture thread   -> echosdk_audio_external_push()  -> far end
-  /// app playback thread  <- echosdk_audio_external_pull()  <- far end
+  /// app capture thread   -> medut_audio_external_push()  -> far end
+  /// app playback thread  <- medut_audio_external_pull()  <- far end
   ///
   /// Turning it off restores the platform device.  Takes effect immediately,
   /// including on calls that are already up, so it is safe to switch mid-call.
   ///
-  /// Not sticky across a restart: echosdk_init() re-derives the device from the
+  /// Not sticky across a restart: medut_init() re-derives the device from the
   /// platform, so an app that shuts the stack down and brings it back up has to
   /// ask for the app-owned device again.
   ///
@@ -970,53 +970,53 @@ class EchoSDKBindings {
   /// VOICE_COMMUNICATION / VoiceProcessingIO on its own side, or expect echo.
   /// The SDK's own half-duplex suppressor becomes available as a fallback while
   /// the app owns the device, but stays off unless asked for with
-  /// echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR) — on every platform, desktop
-  /// included, and echosdk_set_aec(true) is not that request.  It is switched
+  /// medut_set_aec_mode(MEDUT_AEC_SUPPRESSOR) — on every platform, desktop
+  /// included, and medut_set_aec(true) is not that request.  It is switched
   /// off again when the platform device comes back, so the two cancellers never
   /// stack.  NS and AGC follow cfg.ns / cfg.agc while the app owns the device,
   /// unless its engine reports the platform's voice path under it
-  /// (echosdk_audio_external_set_voice_path), and stop again when the
+  /// (medut_audio_external_set_voice_path), and stop again when the
   /// platform's own come back.  All of it applies to calls already up, from
   /// their next frame.
   ///
   /// Returns 0, or an errno on failure.
-  int echosdk_audio_use_external(
+  int medut_audio_use_external(
     bool enable,
   ) {
-    return _echosdk_audio_use_external(
+    return _medut_audio_use_external(
       enable,
     );
   }
 
-  late final _echosdk_audio_use_externalPtr =
+  late final _medut_audio_use_externalPtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Bool)>>(
-          'echosdk_audio_use_external');
-  late final _echosdk_audio_use_external =
-      _echosdk_audio_use_externalPtr.asFunction<int Function(bool)>();
+          'medut_audio_use_external');
+  late final _medut_audio_use_external =
+      _medut_audio_use_externalPtr.asFunction<int Function(bool)>();
 
   /// Give the stack captured microphone audio.  This is what the far end hears.
   ///
   /// [pcm] is S16LE interleaved, [nsamp] total samples (frames x channels), at the
-  /// rate and channel count from echosdk_audio_external_format().  Any buffer size
+  /// rate and channel count from medut_audio_external_format().  Any buffer size
   /// is accepted; the stack re-frames internally.
   ///
   /// Call from the app's capture thread.  Returns 0, ENODEV when no call is
   /// capturing (push between calls is not an error worth acting on), or an errno.
-  int echosdk_audio_external_push(
+  int medut_audio_external_push(
     ffi.Pointer<ffi.Int16> pcm,
     int nsamp,
   ) {
-    return _echosdk_audio_external_push(
+    return _medut_audio_external_push(
       pcm,
       nsamp,
     );
   }
 
-  late final _echosdk_audio_external_pushPtr = _lookup<
+  late final _medut_audio_external_pushPtr = _lookup<
           ffi
           .NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Int16>, ffi.Size)>>(
-      'echosdk_audio_external_push');
-  late final _echosdk_audio_external_push = _echosdk_audio_external_pushPtr
+      'medut_audio_external_push');
+  late final _medut_audio_external_push = _medut_audio_external_pushPtr
       .asFunction<int Function(ffi.Pointer<ffi.Int16>, int)>();
 
   /// Take decoded audio to play.  This is what the local user hears.
@@ -1027,21 +1027,21 @@ class EchoSDKBindings {
   ///
   /// Call from the app's playback thread.  Returns 0, or ENODEV when no call is
   /// playing (the buffer is still zeroed).
-  int echosdk_audio_external_pull(
+  int medut_audio_external_pull(
     ffi.Pointer<ffi.Int16> pcm,
     int nsamp,
   ) {
-    return _echosdk_audio_external_pull(
+    return _medut_audio_external_pull(
       pcm,
       nsamp,
     );
   }
 
-  late final _echosdk_audio_external_pullPtr = _lookup<
+  late final _medut_audio_external_pullPtr = _lookup<
           ffi
           .NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Int16>, ffi.Size)>>(
-      'echosdk_audio_external_pull');
-  late final _echosdk_audio_external_pull = _echosdk_audio_external_pullPtr
+      'medut_audio_external_pull');
+  late final _medut_audio_external_pull = _medut_audio_external_pullPtr
       .asFunction<int Function(ffi.Pointer<ffi.Int16>, int)>();
 
   /// The format the current call negotiated, for sizing the app's own device.
@@ -1053,154 +1053,154 @@ class EchoSDKBindings {
   /// races the device by a few ms, and a mid-call re-INVITE can renegotiate the
   /// codec without any call-state change at all.  Polling this is the way to
   /// learn both that the device opened and that its format changed.
-  int echosdk_audio_external_format(
+  int medut_audio_external_format(
     ffi.Pointer<ffi.Uint32> srate,
     ffi.Pointer<ffi.Uint8> ch,
     ffi.Pointer<ffi.Uint32> ptime,
   ) {
-    return _echosdk_audio_external_format(
+    return _medut_audio_external_format(
       srate,
       ch,
       ptime,
     );
   }
 
-  late final _echosdk_audio_external_formatPtr = _lookup<
+  late final _medut_audio_external_formatPtr = _lookup<
       ffi.NativeFunction<
           ffi.Int Function(ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint8>,
-              ffi.Pointer<ffi.Uint32>)>>('echosdk_audio_external_format');
-  late final _echosdk_audio_external_format =
-      _echosdk_audio_external_formatPtr.asFunction<
+              ffi.Pointer<ffi.Uint32>)>>('medut_audio_external_format');
+  late final _medut_audio_external_format =
+      _medut_audio_external_formatPtr.asFunction<
           int Function(ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint8>,
               ffi.Pointer<ffi.Uint32>)>();
 
   /// True while a call is capturing or playing through the app-owned device.
-  bool echosdk_audio_external_is_active() {
-    return _echosdk_audio_external_is_active();
+  bool medut_audio_external_is_active() {
+    return _medut_audio_external_is_active();
   }
 
-  late final _echosdk_audio_external_is_activePtr =
+  late final _medut_audio_external_is_activePtr =
       _lookup<ffi.NativeFunction<ffi.Bool Function()>>(
-          'echosdk_audio_external_is_active');
-  late final _echosdk_audio_external_is_active =
-      _echosdk_audio_external_is_activePtr.asFunction<bool Function()>();
+          'medut_audio_external_is_active');
+  late final _medut_audio_external_is_active =
+      _medut_audio_external_is_activePtr.asFunction<bool Function()>();
 
   /// Say whether the app-owned device captures through the platform's voice
   /// path — iOS VoiceProcessingIO, Android's VOICE_COMMUNICATION source — so
   /// the device has already cancelled echo and run its own NS and AGC before
-  /// echosdk_audio_external_push() sees a sample.
+  /// medut_audio_external_push() sees a sample.
   ///
   /// While true, the SDK's noise gate and AGC stay off, as they do on its own
   /// mobile drivers: stacked on the platform's they only cost speech.  The
   /// suppressor is not affected; on an app-owned device it runs only when asked
-  /// for with echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).  False, the default,
+  /// for with medut_set_aec_mode(MEDUT_AEC_SUPPRESSOR).  False, the default,
   /// means a raw microphone.
   ///
   /// Call it from the device's start and stop: true once capture is running,
   /// false when it stops.  Never from the audio callback — it logs.  Safe from
   /// any other thread, and does not wait on the SIP thread.  Reset to false by
-  /// echosdk_audio_use_external(false) and by echosdk_init(); ignored while the
+  /// medut_audio_use_external(false) and by medut_init(); ignored while the
   /// SDK's own device is in use.
-  void echosdk_audio_external_set_voice_path(
+  void medut_audio_external_set_voice_path(
     bool active,
   ) {
-    return _echosdk_audio_external_set_voice_path(
+    return _medut_audio_external_set_voice_path(
       active,
     );
   }
 
-  late final _echosdk_audio_external_set_voice_pathPtr =
+  late final _medut_audio_external_set_voice_pathPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Bool)>>(
-          'echosdk_audio_external_set_voice_path');
-  late final _echosdk_audio_external_set_voice_path =
-      _echosdk_audio_external_set_voice_pathPtr
+          'medut_audio_external_set_voice_path');
+  late final _medut_audio_external_set_voice_path =
+      _medut_audio_external_set_voice_pathPtr
           .asFunction<void Function(bool)>();
 
   /// Fill devices[] with available audio input devices, up to max_count entries.
   /// Returns the number of entries written (0 if no devices found yet).
-  /// Call after echosdk_init(); device lists may be empty until the audio
+  /// Call after medut_init(); device lists may be empty until the audio
   /// module has finished async enumeration.
-  int echosdk_audio_list_input_devices(
-    ffi.Pointer<echosdk_audio_device_t> devices,
+  int medut_audio_list_input_devices(
+    ffi.Pointer<medut_audio_device_t> devices,
     int max_count,
   ) {
-    return _echosdk_audio_list_input_devices(
+    return _medut_audio_list_input_devices(
       devices,
       max_count,
     );
   }
 
-  late final _echosdk_audio_list_input_devicesPtr = _lookup<
+  late final _medut_audio_list_input_devicesPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<echosdk_audio_device_t>,
-              ffi.Int)>>('echosdk_audio_list_input_devices');
-  late final _echosdk_audio_list_input_devices =
-      _echosdk_audio_list_input_devicesPtr
-          .asFunction<int Function(ffi.Pointer<echosdk_audio_device_t>, int)>();
+          ffi.Int Function(ffi.Pointer<medut_audio_device_t>,
+              ffi.Int)>>('medut_audio_list_input_devices');
+  late final _medut_audio_list_input_devices =
+      _medut_audio_list_input_devicesPtr
+          .asFunction<int Function(ffi.Pointer<medut_audio_device_t>, int)>();
 
   /// Same for audio output (speaker/playback) devices.
-  int echosdk_audio_list_output_devices(
-    ffi.Pointer<echosdk_audio_device_t> devices,
+  int medut_audio_list_output_devices(
+    ffi.Pointer<medut_audio_device_t> devices,
     int max_count,
   ) {
-    return _echosdk_audio_list_output_devices(
+    return _medut_audio_list_output_devices(
       devices,
       max_count,
     );
   }
 
-  late final _echosdk_audio_list_output_devicesPtr = _lookup<
+  late final _medut_audio_list_output_devicesPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(ffi.Pointer<echosdk_audio_device_t>,
-              ffi.Int)>>('echosdk_audio_list_output_devices');
-  late final _echosdk_audio_list_output_devices =
-      _echosdk_audio_list_output_devicesPtr
-          .asFunction<int Function(ffi.Pointer<echosdk_audio_device_t>, int)>();
+          ffi.Int Function(ffi.Pointer<medut_audio_device_t>,
+              ffi.Int)>>('medut_audio_list_output_devices');
+  late final _medut_audio_list_output_devices =
+      _medut_audio_list_output_devicesPtr
+          .asFunction<int Function(ffi.Pointer<medut_audio_device_t>, int)>();
 
   /// Enable or disable echo cancellation.
-  /// Re-enables the echo control echosdk_init() settled on: the configured
+  /// Re-enables the echo control medut_init() settled on: the configured
   /// aec_mode, or the suppressor if WEBRTC fell back.
   /// set_aec(false) → AEC_OFF; set_aec(true) → restores init mode.
   /// Back-compat: behavior is identical to the former bool aec API.
   /// Not a request for the suppressor on an app-owned device; that is
-  /// echosdk_set_aec_mode(ECHOSDK_AEC_SUPPRESSOR).
-  void echosdk_set_aec(
+  /// medut_set_aec_mode(MEDUT_AEC_SUPPRESSOR).
+  void medut_set_aec(
     bool enable,
   ) {
-    return _echosdk_set_aec(
+    return _medut_set_aec(
       enable,
     );
   }
 
-  late final _echosdk_set_aecPtr =
+  late final _medut_set_aecPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Bool)>>(
-          'echosdk_set_aec');
-  late final _echosdk_set_aec =
-      _echosdk_set_aecPtr.asFunction<void Function(bool)>();
+          'medut_set_aec');
+  late final _medut_set_aec =
+      _medut_set_aecPtr.asFunction<void Function(bool)>();
 
   /// Switch the AEC backend.  Only AEC_OFF ↔ init_mode transitions are valid
   /// at runtime.  Switching between SUPPRESSOR and WEBRTC at runtime returns
   /// EINVAL.  WEBRTC returns ENOTSUP on mobile builds and when
-  /// ECHOSDK_WITH_WEBRTC_AEC was not set at build time.
+  /// MEDUT_WITH_WEBRTC_AEC was not set at build time.
   ///
   /// WEBRTC mode with AEC off keeps WebRTC's noise suppressor running if ns is
-  /// on.  While the app owns the device (echosdk_audio_use_external), on any
+  /// on.  While the app owns the device (medut_audio_use_external), on any
   /// platform, SUPPRESSOR here is also the app asking for the suppressor there —
   /// the only way it runs on an app-owned device.  The request lapses when the
   /// platform device comes back.
-  int echosdk_set_aec_mode(
+  int medut_set_aec_mode(
     int mode,
   ) {
-    return _echosdk_set_aec_mode(
+    return _medut_set_aec_mode(
       mode,
     );
   }
 
-  late final _echosdk_set_aec_modePtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_aec_mode_t)>>(
-          'echosdk_set_aec_mode');
-  late final _echosdk_set_aec_mode =
-      _echosdk_set_aec_modePtr.asFunction<int Function(int)>();
+  late final _medut_set_aec_modePtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_aec_mode_t)>>(
+          'medut_set_aec_mode');
+  late final _medut_set_aec_mode =
+      _medut_set_aec_modePtr.asFunction<int Function(int)>();
 
   /// Tune the built-in TX echo suppressor aggressiveness.  SUPPRESSOR mode only.
   /// 0.0 = no TX suppression (passes through even when far end is loud).
@@ -1208,19 +1208,19 @@ class EchoSDKBindings {
   /// The floor is reached with the far end at −21 dBFS; below that the
   /// attenuation eases off in dB, to none at −44 dBFS.
   /// Takes effect on the next audio frame via atomic store; safe from any thread.
-  void echosdk_set_aec_suppression_level(
+  void medut_set_aec_suppression_level(
     double level,
   ) {
-    return _echosdk_set_aec_suppression_level(
+    return _medut_set_aec_suppression_level(
       level,
     );
   }
 
-  late final _echosdk_set_aec_suppression_levelPtr =
+  late final _medut_set_aec_suppression_levelPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Float)>>(
-          'echosdk_set_aec_suppression_level');
-  late final _echosdk_set_aec_suppression_level =
-      _echosdk_set_aec_suppression_levelPtr.asFunction<void Function(double)>();
+          'medut_set_aec_suppression_level');
+  late final _medut_set_aec_suppression_level =
+      _medut_set_aec_suppression_levelPtr.asFunction<void Function(double)>();
 
   /// Enable/disable noise suppression globally (takes effect next frame).
   ///
@@ -1232,128 +1232,128 @@ class EchoSDKBindings {
   /// VOICE_COMMUNICATION preset, or iOS through VoiceProcessingIO, the platform
   /// already suppresses noise and this stays off (logged).  It applies again
   /// while the app owns the device — unless the app reports its own voice path
-  /// (echosdk_audio_external_set_voice_path) — or on an Android device that
+  /// (medut_audio_external_set_voice_path) — or on an Android device that
   /// refuses the preset.
-  void echosdk_set_ns(
+  void medut_set_ns(
     bool enable,
   ) {
-    return _echosdk_set_ns(
+    return _medut_set_ns(
       enable,
     );
   }
 
-  late final _echosdk_set_nsPtr =
+  late final _medut_set_nsPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Bool)>>(
-          'echosdk_set_ns');
-  late final _echosdk_set_ns =
-      _echosdk_set_nsPtr.asFunction<void Function(bool)>();
+          'medut_set_ns');
+  late final _medut_set_ns =
+      _medut_set_nsPtr.asFunction<void Function(bool)>();
 
   /// Enable/disable automatic gain control globally (takes effect next frame).
-  /// Like echosdk_set_ns(), never on top of the phone's own voice path.
-  void echosdk_set_agc(
+  /// Like medut_set_ns(), never on top of the phone's own voice path.
+  void medut_set_agc(
     bool enable,
   ) {
-    return _echosdk_set_agc(
+    return _medut_set_agc(
       enable,
     );
   }
 
-  late final _echosdk_set_agcPtr =
+  late final _medut_set_agcPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Bool)>>(
-          'echosdk_set_agc');
-  late final _echosdk_set_agc =
-      _echosdk_set_agcPtr.asFunction<void Function(bool)>();
+          'medut_set_agc');
+  late final _medut_set_agc =
+      _medut_set_agcPtr.asFunction<void Function(bool)>();
 
   /// Set manual microphone (TX) gain in dB.  Clamped to [-20, +20].
   /// 0.0 = unity — fast-path bypass, no per-sample work.
   /// Applied before NS/AGC/AEC in the encode chain (raw pre-boost).
   /// Takes effect on the next audio frame via atomic store; safe from any thread.
-  void echosdk_set_mic_gain_db(
+  void medut_set_mic_gain_db(
     double db,
   ) {
-    return _echosdk_set_mic_gain_db(
+    return _medut_set_mic_gain_db(
       db,
     );
   }
 
-  late final _echosdk_set_mic_gain_dbPtr =
+  late final _medut_set_mic_gain_dbPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Float)>>(
-          'echosdk_set_mic_gain_db');
-  late final _echosdk_set_mic_gain_db =
-      _echosdk_set_mic_gain_dbPtr.asFunction<void Function(double)>();
+          'medut_set_mic_gain_db');
+  late final _medut_set_mic_gain_db =
+      _medut_set_mic_gain_dbPtr.asFunction<void Function(double)>();
 
   /// Set manual speaker (RX) gain in dB.  Clamped to [-20, +20].
   /// 0.0 = unity — fast-path bypass.
   /// Applied after the jitter buffer, before playback.
   /// Takes effect on the next audio frame via atomic store; safe from any thread.
-  void echosdk_set_speaker_gain_db(
+  void medut_set_speaker_gain_db(
     double db,
   ) {
-    return _echosdk_set_speaker_gain_db(
+    return _medut_set_speaker_gain_db(
       db,
     );
   }
 
-  late final _echosdk_set_speaker_gain_dbPtr =
+  late final _medut_set_speaker_gain_dbPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Float)>>(
-          'echosdk_set_speaker_gain_db');
-  late final _echosdk_set_speaker_gain_db =
-      _echosdk_set_speaker_gain_dbPtr.asFunction<void Function(double)>();
+          'medut_set_speaker_gain_db');
+  late final _medut_set_speaker_gain_db =
+      _medut_set_speaker_gain_dbPtr.asFunction<void Function(double)>();
 
   /// Change DSCP/TOS on the RTP socket of an active call.
   /// Common values: 46 (EF — voice), 34 (AF41 — video), 0 (best-effort).
   /// Takes effect immediately on the next outgoing RTP packet.
-  int echosdk_call_set_dscp_rtp(
-    echosdk_call_handle_t call,
+  int medut_call_set_dscp_rtp(
+    medut_call_handle_t call,
     int dscp,
   ) {
-    return _echosdk_call_set_dscp_rtp(
+    return _medut_call_set_dscp_rtp(
       call,
       dscp,
     );
   }
 
-  late final _echosdk_call_set_dscp_rtpPtr = _lookup<
+  late final _medut_call_set_dscp_rtpPtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Uint8)>>(
-      'echosdk_call_set_dscp_rtp');
-  late final _echosdk_call_set_dscp_rtp = _echosdk_call_set_dscp_rtpPtr
-      .asFunction<int Function(echosdk_call_handle_t, int)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Uint8)>>(
+      'medut_call_set_dscp_rtp');
+  late final _medut_call_set_dscp_rtp = _medut_call_set_dscp_rtpPtr
+      .asFunction<int Function(medut_call_handle_t, int)>();
 
   /// Update jitter buffer bounds.  Takes effect on calls established after
   /// this call — existing streams keep their current adaptive depth.
   /// Pass 0 for either bound to restore its default (see jitter_buffer_min_ms
   /// and jitter_buffer_max_ms).  Keeps the current jbuf_type.
-  void echosdk_set_jitter_buffer(
+  void medut_set_jitter_buffer(
     int min_ms,
     int max_ms,
   ) {
-    return _echosdk_set_jitter_buffer(
+    return _medut_set_jitter_buffer(
       min_ms,
       max_ms,
     );
   }
 
-  late final _echosdk_set_jitter_bufferPtr =
+  late final _medut_set_jitter_bufferPtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Uint32, ffi.Uint32)>>(
-          'echosdk_set_jitter_buffer');
-  late final _echosdk_set_jitter_buffer =
-      _echosdk_set_jitter_bufferPtr.asFunction<void Function(int, int)>();
+          'medut_set_jitter_buffer');
+  late final _medut_set_jitter_buffer =
+      _medut_set_jitter_bufferPtr.asFunction<void Function(int, int)>();
 
   /// Set jitter buffer type (adaptive or fixed). Takes effect on new calls.
-  void echosdk_set_jitter_buffer_type(
+  void medut_set_jitter_buffer_type(
     int type,
   ) {
-    return _echosdk_set_jitter_buffer_type(
+    return _medut_set_jitter_buffer_type(
       type,
     );
   }
 
-  late final _echosdk_set_jitter_buffer_typePtr =
+  late final _medut_set_jitter_buffer_typePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int32)>>(
-          'echosdk_set_jitter_buffer_type');
-  late final _echosdk_set_jitter_buffer_type =
-      _echosdk_set_jitter_buffer_typePtr.asFunction<void Function(int)>();
+          'medut_set_jitter_buffer_type');
+  late final _medut_set_jitter_buffer_type =
+      _medut_set_jitter_buffer_typePtr.asFunction<void Function(int)>();
 
   /// Set the no-inbound-RTP timeout for one established call, in seconds.
   ///
@@ -1364,23 +1364,23 @@ class EchoSDKBindings {
   /// transfer or a call parked against music-on-hold may legitimately go quiet,
   /// while a normal two-party call should not.
   ///
-  /// @return 0, or ECHOSDK_ERR_INVAL / ECHOSDK_ERR_STATE.
-  int echosdk_call_set_rtp_timeout(
-    echosdk_call_handle_t call,
+  /// @return 0, or MEDUT_ERR_INVAL / MEDUT_ERR_STATE.
+  int medut_call_set_rtp_timeout(
+    medut_call_handle_t call,
     int seconds,
   ) {
-    return _echosdk_call_set_rtp_timeout(
+    return _medut_call_set_rtp_timeout(
       call,
       seconds,
     );
   }
 
-  late final _echosdk_call_set_rtp_timeoutPtr = _lookup<
+  late final _medut_call_set_rtp_timeoutPtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Uint32)>>(
-      'echosdk_call_set_rtp_timeout');
-  late final _echosdk_call_set_rtp_timeout = _echosdk_call_set_rtp_timeoutPtr
-      .asFunction<int Function(echosdk_call_handle_t, int)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Uint32)>>(
+      'medut_call_set_rtp_timeout');
+  late final _medut_call_set_rtp_timeout = _medut_call_set_rtp_timeoutPtr
+      .asFunction<int Function(medut_call_handle_t, int)>();
 
   /// Set the audio encoder bitrate for one call, in bits/s.
   ///
@@ -1390,49 +1390,49 @@ class EchoSDKBindings {
   ///
   /// Calling this on a call that the adaptive controller is managing is
   /// honoured, and then overridden by the controller on its next decision — set
-  /// cfg.adaptive_bitrate to false, or use echosdk_set_adaptive_bitrate(), if
+  /// cfg.adaptive_bitrate to false, or use medut_set_adaptive_bitrate(), if
   /// the app wants to own the rate.
   ///
-  /// @return 0, or ECHOSDK_ERR_INVAL / ECHOSDK_ERR_STATE.
-  int echosdk_call_set_bitrate(
-    echosdk_call_handle_t call,
+  /// @return 0, or MEDUT_ERR_INVAL / MEDUT_ERR_STATE.
+  int medut_call_set_bitrate(
+    medut_call_handle_t call,
     int bitrate_bps,
   ) {
-    return _echosdk_call_set_bitrate(
+    return _medut_call_set_bitrate(
       call,
       bitrate_bps,
     );
   }
 
-  late final _echosdk_call_set_bitratePtr = _lookup<
+  late final _medut_call_set_bitratePtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Uint32)>>(
-      'echosdk_call_set_bitrate');
-  late final _echosdk_call_set_bitrate = _echosdk_call_set_bitratePtr
-      .asFunction<int Function(echosdk_call_handle_t, int)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Uint32)>>(
+      'medut_call_set_bitrate');
+  late final _medut_call_set_bitrate = _medut_call_set_bitratePtr
+      .asFunction<int Function(medut_call_handle_t, int)>();
 
   /// Enable or disable link-adaptive bitrate at runtime, with bounds.
   ///
   /// Pass 0 for either bound to keep the value already configured.  Disabling
   /// leaves every call at whatever rate it currently has; call
-  /// echosdk_call_set_bitrate(call, 0) to restore the negotiated rate.
-  void echosdk_set_adaptive_bitrate(
+  /// medut_call_set_bitrate(call, 0) to restore the negotiated rate.
+  void medut_set_adaptive_bitrate(
     bool enabled,
     int min_bps,
     int max_bps,
   ) {
-    return _echosdk_set_adaptive_bitrate(
+    return _medut_set_adaptive_bitrate(
       enabled,
       min_bps,
       max_bps,
     );
   }
 
-  late final _echosdk_set_adaptive_bitratePtr = _lookup<
+  late final _medut_set_adaptive_bitratePtr = _lookup<
           ffi
           .NativeFunction<ffi.Void Function(ffi.Bool, ffi.Uint32, ffi.Uint32)>>(
-      'echosdk_set_adaptive_bitrate');
-  late final _echosdk_set_adaptive_bitrate = _echosdk_set_adaptive_bitratePtr
+      'medut_set_adaptive_bitrate');
+  late final _medut_set_adaptive_bitrate = _medut_set_adaptive_bitratePtr
       .asFunction<void Function(bool, int, int)>();
 
   /// Send a keepalive/reachability probe (SIP OPTIONS) for one account now.
@@ -1440,194 +1440,194 @@ class EchoSDKBindings {
   /// The same probe the keepalive_interval timer sends, on demand — useful from
   /// an app-foreground or push-wake handler, where the question "is my
   /// registration still reachable?" is worth answering before the user places a
-  /// call.  The result arrives as ECHOSDK_EV_REG_STATE: nothing changes on
+  /// call.  The result arrives as MEDUT_EV_REG_STATE: nothing changes on
   /// success, and on failure the account goes to FAILED and (when
   /// cfg.keepalive_reregister is set) re-REGISTERs.
   ///
-  /// @return 0, or ECHOSDK_ERR_INVAL / ECHOSDK_ERR_STATE.
-  int echosdk_account_keepalive_now(
-    echosdk_account_handle_t account,
+  /// @return 0, or MEDUT_ERR_INVAL / MEDUT_ERR_STATE.
+  int medut_account_keepalive_now(
+    medut_account_handle_t account,
   ) {
-    return _echosdk_account_keepalive_now(
+    return _medut_account_keepalive_now(
       account,
     );
   }
 
-  late final _echosdk_account_keepalive_nowPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_account_handle_t)>>(
-          'echosdk_account_keepalive_now');
-  late final _echosdk_account_keepalive_now = _echosdk_account_keepalive_nowPtr
-      .asFunction<int Function(echosdk_account_handle_t)>();
+  late final _medut_account_keepalive_nowPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_account_handle_t)>>(
+          'medut_account_keepalive_now');
+  late final _medut_account_keepalive_now = _medut_account_keepalive_nowPtr
+      .asFunction<int Function(medut_account_handle_t)>();
 
   /// Mute/unmute the microphone (TX path) for a call.
-  int echosdk_audio_mute(
-    echosdk_call_handle_t call,
+  int medut_audio_mute(
+    medut_call_handle_t call,
     bool mute,
   ) {
-    return _echosdk_audio_mute(
+    return _medut_audio_mute(
       call,
       mute,
     );
   }
 
-  late final _echosdk_audio_mutePtr = _lookup<
+  late final _medut_audio_mutePtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Bool)>>(
-      'echosdk_audio_mute');
-  late final _echosdk_audio_mute = _echosdk_audio_mutePtr
-      .asFunction<int Function(echosdk_call_handle_t, bool)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Bool)>>(
+      'medut_audio_mute');
+  late final _medut_audio_mute = _medut_audio_mutePtr
+      .asFunction<int Function(medut_call_handle_t, bool)>();
 
   /// Return true if TX audio is currently muted on this call.
-  bool echosdk_audio_is_muted(
-    echosdk_call_handle_t call,
+  bool medut_audio_is_muted(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_audio_is_muted(
+    return _medut_audio_is_muted(
       call,
     );
   }
 
-  late final _echosdk_audio_is_mutedPtr =
-      _lookup<ffi.NativeFunction<ffi.Bool Function(echosdk_call_handle_t)>>(
-          'echosdk_audio_is_muted');
-  late final _echosdk_audio_is_muted = _echosdk_audio_is_mutedPtr
-      .asFunction<bool Function(echosdk_call_handle_t)>();
+  late final _medut_audio_is_mutedPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function(medut_call_handle_t)>>(
+          'medut_audio_is_muted');
+  late final _medut_audio_is_muted = _medut_audio_is_mutedPtr
+      .asFunction<bool Function(medut_call_handle_t)>();
 
   /// Mute/unmute the speaker (RX path) for a call — silences incoming audio.
-  int echosdk_audio_mute_rx(
-    echosdk_call_handle_t call,
+  int medut_audio_mute_rx(
+    medut_call_handle_t call,
     bool mute,
   ) {
-    return _echosdk_audio_mute_rx(
+    return _medut_audio_mute_rx(
       call,
       mute,
     );
   }
 
-  late final _echosdk_audio_mute_rxPtr = _lookup<
+  late final _medut_audio_mute_rxPtr = _lookup<
           ffi
-          .NativeFunction<ffi.Int Function(echosdk_call_handle_t, ffi.Bool)>>(
-      'echosdk_audio_mute_rx');
-  late final _echosdk_audio_mute_rx = _echosdk_audio_mute_rxPtr
-      .asFunction<int Function(echosdk_call_handle_t, bool)>();
+          .NativeFunction<ffi.Int Function(medut_call_handle_t, ffi.Bool)>>(
+      'medut_audio_mute_rx');
+  late final _medut_audio_mute_rx = _medut_audio_mute_rxPtr
+      .asFunction<int Function(medut_call_handle_t, bool)>();
 
   /// Set the system audio input device by name. NULL = platform default.
-  int echosdk_audio_set_input_device(
+  int medut_audio_set_input_device(
     ffi.Pointer<ffi.Char> name,
   ) {
-    return _echosdk_audio_set_input_device(
+    return _medut_audio_set_input_device(
       name,
     );
   }
 
-  late final _echosdk_audio_set_input_devicePtr =
+  late final _medut_audio_set_input_devicePtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
-          'echosdk_audio_set_input_device');
-  late final _echosdk_audio_set_input_device =
-      _echosdk_audio_set_input_devicePtr
+          'medut_audio_set_input_device');
+  late final _medut_audio_set_input_device =
+      _medut_audio_set_input_devicePtr
           .asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
   /// Set the system audio output device by name. NULL = platform default.
-  int echosdk_audio_set_output_device(
+  int medut_audio_set_output_device(
     ffi.Pointer<ffi.Char> name,
   ) {
-    return _echosdk_audio_set_output_device(
+    return _medut_audio_set_output_device(
       name,
     );
   }
 
-  late final _echosdk_audio_set_output_devicePtr =
+  late final _medut_audio_set_output_devicePtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
-          'echosdk_audio_set_output_device');
-  late final _echosdk_audio_set_output_device =
-      _echosdk_audio_set_output_devicePtr
+          'medut_audio_set_output_device');
+  late final _medut_audio_set_output_device =
+      _medut_audio_set_output_devicePtr
           .asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
   /// Install a PCM tap on an active call.
   /// cb is called from the audio thread for both RX (decoded) and TX (pre-encode)
   /// directions. Must be non-blocking — heavy work must go to your own thread.
   /// Pass NULL cb to remove the tap.
-  int echosdk_call_set_media_tap(
-    echosdk_call_handle_t call,
-    echosdk_media_tap_cb_t cb,
+  int medut_call_set_media_tap(
+    medut_call_handle_t call,
+    medut_media_tap_cb_t cb,
     ffi.Pointer<ffi.Void> userdata,
   ) {
-    return _echosdk_call_set_media_tap(
+    return _medut_call_set_media_tap(
       call,
       cb,
       userdata,
     );
   }
 
-  late final _echosdk_call_set_media_tapPtr = _lookup<
+  late final _medut_call_set_media_tapPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t, echosdk_media_tap_cb_t,
-              ffi.Pointer<ffi.Void>)>>('echosdk_call_set_media_tap');
-  late final _echosdk_call_set_media_tap =
-      _echosdk_call_set_media_tapPtr.asFunction<
-          int Function(echosdk_call_handle_t, echosdk_media_tap_cb_t,
+          ffi.Int Function(medut_call_handle_t, medut_media_tap_cb_t,
+              ffi.Pointer<ffi.Void>)>>('medut_call_set_media_tap');
+  late final _medut_call_set_media_tap =
+      _medut_call_set_media_tapPtr.asFunction<
+          int Function(medut_call_handle_t, medut_media_tap_cb_t,
               ffi.Pointer<ffi.Void>)>();
 
   /// Start recording call audio to a single mixed WAV file (PCM S16LE).
   /// Both the received (RX) and sent (TX) audio are clip-summed into one stream.
   /// The WAV header is written on the first audio frame and finalized on stop.
   /// Returns EALREADY if recording is already active.
-  int echosdk_call_record_start(
-    echosdk_call_handle_t call,
+  int medut_call_record_start(
+    medut_call_handle_t call,
     ffi.Pointer<ffi.Char> path,
   ) {
-    return _echosdk_call_record_start(
+    return _medut_call_record_start(
       call,
       path,
     );
   }
 
-  late final _echosdk_call_record_startPtr = _lookup<
+  late final _medut_call_record_startPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t,
-              ffi.Pointer<ffi.Char>)>>('echosdk_call_record_start');
-  late final _echosdk_call_record_start = _echosdk_call_record_startPtr
-      .asFunction<int Function(echosdk_call_handle_t, ffi.Pointer<ffi.Char>)>();
+          ffi.Int Function(medut_call_handle_t,
+              ffi.Pointer<ffi.Char>)>>('medut_call_record_start');
+  late final _medut_call_record_start = _medut_call_record_startPtr
+      .asFunction<int Function(medut_call_handle_t, ffi.Pointer<ffi.Char>)>();
 
   /// Stop recording and finalize WAV headers. Idempotent.
-  int echosdk_call_record_stop(
-    echosdk_call_handle_t call,
+  int medut_call_record_stop(
+    medut_call_handle_t call,
   ) {
-    return _echosdk_call_record_stop(
+    return _medut_call_record_stop(
       call,
     );
   }
 
-  late final _echosdk_call_record_stopPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function(echosdk_call_handle_t)>>(
-          'echosdk_call_record_stop');
-  late final _echosdk_call_record_stop = _echosdk_call_record_stopPtr
-      .asFunction<int Function(echosdk_call_handle_t)>();
+  late final _medut_call_record_stopPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function(medut_call_handle_t)>>(
+          'medut_call_record_stop');
+  late final _medut_call_record_stop = _medut_call_record_stopPtr
+      .asFunction<int Function(medut_call_handle_t)>();
 
   /// Fill `out` with the current facts about a call.
   ///
   /// Safe to call from any thread and at any point in the call's life, including
   /// after it has ended, for as long as the handle is valid.
   ///
-  /// @return ECHOSDK_OK, or ECHOSDK_ERR_INVAL for a NULL argument.
-  int echosdk_call_get_info(
-    echosdk_call_handle_t call,
-    ffi.Pointer<echosdk_call_info_t> out,
+  /// @return MEDUT_OK, or MEDUT_ERR_INVAL for a NULL argument.
+  int medut_call_get_info(
+    medut_call_handle_t call,
+    ffi.Pointer<medut_call_info_t> out,
   ) {
-    return _echosdk_call_get_info(
+    return _medut_call_get_info(
       call,
       out,
     );
   }
 
-  late final _echosdk_call_get_infoPtr = _lookup<
+  late final _medut_call_get_infoPtr = _lookup<
       ffi.NativeFunction<
-          ffi.Int Function(echosdk_call_handle_t,
-              ffi.Pointer<echosdk_call_info_t>)>>('echosdk_call_get_info');
-  late final _echosdk_call_get_info = _echosdk_call_get_infoPtr.asFunction<
-      int Function(echosdk_call_handle_t, ffi.Pointer<echosdk_call_info_t>)>();
+          ffi.Int Function(medut_call_handle_t,
+              ffi.Pointer<medut_call_info_t>)>>('medut_call_get_info');
+  late final _medut_call_get_info = _medut_call_get_infoPtr.asFunction<
+      int Function(medut_call_handle_t, ffi.Pointer<medut_call_info_t>)>();
 
   /// Synchronously retrieve current stats for a call.
-  /// Also delivered automatically via ECHOSDK_EV_MEDIA_STATS if
+  /// Also delivered automatically via MEDUT_EV_MEDIA_STATS if
   /// cfg.stats_interval_ms > 0.
   ///
   /// `out` is zeroed before anything else, so it is fully defined whatever this
@@ -1639,24 +1639,24 @@ class EchoSDKBindings {
   /// for the whole call against a peer that sends no RTCP.  0.0 there means
   /// "not measured yet", not "zero delay".  The only fields that are ever NaN
   /// are audio_level_dbov and mic_level_dbov, which use NaN for "unavailable".
-  int echosdk_call_get_stats(
-    echosdk_call_handle_t call,
-    ffi.Pointer<echosdk_ev_media_stats_t> out,
+  int medut_call_get_stats(
+    medut_call_handle_t call,
+    ffi.Pointer<medut_ev_media_stats_t> out,
   ) {
-    return _echosdk_call_get_stats(
+    return _medut_call_get_stats(
       call,
       out,
     );
   }
 
-  late final _echosdk_call_get_statsPtr = _lookup<
+  late final _medut_call_get_statsPtr = _lookup<
           ffi.NativeFunction<
-              ffi.Int Function(echosdk_call_handle_t,
-                  ffi.Pointer<echosdk_ev_media_stats_t>)>>(
-      'echosdk_call_get_stats');
-  late final _echosdk_call_get_stats = _echosdk_call_get_statsPtr.asFunction<
+              ffi.Int Function(medut_call_handle_t,
+                  ffi.Pointer<medut_ev_media_stats_t>)>>(
+      'medut_call_get_stats');
+  late final _medut_call_get_stats = _medut_call_get_statsPtr.asFunction<
       int Function(
-          echosdk_call_handle_t, ffi.Pointer<echosdk_ev_media_stats_t>)>();
+          medut_call_handle_t, ffi.Pointer<medut_ev_media_stats_t>)>();
 
   /// Tell the SDK that the underlying network may have changed.
   ///
@@ -1670,7 +1670,7 @@ class EchoSDKBindings {
   /// Safe to call from any thread and as often as the OS fires.  Calls are
   /// coalesced: the handover runs once the address set has been stable for
   /// cfg.net_settle_ms.  Returns immediately — progress is reported through
-  /// ECHOSDK_EV_NETWORK events.
+  /// MEDUT_EV_NETWORK events.
   ///
   /// A report that changed nothing costs nothing.  When the local address set
   /// is the one the transports are already bound to, every account is
@@ -1692,20 +1692,20 @@ class EchoSDKBindings {
   /// 4. re-INVITE every active call with the new local address in the SDP
   /// 5. verify RTP resumes on the new path, retrying the re-INVITE if not
   ///
-  /// @return ECHOSDK_OK, or ECHOSDK_ERR_STATE if the SDK is not initialized.
-  int echosdk_network_changed() {
-    return _echosdk_network_changed();
+  /// @return MEDUT_OK, or MEDUT_ERR_STATE if the SDK is not initialized.
+  int medut_network_changed() {
+    return _medut_network_changed();
   }
 
-  late final _echosdk_network_changedPtr =
+  late final _medut_network_changedPtr =
       _lookup<ffi.NativeFunction<ffi.Int Function()>>(
-          'echosdk_network_changed');
-  late final _echosdk_network_changed =
-      _echosdk_network_changedPtr.asFunction<int Function()>();
+          'medut_network_changed');
+  late final _medut_network_changed =
+      _medut_network_changedPtr.asFunction<int Function()>();
 
   /// Tell the SDK that interface `ifname` belongs to platform network `handle`
   /// (Android: Network.getNetworkHandle()), or forget it with
-  /// echosdk_network_clear_interface_handle().
+  /// medut_network_clear_interface_handle().
   ///
   /// With a handle on file for a second interface (typically cellular while
   /// Wi-Fi is the default), every new ICE generation gathers on that interface
@@ -1713,149 +1713,149 @@ class EchoSDKBindings {
   /// candidates that already exist instead of waiting on a fresh gather.  The
   /// plugin feeds this from a ConnectivityManager NetworkRequest; no-op on
   /// platforms that pin by interface name (iOS) or cannot pin at all.
-  int echosdk_network_set_interface_handle(
+  int medut_network_set_interface_handle(
     ffi.Pointer<ffi.Char> ifname,
     int handle,
   ) {
-    return _echosdk_network_set_interface_handle(
+    return _medut_network_set_interface_handle(
       ifname,
       handle,
     );
   }
 
-  late final _echosdk_network_set_interface_handlePtr = _lookup<
+  late final _medut_network_set_interface_handlePtr = _lookup<
           ffi
           .NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Uint64)>>(
-      'echosdk_network_set_interface_handle');
-  late final _echosdk_network_set_interface_handle =
-      _echosdk_network_set_interface_handlePtr
+      'medut_network_set_interface_handle');
+  late final _medut_network_set_interface_handle =
+      _medut_network_set_interface_handlePtr
           .asFunction<int Function(ffi.Pointer<ffi.Char>, int)>();
 
-  int echosdk_network_clear_interface_handle(
+  int medut_network_clear_interface_handle(
     ffi.Pointer<ffi.Char> ifname,
   ) {
-    return _echosdk_network_clear_interface_handle(
+    return _medut_network_clear_interface_handle(
       ifname,
     );
   }
 
-  late final _echosdk_network_clear_interface_handlePtr =
+  late final _medut_network_clear_interface_handlePtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
-          'echosdk_network_clear_interface_handle');
-  late final _echosdk_network_clear_interface_handle =
-      _echosdk_network_clear_interface_handlePtr
+          'medut_network_clear_interface_handle');
+  late final _medut_network_clear_interface_handle =
+      _medut_network_clear_interface_handlePtr
           .asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
   /// Change the built-in interface poll interval at runtime.
   /// @param seconds  Poll period; 0 disables polling entirely.
-  int echosdk_network_set_monitor_interval(
+  int medut_network_set_monitor_interval(
     int seconds,
   ) {
-    return _echosdk_network_set_monitor_interval(
+    return _medut_network_set_monitor_interval(
       seconds,
     );
   }
 
-  late final _echosdk_network_set_monitor_intervalPtr =
+  late final _medut_network_set_monitor_intervalPtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Uint32)>>(
-          'echosdk_network_set_monitor_interval');
-  late final _echosdk_network_set_monitor_interval =
-      _echosdk_network_set_monitor_intervalPtr.asFunction<int Function(int)>();
+          'medut_network_set_monitor_interval');
+  late final _medut_network_set_monitor_interval =
+      _medut_network_set_monitor_intervalPtr.asFunction<int Function(int)>();
 
   /// Adjust handover behaviour at runtime (overrides the cfg.net_* fields).
   /// @param reinvite_calls    Re-INVITE active calls onto the new address.
   /// @param hangup_on_failure Hang up calls whose media could not be migrated.
-  int echosdk_network_set_handover_policy(
+  int medut_network_set_handover_policy(
     bool reinvite_calls,
     bool hangup_on_failure,
   ) {
-    return _echosdk_network_set_handover_policy(
+    return _medut_network_set_handover_policy(
       reinvite_calls,
       hangup_on_failure,
     );
   }
 
-  late final _echosdk_network_set_handover_policyPtr =
+  late final _medut_network_set_handover_policyPtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Bool, ffi.Bool)>>(
-          'echosdk_network_set_handover_policy');
-  late final _echosdk_network_set_handover_policy =
-      _echosdk_network_set_handover_policyPtr
+          'medut_network_set_handover_policy');
+  late final _medut_network_set_handover_policy =
+      _medut_network_set_handover_policyPtr
           .asFunction<int Function(bool, bool)>();
 
   /// Copy the local IP the SDK is currently using into buf.
   /// Writes an empty string when no usable address exists.
-  /// @return ECHOSDK_OK, or ECHOSDK_ERR_INVAL / ECHOSDK_ERR_STATE.
-  int echosdk_network_local_addr(
+  /// @return MEDUT_OK, or MEDUT_ERR_INVAL / MEDUT_ERR_STATE.
+  int medut_network_local_addr(
     ffi.Pointer<ffi.Char> buf,
     int sz,
   ) {
-    return _echosdk_network_local_addr(
+    return _medut_network_local_addr(
       buf,
       sz,
     );
   }
 
-  late final _echosdk_network_local_addrPtr = _lookup<
+  late final _medut_network_local_addrPtr = _lookup<
           ffi
           .NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>, ffi.Size)>>(
-      'echosdk_network_local_addr');
-  late final _echosdk_network_local_addr = _echosdk_network_local_addrPtr
+      'medut_network_local_addr');
+  late final _medut_network_local_addr = _medut_network_local_addrPtr
       .asFunction<int Function(ffi.Pointer<ffi.Char>, int)>();
 
   /// False while the device has no usable (non-loopback) local address.
-  bool echosdk_network_is_up() {
-    return _echosdk_network_is_up();
+  bool medut_network_is_up() {
+    return _medut_network_is_up();
   }
 
-  late final _echosdk_network_is_upPtr =
-      _lookup<ffi.NativeFunction<ffi.Bool Function()>>('echosdk_network_is_up');
-  late final _echosdk_network_is_up =
-      _echosdk_network_is_upPtr.asFunction<bool Function()>();
+  late final _medut_network_is_upPtr =
+      _lookup<ffi.NativeFunction<ffi.Bool Function()>>('medut_network_is_up');
+  late final _medut_network_is_up =
+      _medut_network_is_upPtr.asFunction<bool Function()>();
 
   /// Start capturing SIP + RTP to a Wireshark-compatible pcap file.
   /// Writes synthetic Ethernet/IP/UDP headers around each SIP message.
-  int echosdk_pcap_start(
+  int medut_pcap_start(
     ffi.Pointer<ffi.Char> path,
   ) {
-    return _echosdk_pcap_start(
+    return _medut_pcap_start(
       path,
     );
   }
 
-  late final _echosdk_pcap_startPtr =
+  late final _medut_pcap_startPtr =
       _lookup<ffi.NativeFunction<ffi.Int Function(ffi.Pointer<ffi.Char>)>>(
-          'echosdk_pcap_start');
-  late final _echosdk_pcap_start =
-      _echosdk_pcap_startPtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
+          'medut_pcap_start');
+  late final _medut_pcap_start =
+      _medut_pcap_startPtr.asFunction<int Function(ffi.Pointer<ffi.Char>)>();
 
   /// Stop capture and flush/close the pcap file.
-  int echosdk_pcap_stop() {
-    return _echosdk_pcap_stop();
+  int medut_pcap_stop() {
+    return _medut_pcap_stop();
   }
 
-  late final _echosdk_pcap_stopPtr =
-      _lookup<ffi.NativeFunction<ffi.Int Function()>>('echosdk_pcap_stop');
-  late final _echosdk_pcap_stop =
-      _echosdk_pcap_stopPtr.asFunction<int Function()>();
+  late final _medut_pcap_stopPtr =
+      _lookup<ffi.NativeFunction<ffi.Int Function()>>('medut_pcap_stop');
+  late final _medut_pcap_stop =
+      _medut_pcap_stopPtr.asFunction<int Function()>();
 }
 
-final class echosdk_account extends ffi.Opaque {}
+final class medut_account extends ffi.Opaque {}
 
-final class echosdk_call extends ffi.Opaque {}
+final class medut_call extends ffi.Opaque {}
 
 /// ── Enumerations ───────────────────────────────────────────────────────────
-abstract class echosdk_transport_t {
-  static const int ECHOSDK_TRANSPORT_UDP = 0;
-  static const int ECHOSDK_TRANSPORT_TCP = 1;
-  static const int ECHOSDK_TRANSPORT_TLS = 2;
-  static const int ECHOSDK_TRANSPORT_WS = 3;
-  static const int ECHOSDK_TRANSPORT_WSS = 4;
+abstract class medut_transport_t {
+  static const int MEDUT_TRANSPORT_UDP = 0;
+  static const int MEDUT_TRANSPORT_TCP = 1;
+  static const int MEDUT_TRANSPORT_TLS = 2;
+  static const int MEDUT_TRANSPORT_WS = 3;
+  static const int MEDUT_TRANSPORT_WSS = 4;
 }
 
-abstract class echosdk_media_enc_t {
-  static const int ECHOSDK_MEDIA_ENC_NONE = 0;
-  static const int ECHOSDK_MEDIA_ENC_SDES = 1;
-  static const int ECHOSDK_MEDIA_ENC_DTLS_SRTP = 2;
+abstract class medut_media_enc_t {
+  static const int MEDUT_MEDIA_ENC_NONE = 0;
+  static const int MEDUT_MEDIA_ENC_SDES = 1;
+  static const int MEDUT_MEDIA_ENC_DTLS_SRTP = 2;
 }
 
 /// Only OPUS, PCMU and PCMA are compiled into the library — on every platform.
@@ -1863,49 +1863,49 @@ abstract class echosdk_media_enc_t {
 /// and below them stay put (removing them would shift the enum and break the
 /// ABI for already-built callers), but no module registers those codecs:
 /// selecting one contributes nothing to the SDP offer and logs a warning.
-abstract class echosdk_codec_t {
-  static const int ECHOSDK_CODEC_OPUS = 0;
+abstract class medut_codec_t {
+  static const int MEDUT_CODEC_OPUS = 0;
 
   /// G.711 µ-law
-  static const int ECHOSDK_CODEC_PCMU = 1;
+  static const int MEDUT_CODEC_PCMU = 1;
 
   /// G.711 A-law
-  static const int ECHOSDK_CODEC_PCMA = 2;
+  static const int MEDUT_CODEC_PCMA = 2;
 
   /// deprecated — not compiled in
-  static const int ECHOSDK_CODEC_G722 = 3;
+  static const int MEDUT_CODEC_G722 = 3;
 
   /// deprecated — not compiled in
-  static const int ECHOSDK_CODEC_G726_32 = 4;
+  static const int MEDUT_CODEC_G726_32 = 4;
 }
 
-abstract class echosdk_mos_method_t {
-  static const int ECHOSDK_MOS_EMODEL = 0;
-  static const int ECHOSDK_MOS_SIMPLIFIED = 1;
+abstract class medut_mos_method_t {
+  static const int MEDUT_MOS_EMODEL = 0;
+  static const int MEDUT_MOS_SIMPLIFIED = 1;
 }
 
-abstract class echosdk_media_dir_t {
-  static const int ECHOSDK_MEDIA_DIR_RX = 0;
-  static const int ECHOSDK_MEDIA_DIR_TX = 1;
+abstract class medut_media_dir_t {
+  static const int MEDUT_MEDIA_DIR_RX = 0;
+  static const int MEDUT_MEDIA_DIR_TX = 1;
 }
 
-abstract class echosdk_dtmf_mode_t {
+abstract class medut_dtmf_mode_t {
   /// RFC 4733 RTP telephony-event (default)
-  static const int ECHOSDK_DTMF_RFC4733 = 0;
+  static const int MEDUT_DTMF_RFC4733 = 0;
 
   /// SIP INFO application/dtmf-relay
-  static const int ECHOSDK_DTMF_SIP_INFO = 1;
+  static const int MEDUT_DTMF_SIP_INFO = 1;
 
   /// prefer RFC 4733, fall back to SIP INFO
-  static const int ECHOSDK_DTMF_AUTO = 2;
+  static const int MEDUT_DTMF_AUTO = 2;
 }
 
-abstract class echosdk_jbuf_type_t {
+abstract class medut_jbuf_type_t {
   /// adaptive jitter buffer (default)
-  static const int ECHOSDK_JBUF_ADAPTIVE = 0;
+  static const int MEDUT_JBUF_ADAPTIVE = 0;
 
   /// fixed-depth jitter buffer
-  static const int ECHOSDK_JBUF_FIXED = 1;
+  static const int MEDUT_JBUF_FIXED = 1;
 }
 
 /// What to do with an ICE call whose candidates could not be re-gathered on
@@ -1921,12 +1921,12 @@ abstract class echosdk_jbuf_type_t {
 /// to restart, or a replacement that could not be allocated.  Those get the plain
 /// re-INVITE, which carries the old candidate set: it recovers the call when the
 /// peer is reachable directly or through a still-valid TURN relay, and cannot
-/// recover it otherwise.  ECHOSDK_NET_CALL_ICE_STALE marks such a call.
-abstract class echosdk_ice_handover_t {
+/// recover it otherwise.  MEDUT_NET_CALL_ICE_STALE marks such a call.
+abstract class medut_ice_handover_t {
   /// Send the re-INVITE anyway and let media verification decide.
   /// Recovers relay/direct paths; wastes net_verify_ms × net_max_attempts
   /// before failing when it cannot.
-  static const int ECHOSDK_ICE_HANDOVER_BEST_EFFORT = 0;
+  static const int MEDUT_ICE_HANDOVER_BEST_EFFORT = 0;
 
   /// Try once, then fail immediately.  Gives the app a prompt
   /// CALL_MIGRATION_FAILED it can answer by re-placing the call, instead
@@ -1936,7 +1936,7 @@ abstract class echosdk_ice_handover_t {
   /// Does not apply to a call whose ICE was restarted: that call is not
   /// offering the wrong candidates any more, so it is held to the same
   /// retry budget as a direct-RTP call.
-  static const int ECHOSDK_ICE_HANDOVER_FAIL_FAST = 1;
+  static const int MEDUT_ICE_HANDOVER_FAIL_FAST = 1;
 }
 
 /// ICE liveness of a call's media path — the agent's own verdict, from its
@@ -1950,25 +1950,25 @@ abstract class echosdk_ice_handover_t {
 /// checks continue (the path is in trouble but may recover on its own).
 /// FAILED: every pair timed out and nothing is left to gather; the SDK does
 /// not end the call — redialling is the app's decision.
-/// Delivered as ECHOSDK_EV_ICE_STATE and readable via echosdk_call_ice_state().
-abstract class echosdk_ice_state_t {
-  static const int ECHOSDK_ICE_NEW = 0;
-  static const int ECHOSDK_ICE_GATHERING = 1;
-  static const int ECHOSDK_ICE_CHECKING = 2;
-  static const int ECHOSDK_ICE_CONNECTED = 3;
-  static const int ECHOSDK_ICE_COMPLETED = 4;
-  static const int ECHOSDK_ICE_DISCONNECTED = 5;
-  static const int ECHOSDK_ICE_FAILED = 6;
-  static const int ECHOSDK_ICE_CLOSED = 7;
+/// Delivered as MEDUT_EV_ICE_STATE and readable via medut_call_ice_state().
+abstract class medut_ice_state_t {
+  static const int MEDUT_ICE_NEW = 0;
+  static const int MEDUT_ICE_GATHERING = 1;
+  static const int MEDUT_ICE_CHECKING = 2;
+  static const int MEDUT_ICE_CONNECTED = 3;
+  static const int MEDUT_ICE_COMPLETED = 4;
+  static const int MEDUT_ICE_DISCONNECTED = 5;
+  static const int MEDUT_ICE_FAILED = 6;
+  static const int MEDUT_ICE_CLOSED = 7;
 }
 
 /// Candidate type of one side of the selected pair (RFC 8445 §5.1.1).
-abstract class echosdk_ice_cand_type_t {
-  static const int ECHOSDK_ICE_CAND_HOST = 0;
-  static const int ECHOSDK_ICE_CAND_SRFLX = 1;
-  static const int ECHOSDK_ICE_CAND_PRFLX = 2;
-  static const int ECHOSDK_ICE_CAND_RELAY = 3;
-  static const int ECHOSDK_ICE_CAND_NONE = 4;
+abstract class medut_ice_cand_type_t {
+  static const int MEDUT_ICE_CAND_HOST = 0;
+  static const int MEDUT_ICE_CAND_SRFLX = 1;
+  static const int MEDUT_ICE_CAND_PRFLX = 2;
+  static const int MEDUT_ICE_CAND_RELAY = 3;
+  static const int MEDUT_ICE_CAND_NONE = 4;
 }
 
 /// One STUN or TURN server, in the URL grammar browsers accept (RFC 7064 /
@@ -1977,7 +1977,7 @@ abstract class echosdk_ice_cand_type_t {
 /// ports 3478 (5349 for the TLS schemes).  `user`/`pass` are the TURN
 /// long-term credentials and ignored for STUN.  TURN over TCP/TLS entries are
 /// accepted and currently skipped at gathering time with a warning.
-final class echosdk_ice_server_t extends ffi.Struct {
+final class medut_ice_server_t extends ffi.Struct {
   external ffi.Pointer<ffi.Char> url;
 
   external ffi.Pointer<ffi.Char> user;
@@ -1986,19 +1986,19 @@ final class echosdk_ice_server_t extends ffi.Struct {
 }
 
 /// Which candidates a call may use (WebRTC's iceTransportPolicy).
-abstract class echosdk_ice_transport_policy_t {
+abstract class medut_ice_transport_policy_t {
   /// < host, reflexive and relayed
-  static const int ECHOSDK_ICE_TRANSPORT_ALL = 0;
+  static const int MEDUT_ICE_TRANSPORT_ALL = 0;
 
   /// < relayed only: offer and accept
   /// nothing but TURN candidates.  A
   /// call with no usable TURN server
   /// fails fast instead of leaking a
   /// direct path
-  static const int ECHOSDK_ICE_TRANSPORT_RELAY = 1;
+  static const int MEDUT_ICE_TRANSPORT_RELAY = 1;
 }
 
-final class echosdk_opus_config_t extends ffi.Struct {
+final class medut_opus_config_t extends ffi.Struct {
   /// target bps (VBR); default 32000; 0 = Opus picks (~50 kbps mono)
   @ffi.Int()
   external int bitrate;
@@ -2018,7 +2018,7 @@ final class echosdk_opus_config_t extends ffi.Struct {
   @ffi.Bool()
   external bool dtx;
 
-  /// in-band FEC; default true (echosdk_config_init)
+  /// in-band FEC; default true (medut_config_init)
   @ffi.Bool()
   external bool fec;
 
@@ -2028,55 +2028,55 @@ final class echosdk_opus_config_t extends ffi.Struct {
 }
 
 /// ── Error codes ────────────────────────────────────────────────────────────
-abstract class echosdk_error_t {
-  static const int ECHOSDK_OK = 0;
-  static const int ECHOSDK_ERR_INVAL = -1;
-  static const int ECHOSDK_ERR_NOMEM = -2;
+abstract class medut_error_t {
+  static const int MEDUT_OK = 0;
+  static const int MEDUT_ERR_INVAL = -1;
+  static const int MEDUT_ERR_NOMEM = -2;
 
   /// wrong lifecycle state
-  static const int ECHOSDK_ERR_STATE = -3;
-  static const int ECHOSDK_ERR_DNS = -4;
-  static const int ECHOSDK_ERR_TRANSPORT = -5;
-  static const int ECHOSDK_ERR_AUTH = -6;
-  static const int ECHOSDK_ERR_SERVER_5XX = -7;
-  static const int ECHOSDK_ERR_WS_PROTOCOL_REJECTED = -8;
-  static const int ECHOSDK_ERR_TIMEOUT = -9;
-  static const int ECHOSDK_ERR_ALREADY = -10;
+  static const int MEDUT_ERR_STATE = -3;
+  static const int MEDUT_ERR_DNS = -4;
+  static const int MEDUT_ERR_TRANSPORT = -5;
+  static const int MEDUT_ERR_AUTH = -6;
+  static const int MEDUT_ERR_SERVER_5XX = -7;
+  static const int MEDUT_ERR_WS_PROTOCOL_REJECTED = -8;
+  static const int MEDUT_ERR_TIMEOUT = -9;
+  static const int MEDUT_ERR_ALREADY = -10;
 
   /// 403 Forbidden: the request was understood and the credentials were
   /// fine — the server refused this particular request.  On a call that
   /// is a dialplan or policy refusal ("you may not dial that"), which is
   /// not a reason to ask anyone for new credentials.  Registration keeps
-  /// reporting 403 as ECHOSDK_ERR_AUTH, where it does mean the account
+  /// reporting 403 as MEDUT_ERR_AUTH, where it does mean the account
   /// itself was rejected.  Appended at the end of the enum so an app
   /// built against an older header keeps its own numbering.
-  static const int ECHOSDK_ERR_FORBIDDEN = -11;
+  static const int MEDUT_ERR_FORBIDDEN = -11;
 }
 
 /// ── Call states ────────────────────────────────────────────────────────────
-abstract class echosdk_call_state_t {
-  static const int ECHOSDK_CALL_CALLING = 0;
-  static const int ECHOSDK_CALL_RINGING = 1;
-  static const int ECHOSDK_CALL_ESTABLISHED = 2;
-  static const int ECHOSDK_CALL_HELD = 3;
-  static const int ECHOSDK_CALL_ENDED = 4;
-  static const int ECHOSDK_CALL_CANCELLED = 5;
-  static const int ECHOSDK_CALL_FAILED = 6;
+abstract class medut_call_state_t {
+  static const int MEDUT_CALL_CALLING = 0;
+  static const int MEDUT_CALL_RINGING = 1;
+  static const int MEDUT_CALL_ESTABLISHED = 2;
+  static const int MEDUT_CALL_HELD = 3;
+  static const int MEDUT_CALL_ENDED = 4;
+  static const int MEDUT_CALL_CANCELLED = 5;
+  static const int MEDUT_CALL_FAILED = 6;
 }
 
 /// ── Registration states ────────────────────────────────────────────────────
-abstract class echosdk_reg_state_t {
-  static const int ECHOSDK_REG_UNREGISTERED = 0;
-  static const int ECHOSDK_REG_REGISTERING = 1;
-  static const int ECHOSDK_REG_REGISTERED = 2;
+abstract class medut_reg_state_t {
+  static const int MEDUT_REG_UNREGISTERED = 0;
+  static const int MEDUT_REG_REGISTERING = 1;
+  static const int MEDUT_REG_REGISTERED = 2;
 
   /// Terminal: the registration is down and the SDK has stopped trying.
-  /// Either nothing it can retry will help (ECHOSDK_ERR_AUTH — wrong
+  /// Either nothing it can retry will help (MEDUT_ERR_AUTH — wrong
   /// credentials), the retry budget (`reg_retry_max_attempts`) ran out, or
   /// the app cancelled the retry itself.  Recovering needs the app:
-  /// echosdk_account_retry_now(), or new credentials.
-  static const int ECHOSDK_REG_FAILED = 3;
-  static const int ECHOSDK_REG_UNREGISTERING = 4;
+  /// medut_account_retry_now(), or new credentials.
+  static const int MEDUT_REG_FAILED = 3;
+  static const int MEDUT_REG_UNREGISTERING = 4;
 
   /// Transient: the registration is not usable right now, and the SDK is
   /// getting it back on its own.  Nothing for the app to do but say so —
@@ -2096,86 +2096,86 @@ abstract class echosdk_reg_state_t {
   /// - a network handover or a link that dropped entirely — Wi-Fi ↔
   /// cellular, VPN up/down, dock/undock — from the moment the change is
   /// detected until the REGISTER lands on the new path.  The matching
-  /// ECHOSDK_EV_NETWORK events carry the detail.
+  /// MEDUT_EV_NETWORK events carry the detail.
   ///
   /// The state does not flicker back to REGISTERING for each retry: an
   /// account stays RECONNECTING for the whole recovery, and leaves it only
   /// for REGISTERED (recovered) or FAILED (given up).  REGISTERING keeps
   /// its narrower meaning — a registration the app asked for, going out
   /// for the first time.
-  static const int ECHOSDK_REG_RECONNECTING = 5;
+  static const int MEDUT_REG_RECONNECTING = 5;
 }
 
 /// ── Presence enums ──────────────────────────────────────────────────────────
-abstract class echosdk_presence_status_t {
-  static const int ECHOSDK_PRESENCE_UNKNOWN = 0;
+abstract class medut_presence_status_t {
+  static const int MEDUT_PRESENCE_UNKNOWN = 0;
 
   /// available
-  static const int ECHOSDK_PRESENCE_OPEN = 1;
+  static const int MEDUT_PRESENCE_OPEN = 1;
 
   /// offline / DND
-  static const int ECHOSDK_PRESENCE_CLOSED = 2;
+  static const int MEDUT_PRESENCE_CLOSED = 2;
 
   /// on a call
-  static const int ECHOSDK_PRESENCE_BUSY = 3;
+  static const int MEDUT_PRESENCE_BUSY = 3;
 }
 
-abstract class echosdk_100rel_mode_t {
+abstract class medut_100rel_mode_t {
   /// never send/require 100rel
-  static const int ECHOSDK_100REL_DISABLED = 0;
+  static const int MEDUT_100REL_DISABLED = 0;
 
   /// support 100rel if peer offers
-  static const int ECHOSDK_100REL_ENABLED = 1;
+  static const int MEDUT_100REL_ENABLED = 1;
 
   /// require 100rel; reject if unsupported
-  static const int ECHOSDK_100REL_REQUIRED = 2;
+  static const int MEDUT_100REL_REQUIRED = 2;
 }
 
 /// Push notification provider — determines the pn-provider URI parameter
 /// value placed in the SIP REGISTER Contact header per RFC 8599, or the
 /// server-side push dispatch type for non-RFC-8599 servers.
-abstract class echosdk_push_provider_t {
+abstract class medut_push_provider_t {
   /// no push params (default)
-  static const int ECHOSDK_PUSH_PROVIDER_NONE = 0;
+  static const int MEDUT_PUSH_PROVIDER_NONE = 0;
 
   /// Apple APNs production
-  static const int ECHOSDK_PUSH_PROVIDER_APNS = 1;
+  static const int MEDUT_PUSH_PROVIDER_APNS = 1;
 
   /// Apple APNs development
-  static const int ECHOSDK_PUSH_PROVIDER_APNS_SANDBOX = 2;
+  static const int MEDUT_PUSH_PROVIDER_APNS_SANDBOX = 2;
 
   /// Firebase Cloud Messaging
-  static const int ECHOSDK_PUSH_PROVIDER_FCM = 3;
+  static const int MEDUT_PUSH_PROVIDER_FCM = 3;
 }
 
 /// ── Event types ────────────────────────────────────────────────────────────
-abstract class echosdk_event_type_t {
-  static const int ECHOSDK_EV_LOG = 0;
-  static const int ECHOSDK_EV_REG_STATE = 1;
-  static const int ECHOSDK_EV_INCOMING_CALL = 2;
-  static const int ECHOSDK_EV_CALL_STATE = 3;
-  static const int ECHOSDK_EV_CALL_DTMF = 4;
-  static const int ECHOSDK_EV_SDP_NEGOTIATION = 5;
-  static const int ECHOSDK_EV_SIP_TRACE = 6;
-  static const int ECHOSDK_EV_MEDIA_STATS = 7;
-  static const int ECHOSDK_EV_REGISTRAR_WARNING = 8;
-  static const int ECHOSDK_EV_TRANSFER_REQUEST = 9;
-  static const int ECHOSDK_EV_MWI = 10;
-  static const int ECHOSDK_EV_MESSAGE = 11;
-  static const int ECHOSDK_EV_PRESENCE_STATE = 12;
-  static const int ECHOSDK_EV_QUALITY_ALERT = 13;
-  static const int ECHOSDK_EV_NETWORK = 14;
+abstract class medut_event_type_t {
+  static const int MEDUT_EV_LOG = 0;
+  static const int MEDUT_EV_REG_STATE = 1;
+  static const int MEDUT_EV_INCOMING_CALL = 2;
+  static const int MEDUT_EV_CALL_STATE = 3;
+  static const int MEDUT_EV_CALL_DTMF = 4;
+  static const int MEDUT_EV_SDP_NEGOTIATION = 5;
+  static const int MEDUT_EV_SIP_TRACE = 6;
+  static const int MEDUT_EV_MEDIA_STATS = 7;
+  static const int MEDUT_EV_REGISTRAR_WARNING = 8;
+  static const int MEDUT_EV_TRANSFER_REQUEST = 9;
+  static const int MEDUT_EV_MWI = 10;
+  static const int MEDUT_EV_MESSAGE = 11;
+  static const int MEDUT_EV_PRESENCE_STATE = 12;
+  static const int MEDUT_EV_QUALITY_ALERT = 13;
+  static const int MEDUT_EV_NETWORK = 14;
 
   /// An outgoing REFER was refused.  The call named in the payload is STILL
   /// ESTABLISHED — this is deliberately not a call-state change, so a failed
   /// transfer never tears down the leg the user is still talking on.  A REFER
   /// that succeeds needs no event of its own: the far end takes the call over
-  /// and our leg closes, which arrives as ECHOSDK_EV_CALL_STATE / ENDED.
-  static const int ECHOSDK_EV_TRANSFER_FAILED = 15;
+  /// and our leg closes, which arrives as MEDUT_EV_CALL_STATE / ENDED.
+  static const int MEDUT_EV_TRANSFER_FAILED = 15;
 
   /// The ICE liveness state of a call's media path changed — see
-  /// echosdk_ice_state_t.  Payload: echosdk_ev_ice_state_t.
-  static const int ECHOSDK_EV_ICE_STATE = 16;
+  /// medut_ice_state_t.  Payload: medut_ev_ice_state_t.
+  static const int MEDUT_EV_ICE_STATE = 16;
 }
 
 /// Stages of a network handover (Wi-Fi ↔ 4G/5G, VPN up/down, dock/undock).
@@ -2186,47 +2186,47 @@ abstract class echosdk_event_type_t {
 ///
 /// When the device is briefly off-network the sequence starts with DOWN and
 /// resumes at UP once a usable address appears.
-abstract class echosdk_net_event_t {
+abstract class medut_net_event_t {
   /// local address set changed
-  static const int ECHOSDK_NET_CHANGE_DETECTED = 0;
+  static const int MEDUT_NET_CHANGE_DETECTED = 0;
 
   /// no usable local address
-  static const int ECHOSDK_NET_DOWN = 1;
+  static const int MEDUT_NET_DOWN = 1;
 
   /// usable local address again
-  static const int ECHOSDK_NET_UP = 2;
+  static const int MEDUT_NET_UP = 2;
 
   /// SIP transports flushed + re-bound
-  static const int ECHOSDK_NET_TRANSPORT_RESET = 3;
+  static const int MEDUT_NET_TRANSPORT_RESET = 3;
 
   /// REGISTER re-sent on the new path
-  static const int ECHOSDK_NET_REREGISTERING = 4;
+  static const int MEDUT_NET_REREGISTERING = 4;
 
   /// re-INVITE sent to move the media
-  static const int ECHOSDK_NET_CALL_MIGRATING = 5;
+  static const int MEDUT_NET_CALL_MIGRATING = 5;
 
   /// peer answered; awaiting audio
-  static const int ECHOSDK_NET_CALL_MIGRATE_ACCEPTED = 6;
+  static const int MEDUT_NET_CALL_MIGRATE_ACCEPTED = 6;
 
   /// RTP confirmed on the new path
-  static const int ECHOSDK_NET_CALL_MIGRATED = 7;
+  static const int MEDUT_NET_CALL_MIGRATED = 7;
 
   /// gave up; see `error`
-  static const int ECHOSDK_NET_CALL_MIGRATION_FAILED = 8;
+  static const int MEDUT_NET_CALL_MIGRATION_FAILED = 8;
 
   /// not refreshable yet; will retry
-  static const int ECHOSDK_NET_CALL_DEFERRED = 9;
+  static const int MEDUT_NET_CALL_DEFERRED = 9;
 
   /// transport reset failed; retrying
-  static const int ECHOSDK_NET_HANDOVER_FAILED = 10;
+  static const int MEDUT_NET_HANDOVER_FAILED = 10;
 
   /// ICE call whose candidates could not be re-gathered: the migration
   /// falls back to a re-INVITE carrying the pre-handover candidate set,
   /// which recovers direct and TURN-relayed paths only.  Emitted once per
   /// call per handover, before that re-INVITE.  An ICE call that *was*
   /// restarted does not emit this — it migrates like any other call.  See
-  /// echosdk_ice_handover_t and cfg.net_ice_handover.
-  static const int ECHOSDK_NET_CALL_ICE_STALE = 11;
+  /// medut_ice_handover_t and cfg.net_ice_handover.
+  static const int MEDUT_NET_CALL_ICE_STALE = 11;
 
   /// ICE finished its connectivity checks with no usable candidate pair,
   /// so nothing was nominated and the media path was never validated.
@@ -2241,7 +2241,7 @@ abstract class echosdk_net_event_t {
   /// earlier the stream is held on it and audio usually survives, and the
   /// decision to redial belongs to the app.  Emitted once per failed ICE
   /// generation, so a call that restarts twice can emit it twice.
-  static const int ECHOSDK_NET_CALL_ICE_FAILED = 12;
+  static const int MEDUT_NET_CALL_ICE_FAILED = 12;
 }
 
 /// Network handover progress.
@@ -2250,15 +2250,15 @@ abstract class echosdk_net_event_t {
 /// "link settled — rebuilding the media path %u/%u"
 /// `elapsed_ms` on CALL_MIGRATED is how long audio was interrupted:
 /// "media recovered after %.1f s"
-final class echosdk_ev_network_t extends ffi.Struct {
+final class medut_ev_network_t extends ffi.Struct {
   @ffi.Int32()
   external int event;
 
   /// CALL_* events only; else NULL
-  external echosdk_call_handle_t call;
+  external medut_call_handle_t call;
 
   /// REREGISTERING only; else NULL
-  external echosdk_account_handle_t account;
+  external medut_account_handle_t account;
 
   /// new local IP, "" when unknown
   external ffi.Pointer<ffi.Char> local_addr;
@@ -2268,7 +2268,7 @@ final class echosdk_ev_network_t extends ffi.Struct {
   external int attempt;
 
   /// The offer budget this call is held to — net_max_attempts normally, or 1
-  /// for a call under ECHOSDK_ICE_HANDOVER_FAIL_FAST whose ICE could not be
+  /// for a call under MEDUT_ICE_HANDOVER_FAIL_FAST whose ICE could not be
   /// restarted.
   ///
   /// Render it as a progress counter ("%u/%u"), not as an invariant:
@@ -2291,25 +2291,25 @@ final class echosdk_ev_network_t extends ffi.Struct {
   @ffi.Bool()
   external bool ice;
 
-  /// ECHOSDK_OK unless *_FAILED
+  /// MEDUT_OK unless *_FAILED
   @ffi.Int32()
   external int error;
 }
 
-typedef echosdk_call_handle_t = ffi.Pointer<echosdk_call>;
+typedef medut_call_handle_t = ffi.Pointer<medut_call>;
 
 /// ── Opaque handles ─────────────────────────────────────────────────────────
-typedef echosdk_account_handle_t = ffi.Pointer<echosdk_account>;
+typedef medut_account_handle_t = ffi.Pointer<medut_account>;
 
-/// ICE liveness change (ECHOSDK_EV_ICE_STATE).
+/// ICE liveness change (MEDUT_EV_ICE_STATE).
 ///
 /// `local_addr` / `remote_addr` are the selected candidate pair as
 /// "ip:port" ("" until a pair is selected), `generation` counts ICE
 /// restarts (1 = the initial session), `rtt_ms` is the STUN round trip on
 /// the selected pair.  The strings are valid for the callback's duration
 /// (or for the event's life with cfg.deliver_owned_events).
-final class echosdk_ev_ice_state_t extends ffi.Struct {
-  external echosdk_call_handle_t call;
+final class medut_ev_ice_state_t extends ffi.Struct {
+  external medut_call_handle_t call;
 
   @ffi.Int32()
   external int state;
@@ -2333,7 +2333,7 @@ final class echosdk_ev_ice_state_t extends ffi.Struct {
   @ffi.Float()
   external double rtt_ms;
 
-  /// ECHOSDK_OK unless FAILED
+  /// MEDUT_OK unless FAILED
   @ffi.Int32()
   external int error;
 }
@@ -2351,13 +2351,13 @@ final class echosdk_ev_ice_state_t extends ffi.Struct {
 /// Two events can describe one lost registration: the failure itself, then the
 /// retry that was armed for it.  Both carry the same state, so an app that only
 /// renders `state` shows "Reconnecting…" once and needs no de-duplication.
-final class echosdk_ev_reg_state_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_reg_state_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   @ffi.Int32()
   external int state;
 
-  /// ECHOSDK_OK when REGISTERED
+  /// MEDUT_OK when REGISTERED
   @ffi.Int32()
   external int error;
 
@@ -2383,20 +2383,20 @@ final class echosdk_ev_reg_state_t extends ffi.Struct {
   external ffi.Pointer<ffi.Char> error_str;
 }
 
-final class echosdk_ev_incoming_call_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_incoming_call_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
-  external echosdk_call_handle_t call;
+  external medut_call_handle_t call;
 
   external ffi.Pointer<ffi.Char> from_uri;
 
   external ffi.Pointer<ffi.Char> display_name;
 }
 
-final class echosdk_ev_call_state_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_call_state_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
-  external echosdk_call_handle_t call;
+  external medut_call_handle_t call;
 
   @ffi.Int32()
   external int state;
@@ -2407,15 +2407,15 @@ final class echosdk_ev_call_state_t extends ffi.Struct {
   external ffi.Pointer<ffi.Char> reason;
 }
 
-final class echosdk_ev_call_dtmf_t extends ffi.Struct {
-  external echosdk_call_handle_t call;
+final class medut_ev_call_dtmf_t extends ffi.Struct {
+  external medut_call_handle_t call;
 
   @ffi.Char()
   external int digit;
 }
 
-final class echosdk_ev_sdp_negotiation_t extends ffi.Struct {
-  external echosdk_call_handle_t call;
+final class medut_ev_sdp_negotiation_t extends ffi.Struct {
+  external medut_call_handle_t call;
 
   external ffi.Pointer<ffi.Char> local_sdp;
 
@@ -2433,7 +2433,7 @@ final class echosdk_ev_sdp_negotiation_t extends ffi.Struct {
   external ffi.Pointer<ffi.Pointer<ffi.Char>> warnings;
 }
 
-final class echosdk_ev_sip_trace_t extends ffi.Struct {
+final class medut_ev_sip_trace_t extends ffi.Struct {
   @ffi.Int32()
   external int dir;
 
@@ -2449,8 +2449,8 @@ final class echosdk_ev_sip_trace_t extends ffi.Struct {
   external int timestamp_us;
 }
 
-final class echosdk_ev_media_stats_t extends ffi.Struct {
-  external echosdk_call_handle_t call;
+final class medut_ev_media_stats_t extends ffi.Struct {
+  external medut_call_handle_t call;
 
   /// ── Packet counters ─────────────────────────────────────────────────
   @ffi.Uint32()
@@ -2639,7 +2639,7 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
 
   /// ── ICE ───────────────────────────────────────────────────────────── */
   /// /* The media path as the ICE agent sees it.  `ice_state` is
-  /// ECHOSDK_ICE_NEW and the rest zero on a call without ICE.
+  /// MEDUT_ICE_NEW and the rest zero on a call without ICE.
   /// `remote_addr` above is the same address as `ice_remote_addr` on an
   /// ICE call, and the signalled peer on a plain-RTP one.
   @ffi.Int32()
@@ -2695,11 +2695,11 @@ final class echosdk_ev_media_stats_t extends ffi.Struct {
   external int plc_concealed;
 }
 
-final class echosdk_ev_log_t extends ffi.Struct {
+final class medut_ev_log_t extends ffi.Struct {
   external ffi.Pointer<ffi.Char> message;
 }
 
-final class echosdk_ev_registrar_warning_t extends ffi.Struct {
+final class medut_ev_registrar_warning_t extends ffi.Struct {
   external ffi.Pointer<ffi.Char> message;
 }
 
@@ -2708,14 +2708,14 @@ final class echosdk_ev_registrar_warning_t extends ffi.Struct {
 /// The SDK has already answered `202 Accepted` and sent `NOTIFY 100 Trying`;
 /// per RFC 3515 the transferor is now waiting for a final `message/sipfrag`
 /// NOTIFY saying what became of the reference.  Nothing sends it until the app
-/// calls echosdk_call_transfer_accept() or echosdk_call_transfer_reject() —
+/// calls medut_call_transfer_accept() or medut_call_transfer_reject() —
 /// exactly one of the two, on the call this event names.  Ignoring the event
 /// leaves the transferor waiting out the 60 s subscription.
-final class echosdk_ev_transfer_req_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_transfer_req_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   /// call receiving the REFER
-  external echosdk_call_handle_t call;
+  external medut_call_handle_t call;
 
   /// Refer-To header value
   external ffi.Pointer<ffi.Char> refer_to_uri;
@@ -2738,22 +2738,22 @@ final class echosdk_ev_transfer_req_t extends ffi.Struct {
 /// An outgoing REFER was refused (blind or attended).
 ///
 /// The call is still up.  baresip does not close a call whose transfer failed,
-/// and neither does EchoSDK: the caller is still on the line, usually on hold,
+/// and neither does Medut: the caller is still on the line, usually on hold,
 /// and the app's remedy is to resume them and report the failure — not to hang
 /// up.  `reason` is the status line or cause text when the stack supplied one.
-final class echosdk_ev_transfer_failed_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_transfer_failed_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   /// the call we tried to transfer away
-  external echosdk_call_handle_t call;
+  external medut_call_handle_t call;
 
   /// status line / cause, may be NULL
   external ffi.Pointer<ffi.Char> reason;
 }
 
 /// MWI NOTIFY — raw body is parsed into counters; all fields may be 0.
-final class echosdk_ev_mwi_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_mwi_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   @ffi.Bool()
   external bool messages_waiting;
@@ -2775,8 +2775,8 @@ final class echosdk_ev_mwi_t extends ffi.Struct {
 }
 
 /// Incoming SIP MESSAGE (instant message).
-final class echosdk_ev_message_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_message_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   external ffi.Pointer<ffi.Char> from_uri;
 
@@ -2787,8 +2787,8 @@ final class echosdk_ev_message_t extends ffi.Struct {
 }
 
 /// Buddy / contact presence state changed.
-final class echosdk_ev_presence_state_t extends ffi.Struct {
-  external echosdk_account_handle_t account;
+final class medut_ev_presence_state_t extends ffi.Struct {
+  external medut_account_handle_t account;
 
   external ffi.Pointer<ffi.Char> target_uri;
 
@@ -2796,21 +2796,21 @@ final class echosdk_ev_presence_state_t extends ffi.Struct {
   external int status;
 }
 
-abstract class echosdk_quality_issue_t {
-  static const int ECHOSDK_QUALITY_MOS = 0;
-  static const int ECHOSDK_QUALITY_LOSS = 1;
-  static const int ECHOSDK_QUALITY_JITTER = 2;
-  static const int ECHOSDK_QUALITY_RTT = 3;
+abstract class medut_quality_issue_t {
+  static const int MEDUT_QUALITY_MOS = 0;
+  static const int MEDUT_QUALITY_LOSS = 1;
+  static const int MEDUT_QUALITY_JITTER = 2;
+  static const int MEDUT_QUALITY_RTT = 3;
 
   /// No inbound RTP for cfg.media_stall_ms while the call is not on hold.
   /// `value` is the stall duration in ms, `threshold` is media_stall_ms.
   /// Non-fatal: fires again with `recovering` = true when RTP resumes.
   /// See also cfg.rtp_timeout_s, which *ends* the call instead.
-  static const int ECHOSDK_QUALITY_MEDIA_STALL = 4;
+  static const int MEDUT_QUALITY_MEDIA_STALL = 4;
 }
 
-final class echosdk_ev_quality_alert_t extends ffi.Struct {
-  external echosdk_call_handle_t call;
+final class medut_ev_quality_alert_t extends ffi.Struct {
+  external medut_call_handle_t call;
 
   @ffi.Int32()
   external int issue;
@@ -2829,7 +2829,7 @@ final class echosdk_ev_quality_alert_t extends ffi.Struct {
 }
 
 /// ── Master event union ─────────────────────────────────────────────────────
-final class echosdk_event_t extends ffi.Struct {
+final class medut_event_t extends ffi.Struct {
   @ffi.Int32()
   external int type;
 
@@ -2837,47 +2837,47 @@ final class echosdk_event_t extends ffi.Struct {
 }
 
 final class UnnamedUnion1 extends ffi.Union {
-  external echosdk_ev_log_t log;
+  external medut_ev_log_t log;
 
-  external echosdk_ev_reg_state_t reg;
+  external medut_ev_reg_state_t reg;
 
-  external echosdk_ev_incoming_call_t incoming;
+  external medut_ev_incoming_call_t incoming;
 
-  external echosdk_ev_call_state_t call_state;
+  external medut_ev_call_state_t call_state;
 
-  external echosdk_ev_call_dtmf_t dtmf;
+  external medut_ev_call_dtmf_t dtmf;
 
-  external echosdk_ev_sdp_negotiation_t sdp;
+  external medut_ev_sdp_negotiation_t sdp;
 
-  external echosdk_ev_sip_trace_t sip_trace;
+  external medut_ev_sip_trace_t sip_trace;
 
-  external echosdk_ev_media_stats_t stats;
+  external medut_ev_media_stats_t stats;
 
-  external echosdk_ev_registrar_warning_t reg_warn;
+  external medut_ev_registrar_warning_t reg_warn;
 
-  external echosdk_ev_transfer_req_t transfer_req;
+  external medut_ev_transfer_req_t transfer_req;
 
-  external echosdk_ev_transfer_failed_t transfer_failed;
+  external medut_ev_transfer_failed_t transfer_failed;
 
-  external echosdk_ev_mwi_t mwi;
+  external medut_ev_mwi_t mwi;
 
-  external echosdk_ev_message_t msg;
+  external medut_ev_message_t msg;
 
-  external echosdk_ev_presence_state_t presence;
+  external medut_ev_presence_state_t presence;
 
-  external echosdk_ev_quality_alert_t quality_alert;
+  external medut_ev_quality_alert_t quality_alert;
 
-  external echosdk_ev_network_t network;
+  external medut_ev_network_t network;
 
-  external echosdk_ev_ice_state_t ice;
+  external medut_ev_ice_state_t ice;
 }
 
-final class echosdk_config_t extends ffi.Struct {
-  /// ECHOSDK_CONFIG_VERSION
+final class medut_config_t extends ffi.Struct {
+  /// MEDUT_CONFIG_VERSION
   @ffi.Uint32()
   external int version;
 
-  /// sizeof(echosdk_config_t) at compile time
+  /// sizeof(medut_config_t) at compile time
   @ffi.Size()
   external int struct_size;
 
@@ -2975,7 +2975,7 @@ final class echosdk_config_t extends ffi.Struct {
   external int media_enc;
 
   /// Ordered preference list. Overridden per account by
-  /// echosdk_account_config_t.audio_codec[_name]s, and by the
+  /// medut_account_config_t.audio_codec[_name]s, and by the
   /// string list in audio_codec_names[] below.
   /// Leave at 0 for the cross-platform default: Opus, PCMU, PCMA.
   @ffi.Array.multi([8])
@@ -2997,14 +2997,14 @@ final class echosdk_config_t extends ffi.Struct {
   external bool enable_video;
 
   /// echo cancellation backend; default SUPPRESSOR
-  @echosdk_aec_mode_t()
+  @medut_aec_mode_t()
   external int aec_mode;
 
-  /// noise suppression; off on the mobile voice path, see echosdk_set_ns()
+  /// noise suppression; off on the mobile voice path, see medut_set_ns()
   @ffi.Bool()
   external bool ns;
 
-  /// automatic gain control; off on the mobile voice path, see echosdk_set_agc()
+  /// automatic gain control; off on the mobile voice path, see medut_set_agc()
   @ffi.Bool()
   external bool agc;
 
@@ -3020,8 +3020,8 @@ final class echosdk_config_t extends ffi.Struct {
   @ffi.Float()
   external double speaker_gain_db;
 
-  /// see echosdk_config_init() for defaults
-  external echosdk_opus_config_t opus;
+  /// see medut_config_init() for defaults
+  external medut_opus_config_t opus;
 
   /// adaptive (default) or fixed
   @ffi.Int32()
@@ -3103,8 +3103,8 @@ final class echosdk_config_t extends ffi.Struct {
   /// link that is up but not passing traffic — produces no response at
   /// all, and libre's Timer B is a compile-time 64·T1 = 32 s.  This field
   /// arms an SDK-side watchdog instead: an outgoing call still in
-  /// ECHOSDK_CALL_CALLING after `sip_timer_b_ms` is cancelled with 408 and
-  /// reported as ECHOSDK_CALL_FAILED / ECHOSDK_ERR_TIMEOUT.  Set below
+  /// MEDUT_CALL_CALLING after `sip_timer_b_ms` is cancelled with 408 and
+  /// reported as MEDUT_CALL_FAILED / MEDUT_ERR_TIMEOUT.  Set below
   /// 32000 to fail fast (8000–12000 is usual on mobile); 0 disables the
   /// watchdog and leaves the 32 s transaction timeout as the only bound.
   ///
@@ -3119,7 +3119,7 @@ final class echosdk_config_t extends ffi.Struct {
   /// Non-INVITE transaction timeout, ms.  Default 32000 (Timer F).
   ///
   /// Bounds how long the registration watchdog waits for any answer to a
-  /// REGISTER before reporting ECHOSDK_ERR_TIMEOUT and handing over to the
+  /// REGISTER before reporting MEDUT_ERR_TIMEOUT and handing over to the
   /// retry policy.  0 disables the watchdog.
   @ffi.Uint32()
   external int sip_timer_f_ms;
@@ -3138,11 +3138,11 @@ final class echosdk_config_t extends ffi.Struct {
 
   /// ── Quality / observability ─────────────────────────────────── */
   /// /**
-  /// ECHOSDK_EV_MEDIA_STATS poll interval in ms.  Default 2000; 0 disables.
+  /// MEDUT_EV_MEDIA_STATS poll interval in ms.  Default 2000; 0 disables.
   ///
   /// This is also the master switch for RTCP accounting
   /// (baresip `avt.rtp_stats`), so with 0 the loss/jitter/RTT/MOS fields
-  /// read back as zero from echosdk_call_get_stats() too, and every
+  /// read back as zero from medut_call_get_stats() too, and every
   /// feature derived from them — quality alerts, media-stall detection and
   /// adaptive bitrate — is inert.
   @ffi.Uint32()
@@ -3172,11 +3172,11 @@ final class echosdk_config_t extends ffi.Struct {
   /// exist on Android and $TMPDIR is not reliably set from native code.
   external ffi.Pointer<ffi.Char> tmp_dir;
 
-  /// emit ECHOSDK_EV_SIP_TRACE per message
+  /// emit MEDUT_EV_SIP_TRACE per message
   @ffi.Bool()
   external bool trace_sip;
 
-  /// emit ECHOSDK_EV_SDP_NEGOTIATION
+  /// emit MEDUT_EV_SDP_NEGOTIATION
   @ffi.Bool()
   external bool trace_sdp_diff;
 
@@ -3188,12 +3188,12 @@ final class echosdk_config_t extends ffi.Struct {
   external int log_level;
 
   /// required
-  external echosdk_event_cb_t event_cb;
+  external medut_event_cb_t event_cb;
 
   external ffi.Pointer<ffi.Void> event_userdata;
 
   /// Interface poll interval in seconds; 0 disables polling.
-  /// Default 10.  Set 0 on mobile and call echosdk_network_changed().
+  /// Default 10.  Set 0 on mobile and call medut_network_changed().
   @ffi.Uint32()
   external int net_monitor_interval_s;
 
@@ -3233,7 +3233,7 @@ final class echosdk_config_t extends ffi.Struct {
   /// for the duration of the callback (the historical contract).
   ///
   /// true: event_cb receives a heap-owned clone of the event; the
-  /// consumer MUST call echosdk_event_release(ev) exactly once when
+  /// consumer MUST call medut_event_release(ev) exactly once when
   /// done — which may be after the callback has returned.  Required
   /// for bindings that dispatch events asynchronously, e.g. Dart's
   /// NativeCallable.listener, where the callback body runs on the
@@ -3251,11 +3251,11 @@ final class echosdk_config_t extends ffi.Struct {
 
   /// ── Platform audio session activation (iOS) ──────────────────
   ///
-  /// Whether echosdk_init() activates the platform audio session it
+  /// Whether medut_init() activates the platform audio session it
   /// configures.  Only iOS has one; every other platform ignores this.
   ///
   /// true (default): configure the AVAudioSession (PlayAndRecord +
-  /// VoiceChat) and activate it during echosdk_init().  Right for an
+  /// VoiceChat) and activate it during medut_init().  Right for an
   /// app that owns audio outright and has no CallKit.
   ///
   /// false: configure category, mode and options, but do NOT call
@@ -3276,7 +3276,7 @@ final class echosdk_config_t extends ffi.Struct {
   ///
   /// Maps to baresip's `avt.rtp_timeout`.  This is the hard, fatal bound:
   /// the stream is closed with ETIMEDOUT and the call ends with
-  /// ECHOSDK_ERR_TIMEOUT.  Only sendrecv streams are checked, so a held
+  /// MEDUT_ERR_TIMEOUT.  Only sendrecv streams are checked, so a held
   /// call is never torn down by it.
   ///
   /// Left off by default because ending a call is destructive and some
@@ -3289,7 +3289,7 @@ final class echosdk_config_t extends ffi.Struct {
   /// Warn after this many ms without inbound RTP.  Default 4000; 0 = off.
   ///
   /// Non-fatal counterpart to `rtp_timeout_s`, evaluated on the stats tick:
-  /// fires ECHOSDK_QUALITY_MEDIA_STALL when inbound RTP stops advancing and
+  /// fires MEDUT_QUALITY_MEDIA_STALL when inbound RTP stops advancing and
   /// again with `recovering` = true when it resumes.  This is what turns
   /// "the user says they can't hear anything" into an event — a stall that
   /// is not accompanied by an address change is invisible to handover and,
@@ -3389,7 +3389,7 @@ final class echosdk_config_t extends ffi.Struct {
   external bool dns_srv_failover;
 
   /// How to treat an ICE call that could not be re-gathered on handover.
-  /// Default BEST_EFFORT.  See echosdk_ice_handover_t — an ICE call is
+  /// Default BEST_EFFORT.  See medut_ice_handover_t — an ICE call is
   /// normally migrated with a full ICE restart, and this does not apply to
   /// those.
   @ffi.Int32()
@@ -3402,7 +3402,7 @@ final class echosdk_config_t extends ffi.Struct {
   /// placed — it is sent later, when the ICE stack reports that it has
   /// finished gathering candidates.  Nothing in that stack bounds how long
   /// that takes, and one path never reports at all, so an outgoing call
-  /// could sit in ECHOSDK_CALL_CALLING forever with no SIP message ever
+  /// could sit in MEDUT_CALL_CALLING forever with no SIP message ever
   /// reaching the wire and no event to say so.
   ///
   /// This is the bound.  When it expires the offer is released with
@@ -3435,8 +3435,8 @@ final class echosdk_config_t extends ffi.Struct {
   /// stun_server / turn_server fields above (TURN first).  Each server is
   /// resolved and asked on every gather, including the re-gather of an
   /// ICE restart, so credentials changed through
-  /// echosdk_account_set_ice_servers() reach the next restart.
-  external ffi.Pointer<echosdk_ice_server_t> ice_servers;
+  /// medut_account_set_ice_servers() reach the next restart.
+  external ffi.Pointer<medut_ice_server_t> ice_servers;
 
   @ffi.Uint32()
   external int ice_server_count;
@@ -3451,30 +3451,30 @@ final class echosdk_config_t extends ffi.Struct {
   /// interfaces are never used).  A handover then offers candidates that
   /// already exist instead of waiting on a fresh gather.  On Android the
   /// extra interface must be known through
-  /// echosdk_network_set_interface_handle(); the Flutter plugin does that
+  /// medut_network_set_interface_handle(); the Flutter plugin does that
   /// and turns this on.  Default false.
   @ffi.Bool()
   external bool ice_multipath;
 }
 
-typedef echosdk_aec_mode_t = ffi.Uint8;
-typedef Dartechosdk_aec_mode_t = int;
+typedef medut_aec_mode_t = ffi.Uint8;
+typedef Dartmedut_aec_mode_t = int;
 
-/// Event callback — fired from EchoSDK's event dispatch thread, never from
-/// re_main. Calling EchoSDK APIs from inside the callback is safe: the
+/// Event callback — fired from Medut's event dispatch thread, never from
+/// re_main. Calling Medut APIs from inside the callback is safe: the
 /// dispatch thread exists precisely so a consumer can re-enter without
 /// deadlocking the SIP loop. Keep it fast (< 10 ms) — the callback runs
 /// inline with the event queue, so a slow handler backs the queue up. Hand
 /// heavy work (recording, transcription, UI) to your own thread.
-typedef echosdk_event_cb_t
-    = ffi.Pointer<ffi.NativeFunction<echosdk_event_cb_tFunction>>;
-typedef echosdk_event_cb_tFunction = ffi.Void Function(
-    ffi.Pointer<echosdk_event_t> ev, ffi.Pointer<ffi.Void> userdata);
-typedef Dartechosdk_event_cb_tFunction = void Function(
-    ffi.Pointer<echosdk_event_t> ev, ffi.Pointer<ffi.Void> userdata);
+typedef medut_event_cb_t
+    = ffi.Pointer<ffi.NativeFunction<medut_event_cb_tFunction>>;
+typedef medut_event_cb_tFunction = ffi.Void Function(
+    ffi.Pointer<medut_event_t> ev, ffi.Pointer<ffi.Void> userdata);
+typedef Dartmedut_event_cb_tFunction = void Function(
+    ffi.Pointer<medut_event_t> ev, ffi.Pointer<ffi.Void> userdata);
 
 /// ── Account config ─────────────────────────────────────────────────────────
-final class echosdk_account_config_t extends ffi.Struct {
+final class medut_account_config_t extends ffi.Struct {
   /// Login URI — who you are and where the server is.
   /// Accepted forms:
   /// "user@host"            →  AOR sip:user@host, server = host:default_port
@@ -3486,7 +3486,7 @@ final class echosdk_account_config_t extends ffi.Struct {
   /// digest auth password — required
   external ffi.Pointer<ffi.Char> password;
 
-  /// SIP transport protocol.  Defaults to ECHOSDK_TRANSPORT_UDP (0).
+  /// SIP transport protocol.  Defaults to MEDUT_TRANSPORT_UDP (0).
   /// Ignored when server_url is set (transport is derived from the URL scheme).
   @ffi.Int32()
   external int transport;
@@ -3510,7 +3510,7 @@ final class echosdk_account_config_t extends ffi.Struct {
   /// NULL = omit
   external ffi.Pointer<ffi.Char> display_name;
 
-  /// ECHOSDK_MEDIA_ENC_NONE / SDES / DTLS_SRTP
+  /// MEDUT_MEDIA_ENC_NONE / SDES / DTLS_SRTP
   @ffi.Int32()
   external int media_enc;
 
@@ -3557,7 +3557,7 @@ final class echosdk_account_config_t extends ffi.Struct {
   ///
   /// The host app is responsible for obtaining the OS push token
   /// (PKPushRegistry on iOS, FirebaseMessaging on Android) and passing it
-  /// here before calling echosdk_account_register().
+  /// here before calling medut_account_register().
   @ffi.Int32()
   external int push_provider;
 
@@ -3578,8 +3578,8 @@ final class echosdk_account_config_t extends ffi.Struct {
   /// When audio_codec_count == 0 (default), the global list is used.
   ///
   /// Example — prefer PCMU, fall back to Opus:
-  /// cfg.audio_codecs[0]   = ECHOSDK_CODEC_PCMU;
-  /// cfg.audio_codecs[1]   = ECHOSDK_CODEC_OPUS;
+  /// cfg.audio_codecs[0]   = MEDUT_CODEC_PCMU;
+  /// cfg.audio_codecs[1]   = MEDUT_CODEC_OPUS;
   /// cfg.audio_codec_count = 2;
   @ffi.Array.multi([8])
   external ffi.Array<ffi.Int32> audio_codecs;
@@ -3596,14 +3596,14 @@ final class echosdk_account_config_t extends ffi.Struct {
   @ffi.Int()
   external int audio_codec_name_count;
 
-  /// default ECHOSDK_DTMF_RFC4733 (0)
+  /// default MEDUT_DTMF_RFC4733 (0)
   @ffi.Int32()
   external int dtmf_mode;
 
   /// ── ICE servers (append-only ABI) ─────────────────────────────────── */
   /// /** Per-account STUN/TURN list and policy; NULL / 0 = inherit the global
-  /// list, then the legacy single-server fields.  See echosdk_config_t.
-  external ffi.Pointer<echosdk_ice_server_t> ice_servers;
+  /// list, then the legacy single-server fields.  See medut_config_t.
+  external ffi.Pointer<medut_ice_server_t> ice_servers;
 
   @ffi.Uint32()
   external int ice_server_count;
@@ -3612,24 +3612,24 @@ final class echosdk_account_config_t extends ffi.Struct {
   external int ice_transport_policy;
 }
 
-/// Called once per live account by echosdk_account_foreach().
-typedef echosdk_account_iter_fn
-    = ffi.Pointer<ffi.NativeFunction<echosdk_account_iter_fnFunction>>;
-typedef echosdk_account_iter_fnFunction = ffi.Void Function(
-    echosdk_account_handle_t acct, ffi.Pointer<ffi.Void> arg);
-typedef Dartechosdk_account_iter_fnFunction = void Function(
-    echosdk_account_handle_t acct, ffi.Pointer<ffi.Void> arg);
+/// Called once per live account by medut_account_foreach().
+typedef medut_account_iter_fn
+    = ffi.Pointer<ffi.NativeFunction<medut_account_iter_fnFunction>>;
+typedef medut_account_iter_fnFunction = ffi.Void Function(
+    medut_account_handle_t acct, ffi.Pointer<ffi.Void> arg);
+typedef Dartmedut_account_iter_fnFunction = void Function(
+    medut_account_handle_t acct, ffi.Pointer<ffi.Void> arg);
 
-/// Called once per active call by echosdk_call_foreach().
-typedef echosdk_call_iter_fn
-    = ffi.Pointer<ffi.NativeFunction<echosdk_call_iter_fnFunction>>;
-typedef echosdk_call_iter_fnFunction = ffi.Void Function(
-    echosdk_call_handle_t call, ffi.Pointer<ffi.Void> arg);
-typedef Dartechosdk_call_iter_fnFunction = void Function(
-    echosdk_call_handle_t call, ffi.Pointer<ffi.Void> arg);
+/// Called once per active call by medut_call_foreach().
+typedef medut_call_iter_fn
+    = ffi.Pointer<ffi.NativeFunction<medut_call_iter_fnFunction>>;
+typedef medut_call_iter_fnFunction = ffi.Void Function(
+    medut_call_handle_t call, ffi.Pointer<ffi.Void> arg);
+typedef Dartmedut_call_iter_fnFunction = void Function(
+    medut_call_handle_t call, ffi.Pointer<ffi.Void> arg);
 
 /// ── Audio device enumeration ───────────────────────────────────────────────
-final class echosdk_audio_device_t extends ffi.Struct {
+final class medut_audio_device_t extends ffi.Struct {
   /// device name passed to set_input/output_device
   @ffi.Array.multi([128])
   external ffi.Array<ffi.Char> name;
@@ -3645,10 +3645,10 @@ final class echosdk_audio_device_t extends ffi.Struct {
 
 /// Media tap callback — fired from the audio thread on each audio frame.
 /// Must be non-blocking. Copy PCM data if you need it beyond the callback.
-typedef echosdk_media_tap_cb_t
-    = ffi.Pointer<ffi.NativeFunction<echosdk_media_tap_cb_tFunction>>;
-typedef echosdk_media_tap_cb_tFunction = ffi.Void Function(
-    echosdk_call_handle_t call,
+typedef medut_media_tap_cb_t
+    = ffi.Pointer<ffi.NativeFunction<medut_media_tap_cb_tFunction>>;
+typedef medut_media_tap_cb_tFunction = ffi.Void Function(
+    medut_call_handle_t call,
     ffi.Int32 direction,
     ffi.Pointer<ffi.Int16> pcm,
     ffi.Size samples,
@@ -3656,8 +3656,8 @@ typedef echosdk_media_tap_cb_tFunction = ffi.Void Function(
     ffi.Uint8 channels,
     ffi.Uint64 timestamp_us,
     ffi.Pointer<ffi.Void> userdata);
-typedef Dartechosdk_media_tap_cb_tFunction = void Function(
-    echosdk_call_handle_t call,
+typedef Dartmedut_media_tap_cb_tFunction = void Function(
+    medut_call_handle_t call,
     int direction,
     ffi.Pointer<ffi.Int16> pcm,
     int samples,
@@ -3667,13 +3667,13 @@ typedef Dartechosdk_media_tap_cb_tFunction = void Function(
     ffi.Pointer<ffi.Void> userdata);
 
 /// Static and slow-moving facts about a call, as opposed to the per-tick media
-/// numbers in echosdk_call_get_stats().
+/// numbers in medut_call_get_stats().
 ///
 /// Strings are fixed arrays rather than pointers so the whole struct is a value
 /// the caller owns: nothing here can dangle when the call ends, and every
 /// binding can copy it without a lifetime rule. Unavailable fields read as an
 /// empty string or 0.
-final class echosdk_call_info_t extends ffi.Struct {
+final class medut_call_info_t extends ffi.Struct {
   /// far end AoR
   @ffi.Array.multi([256])
   external ffi.Array<ffi.Char> peer_uri;
@@ -3705,7 +3705,7 @@ final class echosdk_call_info_t extends ffi.Struct {
   external bool is_outgoing;
 
   /// True when the PEER has put us on hold. Local hold — the hold this
-  /// app asked for — is echosdk_call_is_held(); the two are independent
+  /// app asked for — is medut_call_is_held(); the two are independent
   /// and can both be true.
   @ffi.Bool()
   external bool is_remote_hold;
@@ -3736,16 +3736,16 @@ final class echosdk_call_info_t extends ffi.Struct {
   external int state;
 }
 
-const int ECHOSDK_VERSION_MAJOR = 1;
+const int MEDUT_VERSION_MAJOR = 1;
 
-const int ECHOSDK_VERSION_MINOR = 0;
+const int MEDUT_VERSION_MINOR = 0;
 
-const int ECHOSDK_VERSION_PATCH = 0;
+const int MEDUT_VERSION_PATCH = 0;
 
-const int ECHOSDK_AEC_OFF = 0;
+const int MEDUT_AEC_OFF = 0;
 
-const int ECHOSDK_AEC_SUPPRESSOR = 1;
+const int MEDUT_AEC_SUPPRESSOR = 1;
 
-const int ECHOSDK_AEC_WEBRTC = 2;
+const int MEDUT_AEC_WEBRTC = 2;
 
-const int ECHOSDK_CONFIG_VERSION = 1;
+const int MEDUT_CONFIG_VERSION = 1;

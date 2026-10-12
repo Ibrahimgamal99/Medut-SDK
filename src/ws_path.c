@@ -6,7 +6,7 @@
  * configured path before the HTTP upgrade request is sent.
  *
  * Additionally, we inject the configured Origin header and any extra
- * WebSocket headers (ws_origin / ws_extra_headers from echosdk_config_t),
+ * WebSocket headers (ws_origin / ws_extra_headers from medut_config_t),
  * and override the keepalive interval (ws_keepalive_ms).
  *
  * Interposition mechanism (every platform, no linker flags): the libre build
@@ -22,7 +22,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Path substituted into every outbound WS connect, derived from the live
  * accounts by ws_recompute().  Empty means no substitution — libre's trailing
@@ -75,13 +75,13 @@ static uint64_t ws_srv_seq;
  * can be trusted — stay out of the way entirely. */
 static bool ws_srv_overflow;
 
-static void ws_origin(char *buf, size_t sz, echosdk_transport_t tp,
+static void ws_origin(char *buf, size_t sz, medut_transport_t tp,
                       const char *host, uint16_t port)
 {
 	bool ipv6 = strchr(host, ':') != NULL;
 
 	re_snprintf(buf, sz, ipv6 ? "%s://[%s]:%u" : "%s://%s:%u",
-	            tp == ECHOSDK_TRANSPORT_WSS ? "wss" : "ws", host, port);
+	            tp == MEDUT_TRANSPORT_WSS ? "wss" : "ws", host, port);
 }
 
 static struct ws_server *ws_find(const char *origin, const char *path)
@@ -132,7 +132,7 @@ static void ws_recompute(void)
 		ws_srv_overflow = false;
 }
 
-void bsdk_ws_set_server(echosdk_transport_t tp, const char *host,
+void bsdk_ws_set_server(medut_transport_t tp, const char *host,
                         uint16_t port, const char *path)
 {
 	char origin[288];
@@ -159,7 +159,7 @@ void bsdk_ws_set_server(echosdk_transport_t tp, const char *host,
 		}
 	}
 	if (!free_slot) {
-		warning("EchoSDK: more than %zu WebSocket servers in one "
+		warning("Medut: more than %zu WebSocket servers in one "
 		        "process; connection pinning disabled\n",
 		        RE_ARRAY_SIZE(ws_srvv));
 		ws_srv_overflow = true;
@@ -175,7 +175,7 @@ void bsdk_ws_set_server(echosdk_transport_t tp, const char *host,
 	ws_recompute();
 }
 
-void bsdk_ws_unset_server(echosdk_transport_t tp, const char *host,
+void bsdk_ws_unset_server(medut_transport_t tp, const char *host,
                           uint16_t port, const char *path)
 {
 	char origin[288];
@@ -342,7 +342,7 @@ int websock_connect(struct websock_conn **connp, struct websock *sock,
 			int r = re_snprintf(patched, sizeof(patched), "%s%s",
 			                    rescue->origin, path);
 			if (r > 0) {
-				warning("EchoSDK: WebSocket connect to '%s' cannot "
+				warning("Medut: WebSocket connect to '%s' cannot "
 				        "reach a server; sending to '%s' instead "
 				        "(several WS servers are configured — pin "
 				        "one by destroying unused accounts)\n",
@@ -368,7 +368,7 @@ int websock_connect(struct websock_conn **connp, struct websock *sock,
 		}
 	}
 
-	debug("EchoSDK: ws connect '%s' -> '%s' (pin='%s' path='%s')\n",
+	debug("Medut: ws connect '%s' -> '%s' (pin='%s' path='%s')\n",
 	      uri ? uri : "(null)", use_uri ? use_uri : "(null)",
 	      g_bsdk_ws_server, g_bsdk_ws_path);
 
@@ -544,7 +544,7 @@ const struct uri *bsdk_ws_route_override(const struct uri *route)
 	    route->port == s_route_uri.port)
 		return route;   /* already the flow — nothing to do */
 
-	debug("EchoSDK: ws in-dialog route %r:%u is not the registration flow;"
+	debug("Medut: ws in-dialog route %r:%u is not the registration flow;"
 	      " routing over %r:%u instead (RFC 7118 B.2)\n",
 	      &route->host, route->port,
 	      &s_route_uri.host, s_route_uri.port);

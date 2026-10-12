@@ -1,4 +1,4 @@
-# EchoSDK
+# Medut
 
 A general-purpose SIP client SDK built on [baresip](https://github.com/baresip/baresip)
 and [libre](https://github.com/baresip/re). It registers against any
@@ -27,13 +27,13 @@ everything app-specific is configuration you pass in.
 
 | Platform | Architecture | TLS backend | Shared lib output |
 |---|---|---|---|
-| Linux | x86_64 | OpenSSL (embedded) | `dist/linux/x86_64/echosdk.so` |
-| macOS | x86_64 + arm64 (universal) | OpenSSL (embedded) | `dist/macos/universal/echosdk.dylib` |
-| Windows | x64 | OpenSSL (embedded via vcpkg) | `dist\windows\x64\echosdk.dll` |
-| Android | arm64-v8a, armeabi-v7a, x86_64 | mbedTLS (embedded) | `dist/android/<ABI>/echosdk.so` |
-| iOS | device + simulator | mbedTLS (embedded) | `dist/ios/EchoSDK.xcframework` |
+| Linux | x86_64 | OpenSSL (embedded) | `dist/linux/x86_64/medut.so` |
+| macOS | x86_64 + arm64 (universal) | OpenSSL (embedded) | `dist/macos/universal/medut.dylib` |
+| Windows | x64 | OpenSSL (embedded via vcpkg) | `dist\windows\x64\medut.dll` |
+| Android | arm64-v8a, armeabi-v7a, x86_64 | mbedTLS (embedded) | `dist/android/<ABI>/medut.so` |
+| iOS | device + simulator | mbedTLS (embedded) | `dist/ios/Medut.xcframework` |
 
-Each platform build script produces both the static archive (`echosdk.a` / `bare.lib`) and the shared library in one step. Shared libraries are **fully self-contained** — consumers need no extra packages at runtime.
+Each platform build script produces both the static archive (`medut.a` / `bare.lib`) and the shared library in one step. Shared libraries are **fully self-contained** — consumers need no extra packages at runtime.
 
 ---
 
@@ -41,7 +41,7 @@ Each platform build script produces both the static archive (`echosdk.a` / `bare
 
 | Language | Binding | Location |
 |---|---|---|
-| C / C++ | Header-only RAII wrapper | `bindings/cpp/echosdk.hpp` |
+| C / C++ | Header-only RAII wrapper | `bindings/cpp/medut.hpp` |
 | Python | cffi | `bindings/python/` |
 | Flutter / Dart | dart:ffi + ffigen | `bindings/flutter/` |
 
@@ -77,30 +77,30 @@ all three languages side by side.
 
 ---
 
-## Dial refusals (Echo convention)
+## Dial refusals
 
-The Echo dialplan refuses a call the caller is not allowed to place with
-**403 Forbidden**, which the SDK reports as `ECHOSDK_ERR_FORBIDDEN` on
-`ECHOSDK_EV_CALL_STATE` / `FAILED`. It is not `ECHOSDK_ERR_AUTH`: the account
+A PBX dialplan typically refuses a call the caller is not allowed to place with
+**403 Forbidden**, which the SDK reports as `MEDUT_ERR_FORBIDDEN` on
+`MEDUT_EV_CALL_STATE` / `FAILED`. It is not `MEDUT_ERR_AUTH`: the account
 is registered and its credentials are fine, so the app should say something
-like *"Not allowed to call"* and never a login prompt. (`ECHOSDK_ERR_AUTH` is
+like *"Not allowed to call"* and never a login prompt. (`MEDUT_ERR_AUTH` is
 still what 401 and 407 produce, and what a registration rejected with 403
 produces — there the account itself was refused.)
 
 403 carries no room for an explanation the user can read, so the reason travels
 separately. **Today it does not travel over SIP at all**: the dialplan emits a
-`dial_blocked` event, which reaches the app over Echo's own websocket, outside
-the SDK. An app on the SDK therefore has the refusal but not yet its reason,
+`dial_blocked` event, which reaches the app over the backend's own websocket,
+outside the SDK. An app on the SDK therefore has the refusal but not yet its reason,
 and should show the generic text until the websocket event arrives.
 
 **Planned:** the dialplan also sends a SIP MESSAGE from
 `sip:echo-dial-blocked@<pbx>`, addressed to the device that dialled so that a
 web and a mobile client on one extension do not receive each other's messages.
 That needs nothing new from the SDK when it lands — it arrives as
-`ECHOSDK_EV_MESSAGE`, with `from_uri` naming the sender and `body` holding the
+`MEDUT_EV_MESSAGE`, with `from_uri` naming the sender and `body` holding the
 text — so an app can be written against it now:
 
-- On `FAILED` with `ECHOSDK_ERR_FORBIDDEN`, show the generic refusal.
+- On `FAILED` with `MEDUT_ERR_FORBIDDEN`, show the generic refusal.
 - On a message from `echo-dial-blocked@…`, show its body as the reason,
   replacing the generic text if the failure has already been shown, or keeping
   it ready for the failure that is about to arrive. The two are independent and

@@ -28,7 +28,7 @@
 #include <time.h>
 #include <re.h>
 #include <baresip.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 struct bsdk_ctx g_bsdk;
 
@@ -194,9 +194,9 @@ static void test_dispatch_after_stop_fails_fast(void)
 	bsdk_re_loop_stop();
 
 	t0 = now_ms();
-	CHECK(bsdk_dispatch(mark_fn, (void *)&hit) == ECHOSDK_ERR_STATE,
+	CHECK(bsdk_dispatch(mark_fn, (void *)&hit) == MEDUT_ERR_STATE,
 	      "async dispatch after stop did not return ERR_STATE");
-	CHECK(bsdk_dispatch_sync(mark_fn, (void *)&hit) == ECHOSDK_ERR_STATE,
+	CHECK(bsdk_dispatch_sync(mark_fn, (void *)&hit) == MEDUT_ERR_STATE,
 	      "sync dispatch after stop did not return ERR_STATE");
 	dt = now_ms() - t0;
 

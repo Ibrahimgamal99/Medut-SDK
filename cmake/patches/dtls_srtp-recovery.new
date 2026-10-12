@@ -1,10 +1,10 @@
-/* EchoSDK-patched: drop an association so it can be started again.
+/* Medut-patched: drop an association so it can be started again.
  *
  * Everything the handshake owns goes: the srtp streams and the udp helper are
  * keyed to the master secret being abandoned, and component_start() returns
  * early while `negotiated` or `dtls_sock` is still set.  app_sock stays — the
  * stream owns it, and the replacement association re-listens on it. */
-static void echosdk_media_reset(struct dtls_srtp *st)
+static void medut_media_reset(struct dtls_srtp *st)
 {
 	size_t i;
 
@@ -23,8 +23,8 @@ static void echosdk_media_reset(struct dtls_srtp *st)
 }
 
 
-static void echosdk_handshake_deadline(void *arg);
-static uint32_t echosdk_handshake_ms(unsigned restarts);
+static void medut_handshake_deadline(void *arg);
+static uint32_t medut_handshake_ms(unsigned restarts);
 
 
 static int media_start(struct dtls_srtp *st, struct sdp_media *sdpm,
@@ -52,36 +52,36 @@ static int media_start(struct dtls_srtp *st, struct sdp_media *sdpm,
 
 	st->started = true;
 
-	/* EchoSDK-patched: remember where this attempt was aimed, so a restart
+	/* Medut-patched: remember where this attempt was aimed, so a restart
 	 * can be aimed at the same place without another offer/answer. */
 	if (raddr_rtp)
 		sa_cpy(&st->raddr_rtp, raddr_rtp);
 	if (raddr_rtcp)
 		sa_cpy(&st->raddr_rtcp, raddr_rtcp);
 
-	/* EchoSDK-patched: nothing else ever revisits a handshake that does not
+	/* Medut-patched: nothing else ever revisits a handshake that does not
 	 * complete.  Without this the call stays up, silent, forever. */
-	tmr_start(&st->tmr_hs, echosdk_handshake_ms(st->hs_restarts),
-		  echosdk_handshake_deadline, st);
+	tmr_start(&st->tmr_hs, medut_handshake_ms(st->hs_restarts),
+		  medut_handshake_deadline, st);
 
 	return 0;
 }
 
 
-/* EchoSDK-patched: how long to wait on the attempt after `restarts` restarts. */
-static uint32_t echosdk_handshake_ms(unsigned restarts)
+/* Medut-patched: how long to wait on the attempt after `restarts` restarts. */
+static uint32_t medut_handshake_ms(unsigned restarts)
 {
-	return restarts ? ECHOSDK_DTLS_HANDSHAKE_LATER_MS
-			: ECHOSDK_DTLS_HANDSHAKE_MS;
+	return restarts ? MEDUT_DTLS_HANDSHAKE_LATER_MS
+			: MEDUT_DTLS_HANDSHAKE_MS;
 }
 
 
-/* EchoSDK-patched: the handshake did not finish in time — restart it.
+/* Medut-patched: the handshake did not finish in time — restart it.
  *
  * Bounded: a peer that never answers must not be retried for the life of the
  * call.  After the last attempt the call is left as it was, which is exactly
  * what the module did after the first attempt before this patch. */
-static void echosdk_handshake_deadline(void *arg)
+static void medut_handshake_deadline(void *arg)
 {
 	struct dtls_srtp *st = arg;
 	uint32_t waited;
@@ -89,7 +89,7 @@ static void echosdk_handshake_deadline(void *arg)
 	if (st->compv[0].negotiated)
 		return;
 
-	if (st->hs_restarts >= ECHOSDK_DTLS_MAX_RESTARTS) {
+	if (st->hs_restarts >= MEDUT_DTLS_MAX_RESTARTS) {
 		warning("dtls_srtp: handshake did not complete after %u"
 			" attempts — giving up (this call has no audio)\n",
 			st->hs_restarts + 1);
@@ -98,11 +98,11 @@ static void echosdk_handshake_deadline(void *arg)
 
 	/* The deadline that just expired is the one media_start() armed for the
 	 * attempt now ending, so read it before the counter moves. */
-	waited = echosdk_handshake_ms(st->hs_restarts);
+	waited = medut_handshake_ms(st->hs_restarts);
 
 	++st->hs_restarts;
 
-	/* EchoSDK-patched: on the last attempt, take the client role whatever
+	/* Medut-patched: on the last attempt, take the client role whatever
 	 * was negotiated.
 	 *
 	 * As the answerer we advertise `passive` (session_alloc) precisely so
@@ -115,7 +115,7 @@ static void echosdk_handshake_deadline(void *arg)
 	 * ClientHello on the way out cannot make it worse.  A peer that really
 	 * is the client ignores it, exactly as it has ignored our silence; a
 	 * peer that was waiting for one gets its call back. */
-	if (st->hs_restarts >= ECHOSDK_DTLS_MAX_RESTARTS && !st->active) {
+	if (st->hs_restarts >= MEDUT_DTLS_MAX_RESTARTS && !st->active) {
 		info("dtls_srtp: media=%s -- last attempt: taking the client"
 		     " role, the peer never connected\n",
 		     sdp_media_name(st->sdpm));
@@ -126,6 +126,6 @@ static void echosdk_handshake_deadline(void *arg)
 		" restarting the association as %s (attempt %u)\n",
 		waited, st->active ? "client" : "server", st->hs_restarts + 1);
 
-	echosdk_media_reset(st);
+	medut_media_reset(st);
 	(void)media_start(st, st->sdpm, &st->raddr_rtp, &st->raddr_rtcp);
 }

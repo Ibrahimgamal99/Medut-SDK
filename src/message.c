@@ -1,20 +1,20 @@
 /**
  * @file message.c  SIP MESSAGE — send and receive
  *
- * Send: echosdk_message_send() → bsdk_dispatch_sync → message_send()
+ * Send: medut_message_send() → bsdk_dispatch_sync → message_send()
  *       baresip's message_send() supports text/plain only; content_type
  *       parameter is accepted for API consistency but currently ignored.
  *
  * Receive: message_listen() registers a handler on the baresip message
- *          subsystem. Each incoming SIP MESSAGE fires ECHOSDK_EV_MESSAGE
+ *          subsystem. Each incoming SIP MESSAGE fires MEDUT_EV_MESSAGE
  *          via the event queue.
  *
  * Lifecycle: bsdk_message_init() is called from core.c after ua_init().
- *            bsdk_message_close() is called from echosdk_shutdown().
+ *            bsdk_message_close() is called from medut_shutdown().
  */
 
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* ── Incoming MESSAGE handler ────────────────────────────────────────────── */
 
@@ -24,14 +24,14 @@ static void message_recv_handler(struct ua *ua, const struct pl *peer,
 {
 	(void)arg;
 
-	struct echosdk_account *acct = bsdk_account_find_by_ua(ua);
+	struct medut_account *acct = bsdk_account_find_by_ua(ua);
 
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
-	qev->ev.type = ECHOSDK_EV_MESSAGE;
-	echosdk_ev_message_t *m = &qev->ev.u.msg;
+	qev->ev.type = MEDUT_EV_MESSAGE;
+	medut_ev_message_t *m = &qev->ev.u.msg;
 	m->account = acct;
 
 	/* Pack strings into buf: peer\0ctype\0body\0 */
@@ -68,7 +68,7 @@ static void message_recv_handler(struct ua *ua, const struct pl *peer,
 /* ── Send ────────────────────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_account *acct;
+	struct medut_account *acct;
 	const char             *to_uri;
 	const char             *body;
 	int                     result;
@@ -79,17 +79,17 @@ static void send_msg_fn(void *arg)
 	send_msg_ctx_t *ctx = arg;
 	if (!ctx->acct->ua) { ctx->result = ENOENT; return; }
 	/* baresip message_send uses text/plain; custom content_type via
-	 * echosdk_message_send() is accepted for future use */
+	 * medut_message_send() is accepted for future use */
 	ctx->result = message_send(ctx->acct->ua, ctx->to_uri,
 	                           ctx->body, NULL, NULL);
 }
 
-int echosdk_message_send(echosdk_account_handle_t account,
+int medut_message_send(medut_account_handle_t account,
                           const char *to_uri,
                           const char *body,
                           const char *content_type)
 {
-	if (!account || !to_uri || !body) return ECHOSDK_ERR_INVAL;
+	if (!account || !to_uri || !body) return MEDUT_ERR_INVAL;
 	(void)content_type; /* currently always text/plain */
 	send_msg_ctx_t ctx = {.acct = account, .to_uri = to_uri,
 	                       .body = body, .result = 0};

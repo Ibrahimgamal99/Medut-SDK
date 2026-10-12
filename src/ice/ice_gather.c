@@ -1,5 +1,5 @@
 /**
- * @file ice_gather.c  echo-ice: candidate gathering
+ * @file ice_gather.c  medut-ice: candidate gathering
  *
  * RFC 8445 §5.1.1.  For every port the generation owns: a host candidate;
  * one server-reflexive request per configured STUN/TURN server, raced —
@@ -182,7 +182,7 @@ static int gather_srflx(struct icea_gen *gen, struct icea_port *port,
 	err = stun_request(&port->ct_gath, gen->stun, IPPROTO_UDP, port->us,
 			   &srv->addr, 0, STUN_METHOD_BINDING, NULL, 0, false,
 			   srflx_resp_handler, port, 1,
-			   STUN_ATTR_SOFTWARE, "EchoSDK echo-ice");
+			   STUN_ATTR_SOFTWARE, "Medut medut-ice");
 	if (err)
 		return err;
 

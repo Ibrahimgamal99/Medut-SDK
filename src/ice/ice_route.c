@@ -1,5 +1,5 @@
 /**
- * @file ice_route.c  echo-ice: receive path and STUN demultiplexing
+ * @file ice_route.c  medut-ice: receive path and STUN demultiplexing
  *
  * Every datagram that reaches one of the agent's own ports comes here.
  * STUN is told apart from data by the RFC 5389 rules (first two bits zero,

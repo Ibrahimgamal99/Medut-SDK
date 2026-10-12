@@ -22,7 +22,7 @@
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 /* ws_path.c reads g_bsdk.cfg for ws_origin / ws_extra_headers / keepalive;
  * core.c is not linked in, so own the definition here. */
@@ -94,7 +94,7 @@ static const char *connect_to(const char *uri)
 
 static void test_single_server(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                   "/ws");
 
 	CHECK(!strcmp(g_bsdk_ws_server, "wss://pbx.example.com:443"),
@@ -112,7 +112,7 @@ static void test_single_server(void)
 	              "wss://pbx.example.com:443/ws"),
 	      "pinned connect went to '%s'", g_used);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                     "/ws");
 	CHECK(!g_bsdk_ws_server[0], "pin survived destroy: '%s'",
 	      g_bsdk_ws_server);
@@ -125,8 +125,8 @@ static void test_single_server(void)
  * behind by the app disabled pinning for every later call in the process. */
 static void test_stale_account_releases_pin(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "typo.example.com", 443, "");
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443, "");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "typo.example.com", 443, "");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "");
 
 	CHECK(!g_bsdk_ws_server[0], "pinned to '%s' with two servers live",
 	      g_bsdk_ws_server);
@@ -142,31 +142,31 @@ static void test_stale_account_releases_pin(void)
 	              "wss://pbx.example.com:443/"),
 	      "dead target went to '%s'", g_used);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "typo.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "typo.example.com", 443,
 	                     "");
 	CHECK(!strcmp(g_bsdk_ws_server, "wss://pbx.example.com:443"),
 	      "pin after destroy is '%s'", g_bsdk_ws_server);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443, "");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "");
 }
 
 /* Same server twice (two accounts on one PBX) is not a conflict. */
 static void test_refcount_same_server(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                   "/ws");
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                   "/ws");
 
 	CHECK(!strcmp(g_bsdk_ws_server, "wss://pbx.example.com:443"),
 	      "pin is '%s'", g_bsdk_ws_server);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                     "/ws");
 	CHECK(!strcmp(g_bsdk_ws_server, "wss://pbx.example.com:443"),
 	      "one destroy dropped the pin: '%s'", g_bsdk_ws_server);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                     "/ws");
 	CHECK(!g_bsdk_ws_server[0], "pin is '%s' after both destroys",
 	      g_bsdk_ws_server);
@@ -175,8 +175,8 @@ static void test_refcount_same_server(void)
 /* Host ambiguous, path agreed: substituting the path is still correct. */
 static void test_path_survives_host_conflict(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "a.example.com", 443, "/ws");
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "b.example.com", 443, "/ws");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "a.example.com", 443, "/ws");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "b.example.com", 443, "/ws");
 
 	CHECK(!g_bsdk_ws_server[0], "pinned to '%s'", g_bsdk_ws_server);
 	CHECK(!strcmp(g_bsdk_ws_path, "/ws"), "path is '%s'", g_bsdk_ws_path);
@@ -184,15 +184,15 @@ static void test_path_survives_host_conflict(void)
 	              "wss://a.example.com:443/ws"),
 	      "path-only substitution gave '%s'", g_used);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "a.example.com", 443, "/ws");
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "b.example.com", 443, "/ws");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "a.example.com", 443, "/ws");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "b.example.com", 443, "/ws");
 }
 
 /* Paths disagree: substituting either one would break the other's handshake. */
 static void test_conflicting_paths_disable_substitution(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "a.example.com", 443, "/ws");
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "b.example.com", 443, "/sip");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "a.example.com", 443, "/ws");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "b.example.com", 443, "/sip");
 
 	CHECK(!g_bsdk_ws_path[0], "path is '%s' with two paths live",
 	      g_bsdk_ws_path);
@@ -200,8 +200,8 @@ static void test_conflicting_paths_disable_substitution(void)
 	              "wss://a.example.com:443/"),
 	      "path substituted anyway: '%s'", g_used);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "a.example.com", 443, "/ws");
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "b.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "a.example.com", 443, "/ws");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "b.example.com", 443,
 	                     "/sip");
 }
 
@@ -209,15 +209,15 @@ static void test_conflicting_paths_disable_substitution(void)
  * must not be "rescued" to somewhere else. */
 static void test_own_loopback_server_untouched(void)
 {
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WS, "127.0.0.1", 8088, "/ws");
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443, "");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WS, "127.0.0.1", 8088, "/ws");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "");
 
 	CHECK(!strcmp(connect_to("ws://127.0.0.1:8088/"),
 	              "ws://127.0.0.1:8088/"),
 	      "own loopback server rewritten to '%s'", g_used);
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WS, "127.0.0.1", 8088, "/ws");
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443, "");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WS, "127.0.0.1", 8088, "/ws");
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "");
 }
 
 /* Nothing registered (non-WS accounts only): pass everything through. */
@@ -262,7 +262,7 @@ static void test_indialog_route_follows_flow(void)
 {
 	const struct uri *r;
 
-	bsdk_ws_set_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443, "/ws");
+	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "/ws");
 
 	/* The failing case: Asterisk's own Contact, unroutable from here. */
 	r = route_for("sip:asterisk@echo:5060;transport=ws");
@@ -287,7 +287,7 @@ static void test_indialog_route_follows_flow(void)
 	CHECK(r != NULL && !pl_strcmp(&r->host, "proxy.example.com"),
 	      "a transport-less route was rerouted");
 
-	bsdk_ws_unset_server(ECHOSDK_TRANSPORT_WSS, "pbx.example.com", 443,
+	bsdk_ws_unset_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443,
 	                     "/ws");
 }
 

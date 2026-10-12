@@ -1,26 +1,26 @@
 /**
  * @file transfer.c  Blind + attended transfer (REFER / REFER w/ Replaces)
  *
- * Blind transfer   — echosdk_call_transfer() (in call.c)
+ * Blind transfer   — medut_call_transfer() (in call.c)
  *                    sends REFER with Refer-To: <uri>
  *
- * Attended transfer — echosdk_call_attended_transfer(call_a, call_b)
+ * Attended transfer — medut_call_attended_transfer(call_a, call_b)
  *                    sends REFER with Refer-To: <call_b_uri>;Replaces=...
  *                    baresip: call_replace_transfer(call_a->bc, call_b->bc)
  *
  * Incoming REFER   — BEVENT_CALL_TRANSFER fires with Refer-To URI in text.
  *                    If URI contains "?Replaces=" it is an attended transfer.
- *                    Surfaced as ECHOSDK_EV_TRANSFER_REQUEST.
+ *                    Surfaced as MEDUT_EV_TRANSFER_REQUEST.
  */
 
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* ── Attended transfer ───────────────────────────────────────────────────── */
 
 typedef struct {
-	struct echosdk_call *call_a;
-	struct echosdk_call *call_b;
+	struct medut_call *call_a;
+	struct medut_call *call_b;
 	int                  result;
 } atxfer_ctx_t;
 
@@ -34,10 +34,10 @@ static void attended_transfer_fn(void *arg)
 	ctx->result = call_replace_transfer(ctx->call_a->bc, ctx->call_b->bc);
 }
 
-int echosdk_call_attended_transfer(echosdk_call_handle_t call_a,
-                                    echosdk_call_handle_t call_b)
+int medut_call_attended_transfer(medut_call_handle_t call_a,
+                                    medut_call_handle_t call_b)
 {
-	if (!call_a || !call_b) return ECHOSDK_ERR_INVAL;
+	if (!call_a || !call_b) return MEDUT_ERR_INVAL;
 	atxfer_ctx_t ctx = {.call_a = call_a, .call_b = call_b, .result = 0};
 	int err = bsdk_dispatch_sync(attended_transfer_fn, &ctx);
 	return err ? err : ctx.result;
@@ -51,15 +51,15 @@ void bsdk_transfer_handle_event(struct bevent *event)
 	struct ua   *ua   = bevent_get_ua(event);
 	const char  *text = bevent_get_text(event);   /* Refer-To URI */
 
-	struct echosdk_call    *lc   = bc ? bsdk_call_find(bc)          : NULL;
-	struct echosdk_account *acct = ua ? bsdk_account_find_by_ua(ua) : NULL;
+	struct medut_call    *lc   = bc ? bsdk_call_find(bc)          : NULL;
+	struct medut_account *acct = ua ? bsdk_account_find_by_ua(ua) : NULL;
 
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	if (!qev)
 		return;
 
-	qev->ev.type = ECHOSDK_EV_TRANSFER_REQUEST;
-	echosdk_ev_transfer_req_t *tr = &qev->ev.u.transfer_req;
+	qev->ev.type = MEDUT_EV_TRANSFER_REQUEST;
+	medut_ev_transfer_req_t *tr = &qev->ev.u.transfer_req;
 	tr->call    = lc;
 	tr->account = acct;
 
@@ -82,7 +82,7 @@ void bsdk_transfer_handle_event(struct bevent *event)
 
 	/* Nothing follows this REFER unless the app says so.  baresip has
 	 * already sent 202 Accepted and NOTIFY 100 Trying and is now waiting on
-	 * us for the terminating NOTIFY — see echosdk_call_transfer_accept(). */
+	 * us for the terminating NOTIFY — see medut_call_transfer_accept(). */
 	tr->auto_followed = false;
 
 	bsdk_event_post_qev(qev);   /* warns and frees qev when the queue is full */
@@ -109,16 +109,16 @@ void bsdk_transfer_handle_event(struct bevent *event)
  */
 
 typedef struct {
-	struct echosdk_call  *lc;
-	struct echosdk_call **out;
+	struct medut_call  *lc;
+	struct medut_call **out;
 	int                   result;
 } xfer_accept_ctx_t;
 
 static void transfer_accept_fn(void *arg)
 {
 	xfer_accept_ctx_t *ctx = arg;
-	struct echosdk_call *lc = ctx->lc;
-	struct echosdk_call *new_lc = NULL;
+	struct medut_call *lc = ctx->lc;
+	struct medut_call *new_lc = NULL;
 	struct call *call2 = NULL;
 	struct pl pl;
 	int err;
@@ -131,7 +131,7 @@ static void transfer_accept_fn(void *arg)
 	if (!lc->xfer_pending || !lc->xfer_refer_to[0]) {
 		/* No REFER outstanding.  Distinct from a transfer that failed:
 		 * there is nothing to notify and nothing to dial. */
-		ctx->result = ECHOSDK_ERR_STATE;
+		ctx->result = MEDUT_ERR_STATE;
 		return;
 	}
 
@@ -140,7 +140,7 @@ static void transfer_accept_fn(void *arg)
 	err = ua_call_alloc(&call2, lc->acct->ua, VIDMODE_OFF, NULL, lc->bc,
 	                    call_localuri(lc->bc), true);
 	if (err) {
-		warning("EchoSDK/transfer: ua_call_alloc failed (%m)\n", err);
+		warning("Medut/transfer: ua_call_alloc failed (%m)\n", err);
 		(void)call_notify_sipfrag(lc->bc, 500, "Call Error");
 		lc->xfer_pending = false;
 		ctx->result = err;
@@ -157,7 +157,7 @@ static void transfer_accept_fn(void *arg)
 	/* Wrap before connecting: call_connect() can emit call events
 	 * synchronously, and event.c silently reports a NULL handle for a call
 	 * it has no wrapper for. */
-	new_lc = bsdk_call_wrap_new(call2, lc->acct, ECHOSDK_CALL_CALLING, true);
+	new_lc = bsdk_call_wrap_new(call2, lc->acct, MEDUT_CALL_CALLING, true);
 	if (!new_lc) {
 		(void)call_notify_sipfrag(lc->bc, 500, "Out of Memory");
 		mem_deref(call2);
@@ -169,7 +169,7 @@ static void transfer_accept_fn(void *arg)
 	pl_set_str(&pl, lc->xfer_refer_to);
 	err = call_connect(call2, &pl);
 	if (err) {
-		warning("EchoSDK/transfer: connect to '%s' failed (%m)\n",
+		warning("Medut/transfer: connect to '%s' failed (%m)\n",
 		        lc->xfer_refer_to, err);
 		/* Tell the transferor now.  Without this it waits out the
 		 * 60 s subscription believing the transfer may still land. */
@@ -199,11 +199,11 @@ static void transfer_accept_fn(void *arg)
 	ctx->result = 0;
 }
 
-int echosdk_call_transfer_accept(echosdk_call_handle_t call,
-                                 echosdk_call_handle_t *out)
+int medut_call_transfer_accept(medut_call_handle_t call,
+                                 medut_call_handle_t *out)
 {
 	if (!call)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	if (out)
 		*out = NULL;
@@ -214,7 +214,7 @@ int echosdk_call_transfer_accept(echosdk_call_handle_t call,
 }
 
 typedef struct {
-	struct echosdk_call *lc;
+	struct medut_call *lc;
 	uint16_t             scode;
 	char                 reason[128];
 	int                  result;
@@ -223,7 +223,7 @@ typedef struct {
 static void transfer_reject_fn(void *arg)
 {
 	xfer_reject_ctx_t *ctx = arg;
-	struct echosdk_call *lc = ctx->lc;
+	struct medut_call *lc = ctx->lc;
 
 	if (!lc->bc) {
 		ctx->result = ENOENT;
@@ -231,7 +231,7 @@ static void transfer_reject_fn(void *arg)
 	}
 
 	if (!lc->xfer_pending) {
-		ctx->result = ECHOSDK_ERR_STATE;
+		ctx->result = MEDUT_ERR_STATE;
 		return;
 	}
 
@@ -244,17 +244,17 @@ static void transfer_reject_fn(void *arg)
 	lc->xfer_pending = false;
 }
 
-int echosdk_call_transfer_reject(echosdk_call_handle_t call,
+int medut_call_transfer_reject(medut_call_handle_t call,
                                  uint16_t scode, const char *reason)
 {
 	if (!call)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	/* Below 200 the NOTIFY is a progress report and leaves the
 	 * subscription open, so the transferor would keep waiting — which is
 	 * the opposite of a refusal. */
 	if (scode < 400 || scode > 699)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	xfer_reject_ctx_t ctx = { .lc = call, .scode = scode, .result = 0 };
 	if (reason)

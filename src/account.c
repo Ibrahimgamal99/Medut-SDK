@@ -1,7 +1,7 @@
 /**
  * @file account.c  Multi-account registration FSM
  *
- * echosdk_account_t wraps a baresip ua. One UA per account.
+ * medut_account_t wraps a baresip ua. One UA per account.
  * Registration retry uses exponential backoff with jitter.
  * All string fields in the account config are deep-copied.
  */
@@ -9,11 +9,11 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 
 /* Post a non-fatal registrar warning.
  *
- * ECHOSDK_EV_REGISTRAR_WARNING has been declared in echosdk.h, cloned in
+ * MEDUT_EV_REGISTRAR_WARNING has been declared in medut.h, cloned in
  * event.c and decoded by every binding since the event set was written, but
  * nothing ever posted it — so the one channel meant to explain a registration
  * that is technically alive but behaving oddly delivered nothing, and the
@@ -27,7 +27,7 @@
  */
 static void post_registrar_warning(const char *fmt, ...)
 {
-	struct echosdk_queued_event *qev = bsdk_qev_alloc();
+	struct medut_queued_event *qev = bsdk_qev_alloc();
 	va_list ap;
 
 	if (!qev)
@@ -37,7 +37,7 @@ static void post_registrar_warning(const char *fmt, ...)
 	(void)re_vsnprintf(qev->buf, sizeof(qev->buf), fmt, ap);
 	va_end(ap);
 
-	qev->ev.type               = ECHOSDK_EV_REGISTRAR_WARNING;
+	qev->ev.type               = MEDUT_EV_REGISTRAR_WARNING;
 	qev->ev.u.reg_warn.message = qev->buf;
 	bsdk_event_post_qev(qev);   /* warns and frees on failure */
 }
@@ -115,9 +115,9 @@ static void parse_account_uri(const char *uri,
 
 /* ── Deep-copy helpers for account config ───────────────────────────────── */
 
-void bsdk_acct_cfg_deep_copy(echosdk_account_config_t *dst,
-                              const echosdk_account_config_t *src,
-                              struct echosdk_account *acct)
+void bsdk_acct_cfg_deep_copy(medut_account_config_t *dst,
+                              const medut_account_config_t *src,
+                              struct medut_account *acct)
 {
 	*dst = *src;
 	acct->cfg_uri         = bsdk_strdup(src->uri);
@@ -157,7 +157,7 @@ void bsdk_acct_cfg_deep_copy(echosdk_account_config_t *dst,
 	dst->ice_server_count = acct->ice_srvc;
 }
 
-void bsdk_acct_cfg_deep_free(struct echosdk_account *acct)
+void bsdk_acct_cfg_deep_free(struct medut_account *acct)
 {
 	mem_deref(acct->cfg_uri);          acct->cfg_uri = NULL;
 	mem_deref(acct->cfg_password);     acct->cfg_password = NULL;
@@ -194,11 +194,11 @@ static void ice_srvv_destructor(void *arg)
 }
 
 int bsdk_ice_servers_copy(struct bsdk_ice_server **vp,
-                          echosdk_ice_server_t **apip, uint32_t *np,
-                          const echosdk_ice_server_t *src, uint32_t n)
+                          medut_ice_server_t **apip, uint32_t *np,
+                          const medut_ice_server_t *src, uint32_t n)
 {
 	struct bsdk_ice_server *v;
-	echosdk_ice_server_t *api;
+	medut_ice_server_t *api;
 	uint32_t kept = 0;
 
 	if (!vp || !apip || !np)
@@ -236,7 +236,7 @@ int bsdk_ice_servers_copy(struct bsdk_ice_server **vp,
 }
 
 void bsdk_ice_servers_free(struct bsdk_ice_server **vp,
-                           echosdk_ice_server_t **apip, uint32_t *np)
+                           medut_ice_server_t **apip, uint32_t *np)
 {
 	if (vp)   *vp   = mem_deref(*vp);
 	if (apip) *apip = mem_deref(*apip);
@@ -264,9 +264,9 @@ static int snap_add(struct bsdk_ice_server_snap *snap, uint32_t cap,
  * the same precedence account.c has always applied to baresip's one slot,
  * except that both servers are now used instead of TURN shadowing STUN. */
 static void snap_add_legacy(struct bsdk_ice_server_snap *snap, uint32_t cap,
-                            const struct echosdk_account *acct)
+                            const struct medut_account *acct)
 {
-	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const medut_config_t *cfg = &g_bsdk.cfg;
 	const char *stun = acct && acct->cfg.stun_server
 	                 ? acct->cfg.stun_server : cfg->stun_server;
 	const char *turn = acct && acct->cfg.turn_server
@@ -284,7 +284,7 @@ static void snap_add_legacy(struct bsdk_ice_server_snap *snap, uint32_t cap,
 int bsdk_ice_servers_for_call(const struct call *bc,
                               struct bsdk_ice_server_snap *snap)
 {
-	const struct echosdk_account *acct = NULL;
+	const struct medut_account *acct = NULL;
 	const struct bsdk_ice_server *src = NULL;
 	uint32_t n = 0, cap;
 	int err = 0;
@@ -385,18 +385,18 @@ static const char *normalize_codec_name(const char *name)
 #define BSDK_DEFAULT_AUDIO_CODECS_G711 "PCMU/8000/1,PCMA/8000/1"
 
 /* Build codec list string from enum array: "opus/48000/2,PCMU/8000/1" */
-static void codec_list_str(const echosdk_codec_t *codecs, int count,
+static void codec_list_str(const medut_codec_t *codecs, int count,
                              char *buf, size_t sz)
 {
 	buf[0] = '\0';
 	for (int i = 0; i < count && i < 8; i++) {
 		const char *name;
 		switch (codecs[i]) {
-		case ECHOSDK_CODEC_OPUS: name = opus_codec_str(); break;
-		case ECHOSDK_CODEC_PCMU: name = "PCMU/8000/1";   break;
-		case ECHOSDK_CODEC_PCMA: name = "PCMA/8000/1";   break;
-		case ECHOSDK_CODEC_G722:    name = "G722/8000/1";    break;
-		case ECHOSDK_CODEC_G726_32: name = "G726-32/8000/1"; break;
+		case MEDUT_CODEC_OPUS: name = opus_codec_str(); break;
+		case MEDUT_CODEC_PCMU: name = "PCMU/8000/1";   break;
+		case MEDUT_CODEC_PCMA: name = "PCMA/8000/1";   break;
+		case MEDUT_CODEC_G722:    name = "G722/8000/1";    break;
+		case MEDUT_CODEC_G726_32: name = "G726-32/8000/1"; break;
 		default:                    name = NULL;              break;
 		}
 		if (!name) continue;
@@ -426,20 +426,20 @@ static void codec_names_list_str(const char names[][32], int count,
 /* Build the RFC 8599 Contact URI params string into buf.
  * Returns length written (>0), 0 if push is disabled/unconfigured,
  * or -1 on overflow. */
-static int build_push_contact_params(const struct echosdk_account *acct,
+static int build_push_contact_params(const struct medut_account *acct,
                                       char *buf, size_t buf_sz)
 {
 	const char *provider_str;
 
-	if (acct->cfg.push_provider == ECHOSDK_PUSH_PROVIDER_NONE)
+	if (acct->cfg.push_provider == MEDUT_PUSH_PROVIDER_NONE)
 		return 0;
 	if (!acct->cfg.push_token || !acct->cfg.push_token[0])
 		return 0;
 
 	switch (acct->cfg.push_provider) {
-	case ECHOSDK_PUSH_PROVIDER_APNS:         provider_str = "apns";         break;
-	case ECHOSDK_PUSH_PROVIDER_APNS_SANDBOX: provider_str = "apns-sandbox"; break;
-	case ECHOSDK_PUSH_PROVIDER_FCM:          provider_str = "fcm";          break;
+	case MEDUT_PUSH_PROVIDER_APNS:         provider_str = "apns";         break;
+	case MEDUT_PUSH_PROVIDER_APNS_SANDBOX: provider_str = "apns-sandbox"; break;
+	case MEDUT_PUSH_PROVIDER_FCM:          provider_str = "fcm";          break;
 	default: return 0;
 	}
 
@@ -471,14 +471,14 @@ static int build_push_contact_params(const struct echosdk_account *acct,
 /* Configure a baresip account object.
  * acct->parsed_* fields (user, host, port, transport) must be set first.
  *
- * Returns 0, or ECHOSDK_ERR_STATE when the stack cannot honour the request
+ * Returns 0, or MEDUT_ERR_STATE when the stack cannot honour the request
  * because a module the account needs is not registered — see the checks
  * below.  baresip itself only warns ("mediaenc not found") and carries on
  * with an account that will offer plain RTP or no codecs at all. */
-static int configure_baresip_account(struct echosdk_account *acct)
+static int configure_baresip_account(struct medut_account *acct)
 {
 	struct account *ba = ua_account(acct->ua);
-	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const medut_config_t *cfg = &g_bsdk.cfg;
 
 	/* Auth — password required; auth_user defaults to uri user part */
 	if (acct->cfg.password)
@@ -526,7 +526,7 @@ static int configure_baresip_account(struct echosdk_account *acct)
 
 	/* Media encryption — account overrides global */
 	{
-		echosdk_media_enc_t enc = acct->cfg.media_enc
+		medut_media_enc_t enc = acct->cfg.media_enc
 		                        ? acct->cfg.media_enc : cfg->media_enc;
 		const char *menc = bsdk_mediaenc_str(enc);
 		if (menc) {
@@ -534,14 +534,14 @@ static int configure_baresip_account(struct echosdk_account *acct)
 			 * warn "mediaenc not found" and hand back an account that
 			 * offers plain RTP — the app asked for encryption, and an
 			 * empty registry means the stack is not in a usable state
-			 * (the classic cause was a second echosdk_init() before
+			 * (the classic cause was a second medut_init() before
 			 * shutdown unloaded the modules; see core.c). */
 			if (!menc_find(baresip_mencl(), menc)) {
-				warning("EchoSDK/account: media encryption '%s' is not "
+				warning("Medut/account: media encryption '%s' is not "
 				        "registered — refusing to create an account "
 				        "that would silently fall back to plain RTP\n",
 				        menc);
-				return ECHOSDK_ERR_STATE;
+				return MEDUT_ERR_STATE;
 			}
 			account_set_mediaenc(ba, menc);
 		}
@@ -550,10 +550,10 @@ static int configure_baresip_account(struct echosdk_account *acct)
 	/* ICE / NAT — account OR global */
 	if (acct->cfg.ice_enabled || cfg->ice_enabled) {
 		if (!mnat_find(baresip_mnatl(), "ice")) {
-			warning("EchoSDK/account: ICE requested but the ice module "
+			warning("Medut/account: ICE requested but the ice module "
 			        "is not registered — refusing to create the "
 			        "account\n");
-			return ECHOSDK_ERR_STATE;
+			return MEDUT_ERR_STATE;
 		}
 		account_set_medianat(ba, "ice");
 	}
@@ -586,11 +586,11 @@ static int configure_baresip_account(struct echosdk_account *acct)
 	 * The uuid the instance-id comes from is a precondition — baresip
 	 * refuses outbound without one — so skip when it is missing rather than
 	 * turn every register into ENOSYS. */
-	if ((acct->parsed_transport == ECHOSDK_TRANSPORT_WS ||
-	     acct->parsed_transport == ECHOSDK_TRANSPORT_WSS) &&
+	if ((acct->parsed_transport == MEDUT_TRANSPORT_WS ||
+	     acct->parsed_transport == MEDUT_TRANSPORT_WSS) &&
 	    str_isset(conf_config()->sip.uuid)) {
 		if (account_set_sipnat(ba, "outbound")) {
-			warning("EchoSDK/account: could not enable RFC 5626 "
+			warning("Medut/account: could not enable RFC 5626 "
 			        "outbound for the WebSocket account\n");
 		}
 		else {
@@ -605,7 +605,7 @@ static int configure_baresip_account(struct echosdk_account *acct)
 			 * reg-id and no Supported: outbound. */
 			int uerr = ua_update_account(acct->ua);
 			if (uerr)
-				warning("EchoSDK/account: ua_update_account: %m\n",
+				warning("Medut/account: ua_update_account: %m\n",
 				        uerr);
 		}
 	}
@@ -641,7 +641,7 @@ static int configure_baresip_account(struct echosdk_account *acct)
 		if ((acct->cfg.ice_enabled || cfg->ice_enabled) &&
 		    !(stun && stun[0]) && !(turn && turn[0]) &&
 		    !acct->ice_srvc && !g_bsdk.cfg_ice_srvc) {
-			warning("EchoSDK/account: %s has ICE on but no STUN or "
+			warning("Medut/account: %s has ICE on but no STUN or "
 			        "TURN server: its calls offer only local "
 			        "addresses, which a peer across NAT cannot "
 			        "reach (FreeSWITCH rejects them with 488)\n",
@@ -684,9 +684,9 @@ static int configure_baresip_account(struct echosdk_account *acct)
 			/* No codec at all is the same broken stack as above, and a
 			 * call with no codecs cannot be negotiated. */
 			if (list_isempty(baresip_aucodecl())) {
-				warning("EchoSDK/account: no audio codec is registered "
+				warning("Medut/account: no audio codec is registered "
 				        "— refusing to create the account\n");
-				return ECHOSDK_ERR_STATE;
+				return MEDUT_ERR_STATE;
 			}
 			account_set_audio_codecs(ba, codecs);
 			/* Unknown names are passed to baresip as-is so any codec a
@@ -696,7 +696,7 @@ static int configure_baresip_account(struct echosdk_account *acct)
 			 * of the restriction that was asked for. Detect that by the
 			 * fallback identity and say so. */
 			if (account_aucodecl(ba) == baresip_aucodecl()) {
-				warning("EchoSDK/account: codec list \"%s\" matched no "
+				warning("Medut/account: codec list \"%s\" matched no "
 				        "loaded codec — offering all codecs instead\n",
 				        codecs);
 			}
@@ -706,12 +706,12 @@ static int configure_baresip_account(struct echosdk_account *acct)
 	/* DTMF via RTP events */
 	{
 		static const enum dtmfmode dtmf_map[] = {
-			[ECHOSDK_DTMF_RFC4733]  = DTMFMODE_RTP_EVENT,
-			[ECHOSDK_DTMF_SIP_INFO] = DTMFMODE_SIP_INFO,
-			[ECHOSDK_DTMF_AUTO]     = DTMFMODE_AUTO,
+			[MEDUT_DTMF_RFC4733]  = DTMFMODE_RTP_EVENT,
+			[MEDUT_DTMF_SIP_INFO] = DTMFMODE_SIP_INFO,
+			[MEDUT_DTMF_AUTO]     = DTMFMODE_AUTO,
 		};
-		echosdk_dtmf_mode_t m = acct->cfg.dtmf_mode;
-		if ((unsigned)m <= ECHOSDK_DTMF_AUTO)
+		medut_dtmf_mode_t m = acct->cfg.dtmf_mode;
+		if ((unsigned)m <= MEDUT_DTMF_AUTO)
 			account_set_dtmfmode(ba, dtmf_map[m]);
 		else
 			account_set_dtmfmode(ba, DTMFMODE_RTP_EVENT);
@@ -738,7 +738,7 @@ static int configure_baresip_account(struct echosdk_account *acct)
  * watchdog and the keepalive probe — and they must agree.
  */
 
-static bool retry_budget_left(const struct echosdk_account *acct)
+static bool retry_budget_left(const struct medut_account *acct)
 {
 	uint32_t max_attempts = acct->retry_policy_set
 	        ? acct->retry_max_attempts
@@ -747,21 +747,21 @@ static bool retry_budget_left(const struct echosdk_account *acct)
 	return max_attempts == 0 || acct->retry_attempt < max_attempts;
 }
 
-echosdk_reg_state_t bsdk_account_reg_fail_state(struct echosdk_account *acct,
-                                                echosdk_error_t err)
+medut_reg_state_t bsdk_account_reg_fail_state(struct medut_account *acct,
+                                                medut_error_t err)
 {
 	/* An armed retry settles it: that attempt is going out whatever the
 	 * budget now says, and schedule_retry() already counted it. */
 	bool will_retry = acct->reg_wanted && !acct->destroyed &&
-	        err != ECHOSDK_ERR_AUTH &&
+	        err != MEDUT_ERR_AUTH &&
 	        (tmr_isrunning(&acct->retry_tmr) || retry_budget_left(acct));
 
 	acct->reconnecting = will_retry;
 
-	return will_retry ? ECHOSDK_REG_RECONNECTING : ECHOSDK_REG_FAILED;
+	return will_retry ? MEDUT_REG_RECONNECTING : MEDUT_REG_FAILED;
 }
 
-void bsdk_account_reconnect_reset(struct echosdk_account *acct)
+void bsdk_account_reconnect_reset(struct medut_account *acct)
 {
 	if (!acct)
 		return;
@@ -770,8 +770,8 @@ void bsdk_account_reconnect_reset(struct echosdk_account *acct)
 	acct->retry_delay_ms = 0;
 }
 
-bool bsdk_account_reg_ev_prepare(struct echosdk_account *acct,
-                                 echosdk_event_t *ev)
+bool bsdk_account_reg_ev_prepare(struct medut_account *acct,
+                                 medut_event_t *ev)
 {
 	if (!acct || !ev)
 		return true;
@@ -781,13 +781,13 @@ bool bsdk_account_reg_ev_prepare(struct echosdk_account *acct,
 	 * retry that just succeeded would read as "reconnecting again in 2 s".
 	 * retry_attempt survives: on a terminal FAILED it is how many attempts
 	 * were spent, and REGISTERED has already zeroed it itself. */
-	if (ev->u.reg.state != ECHOSDK_REG_RECONNECTING)
+	if (ev->u.reg.state != MEDUT_REG_RECONNECTING)
 		bsdk_account_reconnect_reset(acct);
 
 	ev->u.reg.retry_attempt  = acct->retry_attempt;
 	ev->u.reg.retry_delay_ms = acct->retry_delay_ms;
 
-	if (ev->u.reg.state != ECHOSDK_REG_RECONNECTING)
+	if (ev->u.reg.state != MEDUT_REG_RECONNECTING)
 		return true;
 
 	if (acct->last_rc_valid &&
@@ -803,9 +803,9 @@ bool bsdk_account_reg_ev_prepare(struct echosdk_account *acct,
 	return true;
 }
 
-void bsdk_account_reg_reconnecting(struct echosdk_account *acct)
+void bsdk_account_reg_reconnecting(struct medut_account *acct)
 {
-	echosdk_event_t ev = {0};
+	medut_event_t ev = {0};
 
 	if (!acct || acct->destroyed || !acct->reg_wanted)
 		return;
@@ -813,19 +813,19 @@ void bsdk_account_reg_reconnecting(struct echosdk_account *acct)
 	/* Only a registration that was up (or on its way up) has anything to
 	 * lose here.  One that is already RECONNECTING keeps the state it has,
 	 * and a terminal FAILED is not turned back into hope by a new link. */
-	if (acct->reg_state != ECHOSDK_REG_REGISTERED &&
-	    acct->reg_state != ECHOSDK_REG_REGISTERING)
+	if (acct->reg_state != MEDUT_REG_REGISTERED &&
+	    acct->reg_state != MEDUT_REG_REGISTERING)
 		return;
 
 	acct->reconnecting = true;
-	acct->reg_state    = ECHOSDK_REG_RECONNECTING;
+	acct->reg_state    = MEDUT_REG_RECONNECTING;
 	/* The binding is stale and the path may be gone; probing it would only
 	 * report the outage we already know about.  The re-REGISTER re-arms. */
 	bsdk_account_keepalive_cancel(acct);
 
-	ev.type          = ECHOSDK_EV_REG_STATE;
-	ev.u.reg.state   = ECHOSDK_REG_RECONNECTING;
-	ev.u.reg.error   = ECHOSDK_OK;
+	ev.type          = MEDUT_EV_REG_STATE;
+	ev.u.reg.state   = MEDUT_REG_RECONNECTING;
+	ev.u.reg.error   = MEDUT_OK;
 	ev.u.reg.account = acct;
 	if (bsdk_account_reg_ev_prepare(acct, &ev))
 		bsdk_event_post(&ev);
@@ -871,14 +871,14 @@ static uint32_t reg_watch_timeout_ms(void)
 
 static void reg_watch_handler(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 
 	if (acct->destroyed || !acct->ua || !acct->reg_wanted)
 		return;
 
 	/* The consumer already has a terminal answer — nothing owed. */
-	if (acct->reg_state == ECHOSDK_REG_REGISTERED ||
-	    acct->reg_state == ECHOSDK_REG_FAILED)
+	if (acct->reg_state == MEDUT_REG_REGISTERED ||
+	    acct->reg_state == MEDUT_REG_FAILED)
 		return;
 
 	/* A retry is armed, so this REGISTER has already been answered for as
@@ -893,9 +893,9 @@ static void reg_watch_handler(void *arg)
 		return;
 
 	if (ua_isregistered(acct->ua)) {
-		echosdk_event_t ev = {0};
+		medut_event_t ev = {0};
 
-		warning("EchoSDK: account %s is registered but baresip emitted "
+		warning("Medut: account %s is registered but baresip emitted "
 		        "no event; synthesising REGISTERED\n",
 		        acct->cfg_uri ? acct->cfg_uri : "(unknown)");
 
@@ -903,14 +903,14 @@ static void reg_watch_handler(void *arg)
 		                       "no event; state was synthesised from "
 		                       "ua_isregistered()");
 
-		acct->reg_state     = ECHOSDK_REG_REGISTERED;
+		acct->reg_state     = MEDUT_REG_REGISTERED;
 		acct->retry_attempt = 0;
 		acct->reconnecting  = false;
 		bsdk_account_keepalive_arm(acct);
 
-		ev.type          = ECHOSDK_EV_REG_STATE;
-		ev.u.reg.state   = ECHOSDK_REG_REGISTERED;
-		ev.u.reg.error   = ECHOSDK_OK;
+		ev.type          = MEDUT_EV_REG_STATE;
+		ev.u.reg.state   = MEDUT_REG_REGISTERED;
+		ev.u.reg.error   = MEDUT_OK;
 		ev.u.reg.account = acct;
 		(void)bsdk_account_reg_ev_prepare(acct, &ev);
 		bsdk_event_post(&ev);
@@ -921,22 +921,22 @@ static void reg_watch_handler(void *arg)
 
 	if (reg_watch_timeout_ms() &&
 	    acct->reg_watch_elapsed_ms >= reg_watch_timeout_ms()) {
-		echosdk_event_t ev = {0};
+		medut_event_t ev = {0};
 
-		warning("EchoSDK: account %s got no registration answer in "
+		warning("Medut: account %s got no registration answer in "
 		        "%u ms; reporting timeout\n",
 		        acct->cfg_uri ? acct->cfg_uri : "(unknown)",
 		        acct->reg_watch_elapsed_ms);
 
-		acct->reg_error = ECHOSDK_ERR_TIMEOUT;
+		acct->reg_error = MEDUT_ERR_TIMEOUT;
 		acct->reg_state = bsdk_account_reg_fail_state(acct,
-		                                             ECHOSDK_ERR_TIMEOUT);
+		                                             MEDUT_ERR_TIMEOUT);
 		str_ncpy(acct->reg_error_str, "registration timed out",
 		         sizeof(acct->reg_error_str));
 
-		ev.type            = ECHOSDK_EV_REG_STATE;
+		ev.type            = MEDUT_EV_REG_STATE;
 		ev.u.reg.state     = acct->reg_state;
-		ev.u.reg.error     = ECHOSDK_ERR_TIMEOUT;
+		ev.u.reg.error     = MEDUT_ERR_TIMEOUT;
 		ev.u.reg.error_str = acct->reg_error_str;
 		ev.u.reg.account   = acct;
 		if (bsdk_account_reg_ev_prepare(acct, &ev))
@@ -952,7 +952,7 @@ static void reg_watch_handler(void *arg)
 
 /* Arm the watchdog for a registration that was just requested. Call on
  * re_main, immediately after ua_register(). */
-void bsdk_account_watch_registration(struct echosdk_account *acct)
+void bsdk_account_watch_registration(struct medut_account *acct)
 {
 	if (!acct || acct->destroyed || !acct->ua)
 		return;
@@ -992,9 +992,9 @@ static bool host_is_ip_literal(const char *host)
 	return host && sa_set_str(&sa, host, 0) == 0;
 }
 
-static bool srv_failover_eligible(const struct echosdk_account *acct)
+static bool srv_failover_eligible(const struct medut_account *acct)
 {
-	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const medut_config_t *cfg = &g_bsdk.cfg;
 
 	if (!cfg->dns_srv_failover)
 		return false;
@@ -1012,8 +1012,8 @@ static bool srv_failover_eligible(const struct echosdk_account *acct)
 	 * auto-derived server_url stays valid while we walk the targets. */
 	if (acct->cfg.server_url)
 		return false;
-	if (acct->parsed_transport == ECHOSDK_TRANSPORT_WS ||
-	    acct->parsed_transport == ECHOSDK_TRANSPORT_WSS)
+	if (acct->parsed_transport == MEDUT_TRANSPORT_WS ||
+	    acct->parsed_transport == MEDUT_TRANSPORT_WSS)
 		return false;
 	if (acct->cfg.server_port || acct->parsed_port)
 		return false;
@@ -1031,7 +1031,7 @@ static bool srv_failover_eligible(const struct echosdk_account *acct)
 /* Is this account still in the live list?  The DNS callback can outlive an
  * account the app destroyed while the query was in flight, and the pointer
  * would then dangle. */
-static bool acct_is_live(const struct echosdk_account *acct)
+static bool acct_is_live(const struct medut_account *acct)
 {
 	struct le *le;
 	bool found = false;
@@ -1050,7 +1050,7 @@ static bool acct_is_live(const struct echosdk_account *acct)
 
 static void srv_done_handler(const struct bsdk_dns_result *res, void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	size_t n, i;
 
 	if (!acct_is_live(acct))
@@ -1063,7 +1063,7 @@ static void srv_done_handler(const struct bsdk_dns_result *res, void *arg)
 
 	n = bsdk_dns_result_count(res);
 	for (i = 0; i < n && acct->srv_count < BSDK_SRV_MAX_TARGETS; i++) {
-		echosdk_transport_t t;
+		medut_transport_t t;
 		char     host[256];
 		uint16_t port = 0;
 
@@ -1078,11 +1078,11 @@ static void srv_done_handler(const struct bsdk_dns_result *res, void *arg)
 	}
 
 	if (acct->srv_count > 1)
-		info("EchoSDK: %u SRV targets available for failover\n",
+		info("Medut: %u SRV targets available for failover\n",
 		     acct->srv_count);
 }
 
-void bsdk_account_srv_resolve(struct echosdk_account *acct)
+void bsdk_account_srv_resolve(struct medut_account *acct)
 {
 	const char *host;
 
@@ -1108,7 +1108,7 @@ void bsdk_account_srv_resolve(struct echosdk_account *acct)
  * Point this account's outbound proxy at the next SRV target.
  * No-op unless there is more than one target to move between.
  */
-static void srv_advance(struct echosdk_account *acct)
+static void srv_advance(struct medut_account *acct)
 {
 	struct account *ba;
 
@@ -1122,19 +1122,19 @@ static void srv_advance(struct echosdk_account *acct)
 		return;
 
 	if (account_set_outbound(ba, acct->srv_uri[acct->srv_idx], 0)) {
-		warning("EchoSDK: SRV failover: could not set outbound %s\n",
+		warning("Medut: SRV failover: could not set outbound %s\n",
 		        acct->srv_uri[acct->srv_idx]);
 		return;
 	}
 
-	info("EchoSDK: SRV failover: trying proxy %u/%u (%s)\n",
+	info("Medut: SRV failover: trying proxy %u/%u (%s)\n",
 	     acct->srv_idx + 1u, acct->srv_count,
 	     acct->srv_uri[acct->srv_idx]);
 }
 
 static void retry_timer_handler(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	if (acct->destroyed || !acct->ua || !acct->reg_wanted)
 		return;
 
@@ -1144,7 +1144,7 @@ static void retry_timer_handler(void *arg)
 
 	/* schedule_retry() already counted this one, and the RECONNECTING event
 	 * the app got carries the same number — do not print it one ahead. */
-	info("EchoSDK: re-registering account (attempt %u)\n",
+	info("Medut: re-registering account (attempt %u)\n",
 	     acct->retry_attempt);
 	ua_register(acct->ua);
 	bsdk_account_watch_registration(acct);
@@ -1169,8 +1169,8 @@ static void keepalive_handler(void *arg);
 static void keepalive_resp_handler(int err, const struct sip_msg *msg,
                                     void *arg)
 {
-	struct echosdk_account *acct = arg;
-	echosdk_event_t ev = {0};
+	struct medut_account *acct = arg;
+	medut_event_t ev = {0};
 
 	if (!acct_is_live(acct))
 		return;
@@ -1201,22 +1201,22 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 		if (acct->ka_failed) {
 			acct->ka_failed = false;
 
-			if (acct->reg_state == ECHOSDK_REG_RECONNECTING &&
+			if (acct->reg_state == MEDUT_REG_RECONNECTING &&
 			    ua_isregistered(acct->ua)) {
-				echosdk_event_t ok = {0};
+				medut_event_t ok = {0};
 
-				info("EchoSDK: keepalive probe answered again; "
+				info("Medut: keepalive probe answered again; "
 				     "path to proxy recovered\n");
 
-				acct->reg_state     = ECHOSDK_REG_REGISTERED;
-				acct->reg_error     = ECHOSDK_OK;
+				acct->reg_state     = MEDUT_REG_REGISTERED;
+				acct->reg_error     = MEDUT_OK;
 				acct->retry_attempt = 0;
 				acct->reconnecting  = false;
 				acct->reg_error_str[0] = '\0';
 
-				ok.type          = ECHOSDK_EV_REG_STATE;
-				ok.u.reg.state   = ECHOSDK_REG_REGISTERED;
-				ok.u.reg.error   = ECHOSDK_OK;
+				ok.type          = MEDUT_EV_REG_STATE;
+				ok.u.reg.state   = MEDUT_REG_REGISTERED;
+				ok.u.reg.error   = MEDUT_OK;
 				ok.u.reg.account = acct;
 				(void)bsdk_account_reg_ev_prepare(acct, &ok);
 				bsdk_event_post(&ok);
@@ -1227,7 +1227,7 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 		return;
 	}
 
-	warning("EchoSDK: keepalive probe failed (%m); path to proxy is "
+	warning("Medut: keepalive probe failed (%m); path to proxy is "
 	        "unreachable\n", err ? err : ETIMEDOUT);
 
 	/* The registrar answered our last REGISTER and has not refused
@@ -1240,7 +1240,7 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 	                       err ? err : ETIMEDOUT);
 
 	acct->ka_failed = true;
-	acct->reg_error = ECHOSDK_ERR_TIMEOUT;
+	acct->reg_error = MEDUT_ERR_TIMEOUT;
 
 	/* Unreachable, not refused.  With keepalive_reregister the retry policy
 	 * decides whether this is still recoverable; without it we keep probing,
@@ -1248,11 +1248,11 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 	 * later answer (above) is what ends it. */
 	if (g_bsdk.cfg.keepalive_reregister && acct->reg_wanted) {
 		acct->reg_state = bsdk_account_reg_fail_state(acct,
-		                                             ECHOSDK_ERR_TIMEOUT);
+		                                             MEDUT_ERR_TIMEOUT);
 	}
 	else {
-		acct->reg_state    = acct->reg_wanted ? ECHOSDK_REG_RECONNECTING
-		                                      : ECHOSDK_REG_FAILED;
+		acct->reg_state    = acct->reg_wanted ? MEDUT_REG_RECONNECTING
+		                                      : MEDUT_REG_FAILED;
 		acct->reconnecting = acct->reg_wanted;
 	}
 
@@ -1275,16 +1275,16 @@ static void keepalive_resp_handler(int err, const struct sip_msg *msg,
 		bsdk_account_keepalive_arm(acct);
 	}
 
-	ev.type            = ECHOSDK_EV_REG_STATE;
+	ev.type            = MEDUT_EV_REG_STATE;
 	ev.u.reg.state     = acct->reg_state;
-	ev.u.reg.error     = ECHOSDK_ERR_TIMEOUT;
+	ev.u.reg.error     = MEDUT_ERR_TIMEOUT;
 	ev.u.reg.error_str = acct->reg_error_str;
 	ev.u.reg.account   = acct;
 	if (bsdk_account_reg_ev_prepare(acct, &ev))
 		bsdk_event_post(&ev);
 }
 
-int bsdk_account_probe_send(struct echosdk_account *acct,
+int bsdk_account_probe_send(struct medut_account *acct,
                             options_resp_h *resph, void *arg)
 {
 	char uri[320];
@@ -1308,7 +1308,7 @@ int bsdk_account_probe_send(struct echosdk_account *acct,
 
 static void keepalive_handler(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	int err;
 
 	if (acct->destroyed || !acct->ua || !acct->reg_wanted)
@@ -1342,7 +1342,7 @@ static void keepalive_handler(void *arg)
 	}
 }
 
-void bsdk_account_keepalive_arm(struct echosdk_account *acct)
+void bsdk_account_keepalive_arm(struct medut_account *acct)
 {
 	uint32_t iv;
 
@@ -1356,7 +1356,7 @@ void bsdk_account_keepalive_arm(struct echosdk_account *acct)
 	tmr_start(&acct->ka_tmr, iv, keepalive_handler, acct);
 }
 
-void bsdk_account_keepalive_cancel(struct echosdk_account *acct)
+void bsdk_account_keepalive_cancel(struct medut_account *acct)
 {
 	if (!acct)
 		return;
@@ -1403,9 +1403,9 @@ static uint32_t apply_jitter(uint32_t delay, float jitter)
 	return (uint32_t)((int32_t)delay + offset);
 }
 
-void bsdk_account_schedule_retry(struct echosdk_account *acct)
+void bsdk_account_schedule_retry(struct medut_account *acct)
 {
-	const echosdk_config_t *cfg = &g_bsdk.cfg;
+	const medut_config_t *cfg = &g_bsdk.cfg;
 
 	uint32_t initial_ms   = acct->retry_policy_set ? acct->retry_initial_ms   : cfg->reg_retry_initial_ms;
 	uint32_t max_ms       = acct->retry_policy_set ? acct->retry_max_ms       : cfg->reg_retry_max_ms;
@@ -1427,9 +1427,9 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 		return;
 
 	if (!retry_budget_left(acct)) {
-		echosdk_event_t done = {0};
+		medut_event_t done = {0};
 
-		info("EchoSDK: max retry attempts reached for account\n");
+		info("Medut: max retry attempts reached for account\n");
 
 		acct->reconnecting = false;
 
@@ -1439,13 +1439,13 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 		 * it.  A caller that already reported FAILED (an exhausted budget is
 		 * visible to bsdk_account_reg_fail_state() too) needs no second
 		 * event. */
-		if (acct->reg_state != ECHOSDK_REG_RECONNECTING)
+		if (acct->reg_state != MEDUT_REG_RECONNECTING)
 			return;
 
-		acct->reg_state = ECHOSDK_REG_FAILED;
+		acct->reg_state = MEDUT_REG_FAILED;
 
-		done.type            = ECHOSDK_EV_REG_STATE;
-		done.u.reg.state     = ECHOSDK_REG_FAILED;
+		done.type            = MEDUT_EV_REG_STATE;
+		done.u.reg.state     = MEDUT_REG_FAILED;
 		done.u.reg.error     = acct->reg_error;
 		done.u.reg.error_str = acct->reg_error_str[0]
 		        ? acct->reg_error_str : NULL;
@@ -1464,7 +1464,7 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 		}
 	}
 
-	/* Jitter is global only: echosdk_account_set_retry_policy() predates it
+	/* Jitter is global only: medut_account_set_retry_policy() predates it
 	 * and has no parameter for it, so there is no per-account value to
 	 * prefer here. */
 	delay = apply_jitter(delay, cfg->reg_retry_jitter);
@@ -1478,11 +1478,11 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 	 * attempt and the delay: an attempt is armed, so this is a countdown and
 	 * not a failure the app has to act on. */
 	acct->reconnecting = true;
-	acct->reg_state    = ECHOSDK_REG_RECONNECTING;
+	acct->reg_state    = MEDUT_REG_RECONNECTING;
 
-	echosdk_event_t ev = {0};
-	ev.type            = ECHOSDK_EV_REG_STATE;
-	ev.u.reg.state     = ECHOSDK_REG_RECONNECTING;
+	medut_event_t ev = {0};
+	ev.type            = MEDUT_EV_REG_STATE;
+	ev.u.reg.state     = MEDUT_REG_RECONNECTING;
 	ev.u.reg.error     = acct->reg_error;
 	ev.u.reg.error_str = acct->reg_error_str[0]
 	        ? acct->reg_error_str : NULL;
@@ -1497,7 +1497,7 @@ void bsdk_account_schedule_retry(struct echosdk_account *acct)
 
 static void account_destructor(void *data)
 {
-	struct echosdk_account *acct = data;
+	struct medut_account *acct = data;
 	tmr_cancel(&acct->retry_tmr);
 	tmr_cancel(&acct->reg_watch_tmr);
 	tmr_cancel(&acct->ka_tmr);
@@ -1517,12 +1517,12 @@ static void account_destructor(void *data)
 
 /* ── bsdk_account_find_by_ua ─────────────────────────────────────────────── */
 
-struct echosdk_account *bsdk_account_find_by_ua(const struct ua *ua)
+struct medut_account *bsdk_account_find_by_ua(const struct ua *ua)
 {
 	struct le *le;
 	mtx_lock(&g_bsdk.acct_lock);
 	LIST_FOREACH(&g_bsdk.accounts, le) {
-		struct echosdk_account *acct = le->data;
+		struct medut_account *acct = le->data;
 		if (acct->ua == ua) {
 			mtx_unlock(&g_bsdk.acct_lock);
 			return acct;
@@ -1535,8 +1535,8 @@ struct echosdk_account *bsdk_account_find_by_ua(const struct ua *ua)
 /* ── Public API — dispatch wrappers ─────────────────────────────────────── */
 
 typedef struct {
-	echosdk_account_config_t  cfg;
-	echosdk_account_handle_t *out;
+	medut_account_config_t  cfg;
+	medut_account_handle_t *out;
 	int                       result;
 } create_ctx_t;
 
@@ -1545,7 +1545,7 @@ static void create_fn(void *arg)
 	create_ctx_t *ctx = arg;
 	int err;
 
-	struct echosdk_account *acct = mem_alloc(sizeof(*acct), account_destructor);
+	struct medut_account *acct = mem_alloc(sizeof(*acct), account_destructor);
 	if (!acct) { ctx->result = ENOMEM; return; }
 	memset(acct, 0, sizeof(*acct));
 	tmr_init(&acct->retry_tmr);
@@ -1554,11 +1554,11 @@ static void create_fn(void *arg)
 	list_init(&acct->custom_hdrs);
 
 	bsdk_acct_cfg_deep_copy(&acct->cfg, &ctx->cfg, acct);
-	acct->reg_state = ECHOSDK_REG_UNREGISTERED;
+	acct->reg_state = MEDUT_REG_UNREGISTERED;
 
 	if (!acct->cfg.uri) {
 		mem_deref(acct);
-		ctx->result = ECHOSDK_ERR_INVAL;
+		ctx->result = MEDUT_ERR_INVAL;
 		return;
 	}
 
@@ -1569,7 +1569,7 @@ static void create_fn(void *arg)
 	                  &acct->parsed_port);
 
 	/* Determine transport: server_url → account transport → global default */
-	echosdk_transport_t tp = acct->cfg.transport;
+	medut_transport_t tp = acct->cfg.transport;
 	char ws_path[256] = ""; /* set only if server_url contains an explicit path */
 	char ws_host[256] = ""; /* WS server authority — pinned in ws_path.c */
 	uint16_t ws_port = 0;
@@ -1596,21 +1596,21 @@ static void create_fn(void *arg)
 		if (!port) {
 			switch (tp) {
 			/* WebSocket defaults, as in bsdk_parse_server_url. */
-			case ECHOSDK_TRANSPORT_WSS: port = 443; break;
-			case ECHOSDK_TRANSPORT_WS:  port = 80; break;
-			case ECHOSDK_TRANSPORT_TLS: port = 5061; break;
-			case ECHOSDK_TRANSPORT_TCP: port = 5060; break;
-			case ECHOSDK_TRANSPORT_UDP:
+			case MEDUT_TRANSPORT_WSS: port = 443; break;
+			case MEDUT_TRANSPORT_WS:  port = 80; break;
+			case MEDUT_TRANSPORT_TLS: port = 5061; break;
+			case MEDUT_TRANSPORT_TCP: port = 5060; break;
+			case MEDUT_TRANSPORT_UDP:
 			default:                     port = 5060; break;
 			}
 		}
 		const char *scheme;
 		switch (tp) {
-		case ECHOSDK_TRANSPORT_WSS: scheme = "wss"; break;
-		case ECHOSDK_TRANSPORT_WS:  scheme = "ws";  break;
-		case ECHOSDK_TRANSPORT_TLS: scheme = "sips"; break;
-		case ECHOSDK_TRANSPORT_TCP: scheme = "sip";  break;
-		case ECHOSDK_TRANSPORT_UDP:
+		case MEDUT_TRANSPORT_WSS: scheme = "wss"; break;
+		case MEDUT_TRANSPORT_WS:  scheme = "ws";  break;
+		case MEDUT_TRANSPORT_TLS: scheme = "sips"; break;
+		case MEDUT_TRANSPORT_TCP: scheme = "sip";  break;
+		case MEDUT_TRANSPORT_UDP:
 		default:                     scheme = "sip"; break;
 		}
 
@@ -1625,7 +1625,7 @@ static void create_fn(void *arg)
 	/* Claim the server + explicit path for __wrap_websock_connect
 	 * (ws_path.c).  Released in account_destructor, so a destroyed account
 	 * stops counting against connection pinning. */
-	if (tp == ECHOSDK_TRANSPORT_WS || tp == ECHOSDK_TRANSPORT_WSS) {
+	if (tp == MEDUT_TRANSPORT_WS || tp == MEDUT_TRANSPORT_WSS) {
 		str_ncpy(acct->ws_host, ws_host, sizeof(acct->ws_host));
 		str_ncpy(acct->ws_pin_path, ws_path, sizeof(acct->ws_pin_path));
 		acct->ws_port = ws_port;
@@ -1638,7 +1638,7 @@ static void create_fn(void *arg)
 	char aor[512];
 	bool ipv6 = strchr(acct->parsed_host, ':') != NULL;
 	/* cfg.reg_refresh_pct is the documented "refresh at N% of expires" knob
-	 * (default 75).  It used to be written by echosdk_config_init() and read
+	 * (default 75).  It used to be written by medut_config_init() and read
 	 * NOWHERE, so an app tuning it silently got libre's built-in 90% —
 	 * worse than absent, because the config, the docs and four bindings all
 	 * advertise it.  baresip takes this as the AOR ";rwait=" parameter
@@ -1687,11 +1687,11 @@ static void create_fn(void *arg)
 	ctx->result = 0;
 }
 
-int echosdk_account_create(const echosdk_account_config_t *cfg,
-                            echosdk_account_handle_t *out)
+int medut_account_create(const medut_account_config_t *cfg,
+                            medut_account_handle_t *out)
 {
 	if (!cfg || !cfg->uri || !out)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	create_ctx_t ctx = { .cfg = *cfg, .out = out, .result = 0 };
 	int err = bsdk_dispatch_sync(create_fn, &ctx);
@@ -1700,7 +1700,7 @@ int echosdk_account_create(const echosdk_account_config_t *cfg,
 
 static void destroy_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	acct->destroyed = true;
 	tmr_cancel(&acct->retry_tmr);
 	tmr_cancel(&acct->reg_watch_tmr);
@@ -1715,7 +1715,7 @@ static void destroy_fn(void *arg)
 	mem_deref(acct);
 }
 
-void echosdk_account_destroy(echosdk_account_handle_t acct)
+void medut_account_destroy(medut_account_handle_t acct)
 {
 	if (!acct) return;
 	bsdk_dispatch_sync(destroy_fn, acct);
@@ -1723,24 +1723,24 @@ void echosdk_account_destroy(echosdk_account_handle_t acct)
 
 /* ── Enumeration & state readers ─────────────────────────────────────────── */
 
-void echosdk_account_foreach(echosdk_account_iter_fn fn, void *arg)
+void medut_account_foreach(medut_account_iter_fn fn, void *arg)
 {
 	if (!fn) return;
 
 	mtx_lock(&g_bsdk.acct_lock);
 	struct le *le;
 	LIST_FOREACH(&g_bsdk.accounts, le) {
-		struct echosdk_account *acct = le->data;
+		struct medut_account *acct = le->data;
 		if (!acct->destroyed)
-			fn((echosdk_account_handle_t)acct, arg);
+			fn((medut_account_handle_t)acct, arg);
 	}
 	mtx_unlock(&g_bsdk.acct_lock);
 }
 
-int echosdk_account_get_aor(echosdk_account_handle_t acct, char *buf, size_t sz)
+int medut_account_get_aor(medut_account_handle_t acct, char *buf, size_t sz)
 {
 	if (!acct || !buf || sz == 0)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 
 	/* parsed_user/parsed_host are set once at create time and never
 	 * mutated, so no lock is needed. */
@@ -1749,20 +1749,20 @@ int echosdk_account_get_aor(echosdk_account_handle_t acct, char *buf, size_t sz)
 	                    acct->parsed_user, acct->parsed_host);
 	if (n < 0) {
 		buf[0] = '\0';
-		return ECHOSDK_ERR_NOMEM;
+		return MEDUT_ERR_NOMEM;
 	}
-	return ECHOSDK_OK;
+	return MEDUT_OK;
 }
 
-echosdk_reg_state_t echosdk_account_get_reg_state(echosdk_account_handle_t acct)
+medut_reg_state_t medut_account_get_reg_state(medut_account_handle_t acct)
 {
-	if (!acct) return ECHOSDK_REG_UNREGISTERED;
+	if (!acct) return MEDUT_REG_UNREGISTERED;
 	return acct->reg_state;
 }
 
 static void register_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	if (acct->ua) {
 		acct->reg_wanted = true;   /* netmon.c re-REGISTERs on handover */
 		/* An explicit register() is a fresh intent, not the tail of a
@@ -1779,20 +1779,20 @@ static void register_fn(void *arg)
 	}
 }
 
-int echosdk_account_register(echosdk_account_handle_t acct)
+int medut_account_register(medut_account_handle_t acct)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	return bsdk_dispatch(register_fn, acct);
 }
 
 static void unregister_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	if (acct->ua) {
 		acct->reg_wanted   = false;
 		acct->reconnecting = false;
 		acct->ka_failed    = false;
-		acct->reg_state = ECHOSDK_REG_UNREGISTERING;
+		acct->reg_state = MEDUT_REG_UNREGISTERING;
 		tmr_cancel(&acct->reg_watch_tmr);
 		tmr_cancel(&acct->retry_tmr);
 		bsdk_account_keepalive_cancel(acct);
@@ -1800,15 +1800,15 @@ static void unregister_fn(void *arg)
 	}
 }
 
-int echosdk_account_unregister(echosdk_account_handle_t acct)
+int medut_account_unregister(medut_account_handle_t acct)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	return bsdk_dispatch(unregister_fn, acct);
 }
 
 static void keepalive_now_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 
 	/* Cancel the pending tick first: keepalive_handler() re-arms on every
 	 * exit path, so firing it early without this would leave the schedule
@@ -1817,12 +1817,12 @@ static void keepalive_now_fn(void *arg)
 	keepalive_handler(acct);
 }
 
-int echosdk_account_keepalive_now(echosdk_account_handle_t acct)
+int medut_account_keepalive_now(medut_account_handle_t acct)
 {
 	if (!acct)
-		return ECHOSDK_ERR_INVAL;
+		return MEDUT_ERR_INVAL;
 	if (!acct->ua || acct->destroyed || !acct->reg_wanted)
-		return ECHOSDK_ERR_STATE;
+		return MEDUT_ERR_STATE;
 
 	return bsdk_dispatch(keepalive_now_fn, acct);
 }
@@ -1830,7 +1830,7 @@ int echosdk_account_keepalive_now(echosdk_account_handle_t acct)
 /* ── Retry control ───────────────────────────────────────────────────────── */
 
 typedef struct {
-	echosdk_account_handle_t acct;
+	medut_account_handle_t acct;
 	uint32_t initial_ms;
 	uint32_t max_ms;
 	float    backoff;
@@ -1840,7 +1840,7 @@ typedef struct {
 static void set_retry_policy_fn(void *arg)
 {
 	retry_policy_ctx_t *ctx = arg;
-	struct echosdk_account *acct = ctx->acct;
+	struct medut_account *acct = ctx->acct;
 	acct->retry_policy_set   = true;
 	acct->retry_initial_ms   = ctx->initial_ms;
 	acct->retry_max_ms       = ctx->max_ms;
@@ -1848,18 +1848,18 @@ static void set_retry_policy_fn(void *arg)
 	acct->retry_max_attempts = ctx->max_attempts;
 }
 
-int echosdk_account_set_retry_policy(echosdk_account_handle_t acct,
+int medut_account_set_retry_policy(medut_account_handle_t acct,
                                       uint32_t initial_ms, uint32_t max_ms,
                                       float backoff, uint32_t max_attempts)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	retry_policy_ctx_t ctx = { acct, initial_ms, max_ms, backoff, max_attempts };
 	return bsdk_dispatch_sync(set_retry_policy_fn, &ctx);
 }
 
 static void cancel_retry_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 
 	tmr_cancel(&acct->retry_tmr);
 	tmr_cancel(&acct->reg_watch_tmr);
@@ -1869,14 +1869,14 @@ static void cancel_retry_fn(void *arg)
 	 * registration is now down for good as far as the SDK is concerned.
 	 * Report it, or the app is left rendering "Reconnecting…" against a
 	 * retry it cancelled itself. */
-	if (acct->reg_state == ECHOSDK_REG_RECONNECTING) {
-		echosdk_event_t ev = {0};
+	if (acct->reg_state == MEDUT_REG_RECONNECTING) {
+		medut_event_t ev = {0};
 
 		acct->reconnecting = false;
-		acct->reg_state    = ECHOSDK_REG_FAILED;
+		acct->reg_state    = MEDUT_REG_FAILED;
 
-		ev.type            = ECHOSDK_EV_REG_STATE;
-		ev.u.reg.state     = ECHOSDK_REG_FAILED;
+		ev.type            = MEDUT_EV_REG_STATE;
+		ev.u.reg.state     = MEDUT_REG_FAILED;
 		ev.u.reg.error     = acct->reg_error;
 		ev.u.reg.error_str = acct->reg_error_str[0]
 		        ? acct->reg_error_str : NULL;
@@ -1885,15 +1885,15 @@ static void cancel_retry_fn(void *arg)
 	}
 }
 
-int echosdk_account_cancel_retry(echosdk_account_handle_t acct)
+int medut_account_cancel_retry(medut_account_handle_t acct)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	return bsdk_dispatch_sync(cancel_retry_fn, acct);
 }
 
 static void retry_now_fn(void *arg)
 {
-	struct echosdk_account *acct = arg;
+	struct medut_account *acct = arg;
 	tmr_cancel(&acct->retry_tmr);
 	acct->retry_attempt = 0;
 	if (!acct->destroyed && acct->ua) {
@@ -1903,27 +1903,27 @@ static void retry_now_fn(void *arg)
 	}
 }
 
-int echosdk_account_retry_now(echosdk_account_handle_t acct)
+int medut_account_retry_now(medut_account_handle_t acct)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	return bsdk_dispatch_sync(retry_now_fn, acct);
 }
 
 /* ── ICE server runtime update ──────────────────────────────────────────── */
 
 typedef struct {
-	echosdk_account_handle_t        acct;
-	const echosdk_ice_server_t     *servers;   /* caller-owned; copied under
+	medut_account_handle_t        acct;
+	const medut_ice_server_t     *servers;   /* caller-owned; copied under
 	                                              bsdk_dispatch_sync */
 	uint32_t                        count;
-	echosdk_ice_transport_policy_t  policy;
+	medut_ice_transport_policy_t  policy;
 	int                             err;
 } set_ice_servers_ctx_t;
 
 static void set_ice_servers_fn(void *arg)
 {
 	set_ice_servers_ctx_t *ctx = arg;
-	struct echosdk_account *acct = ctx->acct;
+	struct medut_account *acct = ctx->acct;
 
 	ctx->err = bsdk_ice_servers_copy(&acct->ice_srvv, &acct->ice_srv_api,
 	                                 &acct->ice_srvc, ctx->servers,
@@ -1933,24 +1933,24 @@ static void set_ice_servers_fn(void *arg)
 	acct->ice_policy           = ctx->policy;
 	acct->cfg.ice_transport_policy = ctx->policy;
 
-	info("EchoSDK/account: %s: ICE servers replaced (%u entr%s, policy %s)"
+	info("Medut/account: %s: ICE servers replaced (%u entr%s, policy %s)"
 	     " — applies to the next gather or restart\n",
 	     acct->cfg.uri ? acct->cfg.uri : "?", acct->ice_srvc,
 	     acct->ice_srvc == 1 ? "y" : "ies",
-	     ctx->policy == ECHOSDK_ICE_TRANSPORT_RELAY ? "relay" : "all");
+	     ctx->policy == MEDUT_ICE_TRANSPORT_RELAY ? "relay" : "all");
 }
 
-int echosdk_account_set_ice_servers(echosdk_account_handle_t acct,
-                                    const echosdk_ice_server_t *servers,
+int medut_account_set_ice_servers(medut_account_handle_t acct,
+                                    const medut_ice_server_t *servers,
                                     uint32_t count,
-                                    echosdk_ice_transport_policy_t policy)
+                                    medut_ice_transport_policy_t policy)
 {
 	set_ice_servers_ctx_t ctx = { .acct = acct, .servers = servers,
 	                              .count = servers ? count : 0,
 	                              .policy = policy };
 	int err;
 
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	err = bsdk_dispatch_sync(set_ice_servers_fn, &ctx);
 	return err ? err : ctx.err;
 }
@@ -1958,7 +1958,7 @@ int echosdk_account_set_ice_servers(echosdk_account_handle_t acct,
 /* ── Push token runtime update ──────────────────────────────────────────── */
 
 typedef struct {
-	echosdk_account_handle_t  acct;
+	medut_account_handle_t  acct;
 	/* Caller-owned string pointer. Safe because bsdk_dispatch_sync blocks
 	 * the caller until set_push_token_fn returns, so the string cannot be
 	 * freed before bsdk_strdup() copies it. */
@@ -1969,10 +1969,10 @@ typedef struct {
 static void set_push_token_fn(void *arg)
 {
 	push_token_ctx_t *ctx = arg;
-	struct echosdk_account *acct = ctx->acct;
+	struct medut_account *acct = ctx->acct;
 
 	if (!acct->ua) {
-		ctx->result = ECHOSDK_ERR_STATE;
+		ctx->result = MEDUT_ERR_STATE;
 		return;
 	}
 
@@ -1983,7 +1983,7 @@ static void set_push_token_fn(void *arg)
 	char pn_params[BSDK_PUSH_PARAMS_BUFSZ];
 	int n = build_push_contact_params(acct, pn_params, sizeof(pn_params));
 	if (n < 0) {
-		ctx->result = ECHOSDK_ERR_INVAL;  /* token too long */
+		ctx->result = MEDUT_ERR_INVAL;  /* token too long */
 		return;
 	}
 
@@ -1992,19 +1992,19 @@ static void set_push_token_fn(void *arg)
 	/* Re-register only when safe: skip if mid-transaction or mid-retry.
 	 * The new cparams are already stored on the UA; the next natural
 	 * ua_register() call will pick them up. */
-	bool reg_in_flight = (acct->reg_state == ECHOSDK_REG_REGISTERING ||
-	                      acct->reg_state == ECHOSDK_REG_UNREGISTERING ||
-	                      acct->reg_state == ECHOSDK_REG_RECONNECTING);
+	bool reg_in_flight = (acct->reg_state == MEDUT_REG_REGISTERING ||
+	                      acct->reg_state == MEDUT_REG_UNREGISTERING ||
+	                      acct->reg_state == MEDUT_REG_RECONNECTING);
 	bool retry_pending = tmr_isrunning(&acct->retry_tmr);
 
 	if (!reg_in_flight && !retry_pending)
 		ua_register(acct->ua);
 }
 
-int echosdk_account_set_push_token(echosdk_account_handle_t acct,
+int medut_account_set_push_token(medut_account_handle_t acct,
                                     const char *push_token)
 {
-	if (!acct) return ECHOSDK_ERR_INVAL;
+	if (!acct) return MEDUT_ERR_INVAL;
 	push_token_ctx_t ctx = { .acct = acct, .push_token = push_token,
 	                          .result = 0 };
 	int err = bsdk_dispatch_sync(set_push_token_fn, &ctx);

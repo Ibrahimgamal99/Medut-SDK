@@ -1,5 +1,5 @@
 /**
- * @file ice_check.c  echo-ice: connectivity checks and the scheduler
+ * @file ice_check.c  medut-ice: connectivity checks and the scheduler
  *
  * One timer per generation.  Every tick prunes the ping table, refreshes
  * pair states and the selection (ice_select.c), then sends at most one

@@ -17,7 +17,7 @@
 ///     --dart-define=SIP_CALLEE=9999
 ///
 /// Grant the mic first, or the capture path reports mic-permission:
-///   adb shell pm grant dev.echosdk.echo_sdk android.permission.RECORD_AUDIO
+///   adb shell pm grant dev.medut.medut android.permission.RECORD_AUDIO
 ///
 /// SIP_CALLEE must answer and return audio; a silent callee fails step 5 by
 /// design, since "connected but silent" is precisely what this test exists to
@@ -25,7 +25,7 @@
 @Timeout(Duration(minutes: 3))
 library;
 
-import 'package:echo_sdk/echo_sdk.dart';
+import 'package:medut/medut.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -47,8 +47,8 @@ void main() {
       print('ATEST $s');
     }
 
-    final sdk = await EchoSDK.start(
-      config: const EchoSDKConfig(
+    final sdk = await Medut.start(
+      config: const MedutConfig(
         logLevel: 3,
         appOwnedAudio: true,
         netMonitorIntervalSeconds: 0,
@@ -65,7 +65,7 @@ void main() {
     var st = await sdk.appOwnedAudioStatus();
     note('status after start: $st');
     expect(st['available'], isTrue,
-        reason: 'libechosdk.so did not load, or the JNI symbols are missing — '
+        reason: 'libmedut.so did not load, or the JNI symbols are missing — '
             'every push/pull would throw UnsatisfiedLinkError');
     expect(sdk.appOwnedAudioActive, isFalse,
         reason: 'no call yet, so no device should be open');

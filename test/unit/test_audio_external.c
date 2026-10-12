@@ -30,7 +30,7 @@
 #include <re.h>
 #include <rem.h>
 #include <baresip.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 static int g_pass, g_fail;
 
@@ -227,7 +227,7 @@ static void test_idle(void)
 
 	memset(buf, 0xAA, sizeof(buf));
 
-	err = echosdk_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
+	err = medut_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
 	CHECK(err == ENODEV, "pull with no device: expected ENODEV, got %d", err);
 
 	bool zeroed = true;
@@ -236,12 +236,12 @@ static void test_idle(void)
 	CHECK(zeroed, "pull must zero the buffer even with no device");
 
 	int16_t one = 0;
-	err = echosdk_audio_external_push(&one, 1);
+	err = medut_audio_external_push(&one, 1);
 	CHECK(err == ENODEV, "push with no device: expected ENODEV, got %d", err);
 
-	CHECK(!echosdk_audio_external_is_active(), "is_active with no device");
+	CHECK(!medut_audio_external_is_active(), "is_active with no device");
 
-	err = echosdk_audio_external_format(NULL, NULL, NULL);
+	err = medut_audio_external_format(NULL, NULL, NULL);
 	CHECK(err == ENODEV, "format with no device: expected ENODEV, got %d", err);
 }
 
@@ -266,7 +266,7 @@ static void test_reframing(void)
 	for (size_t s = 0; s < RE_ARRAY_SIZE(sizes); s++) {
 		for (size_t i = 0; i < sizes[s]; i++)
 			chunk[i] = next++;
-		err = echosdk_audio_external_push(chunk, sizes[s]);
+		err = medut_audio_external_push(chunk, sizes[s]);
 		CHECK(err == 0, "push %zu: %d", sizes[s], err);
 		total += sizes[s];
 	}
@@ -304,7 +304,7 @@ static void test_short_ptime_no_hang(void)
 	memset(chunk, 0, sizeof(chunk));
 
 	for (int i = 0; i < 10; i++) {
-		err = echosdk_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
+		err = medut_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
 		CHECK(err == 0, "push at ptime=10: %d", err);
 	}
 
@@ -327,7 +327,7 @@ static void test_second_call_returns_the_mic(void)
 	CHECK(open_src(&b, 8000, 1, 20, &rb) == 0, "open B");
 
 	/* Newest wins while both are up. */
-	err = echosdk_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
+	err = medut_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
 	CHECK(err == 0, "push with both open: %d", err);
 	CHECK(rb.nframes == 1 && ra.nframes == 0,
 	      "newest device should get the audio (A=%d B=%d)",
@@ -336,7 +336,7 @@ static void test_second_call_returns_the_mic(void)
 	/* B hangs up; the mic must fall back to A, not vanish. */
 	mem_deref(b);
 
-	err = echosdk_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
+	err = medut_audio_external_push(chunk, RE_ARRAY_SIZE(chunk));
 	CHECK(err == 0, "push after B closed: %d", err);
 	CHECK(ra.nframes == 1, "A must get the mic back after B closes (A=%d)",
 	      ra.nframes);
@@ -356,19 +356,19 @@ static void test_format(void)
 
 	CHECK(open_src(&st, 16000, 1, 20, &r) == 0, "open_src 16k");
 
-	err = echosdk_audio_external_format(&srate, &ch, &ptime);
+	err = medut_audio_external_format(&srate, &ch, &ptime);
 	CHECK(err == 0, "format while open: %d", err);
 	CHECK(srate == 16000 && ch == 1 && ptime == 20,
 	      "format: got %u Hz %u ch %u ms", srate, ch, ptime);
 
 	mem_deref(st);
 
-	err = echosdk_audio_external_format(&srate, &ch, &ptime);
+	err = medut_audio_external_format(&srate, &ch, &ptime);
 	CHECK(err == ENODEV, "format after close: expected ENODEV, got %d", err);
 
 	/* Playback alone still answers — a receive-only call has no capture. */
 	CHECK(open_play(&pst, 8000, 1, 0, &base) == 0, "open_play");
-	err = echosdk_audio_external_format(&srate, &ch, &ptime);
+	err = medut_audio_external_format(&srate, &ch, &ptime);
 	CHECK(err == 0, "format from playback alone: %d", err);
 	CHECK(ptime == 20, "ptime 0 must report as the 20 ms default, got %u",
 	      ptime);
@@ -385,7 +385,7 @@ static void test_playback(void)
 	CHECK(open_play(&st, 8000, 1, 20, &base) == 0, "open_play");
 
 	memset(buf, 0xAA, sizeof(buf));
-	err = echosdk_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
+	err = medut_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
 	CHECK(err == 0, "pull: %d", err);
 
 	bool ramp = true;
@@ -393,12 +393,12 @@ static void test_playback(void)
 		if (buf[i] != (int16_t)(base + (int)i)) ramp = false;
 	CHECK(ramp, "pull must return what the decoder wrote");
 
-	CHECK(echosdk_audio_external_is_active(), "is_active with playback open");
+	CHECK(medut_audio_external_is_active(), "is_active with playback open");
 
 	mem_deref(st);
 
 	memset(buf, 0xAA, sizeof(buf));
-	err = echosdk_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
+	err = medut_audio_external_pull(buf, RE_ARRAY_SIZE(buf));
 	CHECK(err == ENODEV, "pull after close: expected ENODEV, got %d", err);
 	CHECK(buf[0] == 0 && buf[159] == 0, "buffer must still be zeroed");
 }
@@ -444,7 +444,7 @@ static void test_partial_frame_rejected(void)
 
 	CHECK(open_src(&st, 8000, 2, 20, &r) == 0, "open_src stereo");
 
-	err = echosdk_audio_external_push(chunk, 161);
+	err = medut_audio_external_push(chunk, 161);
 	CHECK(err == EINVAL, "odd sample count on stereo: expected EINVAL, got %d",
 	      err);
 

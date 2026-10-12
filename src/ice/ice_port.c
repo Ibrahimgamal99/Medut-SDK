@@ -1,5 +1,5 @@
 /**
- * @file ice_port.c  echo-ice: ports (one socket per interface × family)
+ * @file ice_port.c  medut-ice: ports (one socket per interface × family)
  *
  * A port is a socket the generation can send and receive on.  The stream's
  * own RTP/RTCP sockets are attached with is_stream_sock=true: they are

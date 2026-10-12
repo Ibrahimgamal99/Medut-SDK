@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel>=0.40", "cffi>=1.15"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "echo-sdk"
-version = "2.1.1"
-description = "Python binding for EchoSDK — SIP/WebRTC/NAT SDK"
+name = "medut"
+version = "1.0.0"
+description = "Python binding for Medut — SIP/WebRTC/NAT SDK"
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
 requires-python = ">=3.9"
@@ -20,7 +20,7 @@ classifiers = [
   "Intended Audience :: Developers",
 ]
 
-# Required system libraries on Linux (DT_NEEDED in echosdk.so):
+# Required system libraries on Linux (DT_NEEDED in medut.so):
 #   libssl3 / libcrypto (OpenSSL 3):
 #     Ubuntu/Debian:  apt install libssl3
 #     Fedora/RHEL:    dnf install openssl-libs
@@ -31,12 +31,12 @@ classifiers = [
 #     Arch:           pacman -S libpulse
 #
 # libwebrtc-audio-processing-1 is optional (AEC_WEBRTC mode only).
-# EchoSDK raises ImportError with the exact install command if a required
+# Medut raises ImportError with the exact install command if a required
 # library is missing.
 
 [project.urls]
-Homepage = "https://github.com/NawyRE/echo-sdk.git"
+Homepage = "https://github.com/Ibrahimgamal99/Medut-SDK.git"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["echo_sdk*"]
+include = ["medut*"]

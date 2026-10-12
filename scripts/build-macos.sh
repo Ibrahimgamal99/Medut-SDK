@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build EchoSDK for macOS: arm64 + x86_64, then lipo into a universal archive.
-# Output: dist/macos/universal/echosdk.a  +  dist/macos/universal/include/
+# Build Medut for macOS: arm64 + x86_64, then lipo into a universal archive.
+# Output: dist/macos/universal/medut.a  +  dist/macos/universal/include/
 #
 # Prerequisites (macOS only):
 #   - Xcode or Command Line Tools (for lipo, libtool)
@@ -26,11 +26,11 @@ build_arch() {
   cmake -S "${ROOT}" -B "${BUILD_DIR}" -GNinja \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
     -DCMAKE_OSX_ARCHITECTURES="${ARCH}" \
-    -DECHOSDK_TLS=openssl \
-    -DECHOSDK_MODULES_PROFILE=desktop \
+    -DMEDUT_TLS=openssl \
+    -DMEDUT_MODULES_PROFILE=desktop \
     ${OPENSSL_ROOT:+-DOPENSSL_ROOT_DIR="${OPENSSL_ROOT}"}
 
-  cmake --build "${BUILD_DIR}" --target echosdk -j"$(sysctl -n hw.logicalcpu)"
+  cmake --build "${BUILD_DIR}" --target medut -j"$(sysctl -n hw.logicalcpu)"
   cmake --install "${BUILD_DIR}"
 }
 
@@ -43,21 +43,21 @@ build_arch x86_64
 echo "=== Creating universal binary with lipo ==="
 mkdir -p "${DIST}/universal"
 lipo -create \
-  "${DIST}/arm64/echosdk.a" \
-  "${DIST}/x86_64/echosdk.a" \
-  -output "${DIST}/universal/echosdk.a"
+  "${DIST}/arm64/medut.a" \
+  "${DIST}/x86_64/medut.a" \
+  -output "${DIST}/universal/medut.a"
 
 # Copy headers from one of the slices
 cp -r "${DIST}/arm64/include" "${DIST}/universal/"
 
 # ── Link universal shared library (zero extra runtime deps) ──────────────────
-DYLIB="${DIST}/universal/echosdk.dylib"
+DYLIB="${DIST}/universal/medut.dylib"
 echo ""
 echo "=== Linking ${DYLIB} ==="
 # Statically embed OpenSSL so consumers need no brew package at runtime.
 # Apple system frameworks are always present; they stay as -framework.
 clang -dynamiclib \
-  -Wl,-all_load "${DIST}/universal/echosdk.a" -Wl,-noall_load \
+  -Wl,-all_load "${DIST}/universal/medut.a" -Wl,-noall_load \
   "${OPENSSL_ROOT}/lib/libssl.a" \
   "${OPENSSL_ROOT}/lib/libcrypto.a" \
   -framework CoreFoundation \
@@ -69,5 +69,5 @@ clang -dynamiclib \
 
 echo ""
 echo "Done. Output:"
-ls -lh "${DIST}/universal/echosdk.a" "${DYLIB}"
-lipo -info "${DIST}/universal/echosdk.a"
+ls -lh "${DIST}/universal/medut.a" "${DYLIB}"
+lipo -info "${DIST}/universal/medut.a"

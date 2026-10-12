@@ -1,5 +1,5 @@
 # patch-baresip-sources.cmake
-# Apply EchoSDK's baresip patches at build time.  Ten jobs:
+# Apply Medut's baresip patches at build time.  Ten jobs:
 #   1. Disable baresip's executables (baresip_exe, test/, webrtc/) everywhere.
 #   2. Make dtls_srtp recover from a handshake that is perturbed or stalls.
 #   3. Keep a re-REGISTER from un-REGISTERing the binding it refreshes.
@@ -26,7 +26,7 @@
 # Jobs 5-9 are the ones nothing in the SDK calls into, so nothing would notice
 # them missing.  Each defines a `bsdk_patch_*` string that src/core.c
 # references: a tree without the patch fails to link, and
-# `strings libechosdk.so | grep echosdk-patch` names the versions a binary
+# `strings libmedut.so | grep medut-patch` names the versions a binary
 # carries.  The version is also the job's idempotence marker; a file patched by
 # an older version is restored from the pinned revision and patched afresh
 # (bsdk_restore_if_stale), since a changed hunk can be neither found in nor
@@ -35,14 +35,14 @@
 #
 # The SDK owns the public websock_connect() and sip_dialog_route() names:
 # libre's definitions are renamed to __real_* (cmake/patch-re-sources.cmake)
-# and the only provider of the public symbols is EchoSDK's src/ws_path.c.
+# and the only provider of the public symbols is Medut's src/ws_path.c.
 # baresip's executables link libre directly without ws_path.c, so they stop
 # linking — and the SDK only ever consumes libbaresip.a anyway.  This is the
 # executable-disabling half of what fix-msvc-baresip.cmake did for MSVC,
 # promoted to every platform now that the rename is unconditional.
 #
-# Idempotent behind the "# EchoSDK-disabled" marker (the legacy
-# "# EchoSDK-msvc-disabled" marker from fix-msvc-baresip.cmake also counts, so
+# Idempotent behind the "# Medut-disabled" marker (the legacy
+# "# Medut-msvc-disabled" marker from fix-msvc-baresip.cmake also counts, so
 # a Windows tree patched by the older script is left alone).
 
 if(NOT DEFINED SOURCE_DIR)
@@ -55,7 +55,7 @@ endif()
 function(bsdk_restore_if_stale _file _marker)
   file(READ "${_file}" _c)
   string(FIND "${_c}" "${_marker}" _cur)
-  string(FIND "${_c}" "EchoSDK-patched" _any)
+  string(FIND "${_c}" "Medut-patched" _any)
   if(NOT _cur EQUAL -1 OR _any EQUAL -1)
     return()
   endif()
@@ -63,7 +63,7 @@ function(bsdk_restore_if_stale _file _marker)
   find_program(_BSDK_GIT git)
   if(NOT _BSDK_GIT)
     message(FATAL_ERROR
-      "patch-baresip-sources: ${_rel} carries an older EchoSDK patch and git "
+      "patch-baresip-sources: ${_rel} carries an older Medut patch and git "
       "is not available to restore it. Re-fetch third_party/baresip "
       "(scripts/fetch-third-party.sh) and build again.")
   endif()
@@ -112,8 +112,8 @@ endif()
 
 file(READ "${BARESIP_CMAKE}" CONTENT)
 
-string(FIND "${CONTENT}" "# EchoSDK-disabled" _ALREADY)
-string(FIND "${CONTENT}" "# EchoSDK-msvc-disabled" _ALREADY_MSVC)
+string(FIND "${CONTENT}" "# Medut-disabled" _ALREADY)
+string(FIND "${CONTENT}" "# Medut-msvc-disabled" _ALREADY_MSVC)
 if(NOT _ALREADY EQUAL -1 OR NOT _ALREADY_MSVC EQUAL -1)
   message(STATUS "patch-baresip-sources: ${BARESIP_CMAKE} already patched (executables disabled)")
   set(_SKIP_EXES TRUE)
@@ -139,15 +139,15 @@ endforeach()
 
 string(REPLACE
   "add_subdirectory(webrtc)"
-  "# add_subdirectory(webrtc)  # EchoSDK-disabled"
+  "# add_subdirectory(webrtc)  # Medut-disabled"
   CONTENT "${CONTENT}")
 string(REPLACE
   "add_subdirectory(test)"
-  "# add_subdirectory(test)  # EchoSDK-disabled"
+  "# add_subdirectory(test)  # Medut-disabled"
   CONTENT "${CONTENT}")
 string(REPLACE
   "add_executable(baresip_exe src/main.c)"
-  "add_executable(baresip_exe EXCLUDE_FROM_ALL src/main.c)  # EchoSDK-disabled"
+  "add_executable(baresip_exe EXCLUDE_FROM_ALL src/main.c)  # Medut-disabled"
   CONTENT "${CONTENT}")
 # The exe's OUTPUT_NAME collides with the library target's name: Ninja resolves
 # `--build --target baresip` to the FILE named baresip (the excluded exe) and
@@ -155,11 +155,11 @@ string(REPLACE
 # library on every generator.
 string(REPLACE
   "set_target_properties(baresip_exe PROPERTIES OUTPUT_NAME baresip)"
-  "set_target_properties(baresip_exe PROPERTIES OUTPUT_NAME baresip_exe)  # EchoSDK-disabled"
+  "set_target_properties(baresip_exe PROPERTIES OUTPUT_NAME baresip_exe)  # Medut-disabled"
   CONTENT "${CONTENT}")
 string(REPLACE
   "install(TARGETS baresip_exe baresip"
-  "install(TARGETS baresip  # EchoSDK-disabled baresip_exe"
+  "install(TARGETS baresip  # Medut-disabled baresip_exe"
   CONTENT "${CONTENT}")
 
 file(WRITE "${BARESIP_CMAKE}" "${CONTENT}")
@@ -209,7 +209,7 @@ if(NOT EXISTS "${DTLS_SRTP_C}")
 endif()
 
 file(READ "${DTLS_SRTP_C}" DCONTENT)
-string(FIND "${DCONTENT}" "EchoSDK-patched" _DTLS_DONE)
+string(FIND "${DCONTENT}" "Medut-patched" _DTLS_DONE)
 
 if(NOT _DTLS_DONE EQUAL -1)
   message(STATUS "patch-baresip-sources: ${DTLS_SRTP_C} already patched (dtls recovery)")
@@ -255,7 +255,7 @@ endif()
 # hunk N) that binding is the one the new client is about to REGISTER — so
 # the AOR goes empty for a round trip, or for good when the un-REGISTER is
 # deferred behind an in-flight request (hunk O).  sipreg_release() is libre's
-# EchoSDK-patched free for exactly this hand-off.
+# Medut-patched free for exactly this hand-off.
 # ---------------------------------------------------------------------------
 
 set(REG_C "${SOURCE_DIR}/src/reg.c")
@@ -271,7 +271,7 @@ set(_REG_OLD [=[
 ]=])
 set(_REG_NEW [=[
 	failed = sipreg_failed(reg->sipreg);
-	/* EchoSDK-patched: the new client refreshes this one's binding; see
+	/* Medut-patched: the new client refreshes this one's binding; see
 	 * sipreg_release() in libre. */
 	reg->sipreg = sipreg_release(reg->sipreg);
 	err = sipreg_alloc(&reg->sipreg, uag_sip(), reg_uri,
@@ -311,7 +311,7 @@ endif()
 # has no RTT for the leg.  Upstream baresip main carries the same text.
 #
 # Own anchor check rather than a hunk in Job 2: that job is skipped wholesale
-# on any tree already carrying "EchoSDK-patched", so a hunk added there would
+# on any tree already carrying "Medut-patched", so a hunk added there would
 # never reach an existing checkout.
 # ---------------------------------------------------------------------------
 
@@ -322,7 +322,7 @@ set(_MUX_OLD [=[
 				comp->is_rtp ? "RTP" : "RTCP"))
 ]=])
 set(_MUX_NEW [=[
-		/* EchoSDK-patched: under rtcp-mux this handshake keys RTCP too
+		/* Medut-patched: under rtcp-mux this handshake keys RTCP too
 		 * and there is no RTCP component to report it, while call.c
 		 * starts RTCP only on an event that names it. */
 		if (re_snprintf(buf, sizeof(buf), "%s,%s",
@@ -383,7 +383,7 @@ struct auenc_state {
 };
 ]=])
 set(_NEW_ENC0 [=[
-/* EchoSDK-patched (echosdk-patch opus-fec v2): the local DTX switch, set by
+/* Medut-patched (medut-patch opus-fec v2): the local DTX switch, set by
  * modules/opus/opus.c from the opus_dtx config key (job 7). */
 extern opus_int32 opus_dtx;
 
@@ -400,7 +400,7 @@ set(_OLD_ENC1 [=[
 	}
 ]=])
 set(_NEW_ENC1 [=[
-	/* EchoSDK-patched: unconditional, so the level can return to 0. */
+	/* Medut-patched: unconditional, so the level can return to 0. */
 	opus_encoder_ctl(aes->enc,
 			 OPUS_SET_PACKET_LOSS_PERC(opus_packet_loss));
 ]=])
@@ -408,7 +408,7 @@ set(_OLD_ENC2 [=[
 	(void)opus_encoder_ctl(aes->enc, OPUS_SET_DTX(prm.dtx));
 ]=])
 set(_NEW_ENC2 [=[
-	/* EchoSDK-patched: usedtx in the peer's fmtp is only its preference
+	/* Medut-patched: usedtx in the peer's fmtp is only its preference
 	 * (RFC 7587 6.1); DTX is ours to switch on, and a DTX stream decodes
 	 * anywhere. */
 	(void)opus_encoder_ctl(aes->enc, OPUS_SET_DTX(prm.dtx || opus_dtx));
@@ -420,7 +420,7 @@ set(_OLD_ENC3 [=[
 }
 ]=])
 set(_NEW_ENC3 [=[
-	/* EchoSDK-patched: a packet of 2 bytes or less is one the encoder says
+	/* Medut-patched: a packet of 2 bytes or less is one the encoder says
 	 * not to transmit (DTX).  Zero length makes src/audio.c skip the send
 	 * while its RTP timestamp still advances, so the next packet lands a
 	 * whole number of frames later (RFC 7587 3.1.3). */
@@ -430,7 +430,7 @@ set(_NEW_ENC3 [=[
 }
 ]=])
 set(_keys ENC0 ENC1 ENC2 ENC3)
-bsdk_patch_file("${OPUS_ENC_C}" "echosdk-patch opus-fec v2"
+bsdk_patch_file("${OPUS_ENC_C}" "medut-patch opus-fec v2"
   "expected loss can return to 0, local DTX, DTX frames dropped"
   "leaves FEC redundancy stuck once raised and sends DTX silence at 50 pps")
 
@@ -446,13 +446,13 @@ set(_NEW_DEC0 [=[
 struct audec_state {
 	OpusDecoder *dec;
 	unsigned ch;
-	/* EchoSDK-patched: how lost frames were filled in, for src/stats.c */
+	/* Medut-patched: how lost frames were filled in, for src/stats.c */
 	uint32_t n_fec;   /**< Rebuilt from the next packet's LBRR copy */
 	uint32_t n_plc;   /**< Concealed by the decoder alone           */
 };
 
 
-/* EchoSDK-patched: the split, read by src/stats.c through
+/* Medut-patched: the split, read by src/stats.c through
  * audio_decoder_state() (job 9). */
 int opus_decode_fec_stats(const struct audec_state *ads,
 			  uint32_t *fec, uint32_t *plc);
@@ -472,7 +472,7 @@ set(_OLD_DEC [=[
 	fec = buf && len && opus_packet_loss > 0;
 ]=])
 set(_NEW_DEC [=[
-	/* EchoSDK-patched: whether the peer sent FEC is not a question our
+	/* Medut-patched: whether the peer sent FEC is not a question our
 	 * own expected loss (opus_packet_loss) can answer — the packet is.
 	 * Without an LBRR copy libopus would conceal anyway; asking first
 	 * tells the two apart for the counters. */
@@ -499,16 +499,16 @@ set(_OLD_DECMARK [=[
 int opus_decode_pkloss(struct audec_state *ads,
 ]=])
 set(_NEW_DECMARK [=[
-/* EchoSDK-patched: src/core.c references this, so a build without the FEC
+/* Medut-patched: src/core.c references this, so a build without the FEC
  * patch below fails to link instead of shipping without it. */
 extern const char bsdk_patch_opus_fec[];
-const char bsdk_patch_opus_fec[] = "echosdk-patch opus-fec v2";
+const char bsdk_patch_opus_fec[] = "medut-patch opus-fec v2";
 
 
 int opus_decode_pkloss(struct audec_state *ads,
 ]=])
 set(_keys DEC0 DEC DEC2 DECMARK)
-bsdk_patch_file("${OPUS_DEC_C}" "echosdk-patch opus-fec v2"
+bsdk_patch_file("${OPUS_DEC_C}" "medut-patch opus-fec v2"
   "FEC decode not gated on our expected loss, FEC/PLC split counted"
   "throws away the FEC the peer sends")
 
@@ -570,7 +570,7 @@ set(_OLD_AR1 [=[
 ]=])
 set(_NEW_AR1 [=[
 	bool done_first;              /**< First auplay write done flag      */
-	/* EchoSDK-patched: burst concealment, see aurecv_plc_playout() */
+	/* Medut-patched: burst concealment, see aurecv_plc_playout() */
 	size_t plc_level;             /**< aubuf bytes after last real frame */
 	size_t plc_frame_sz;          /**< Bytes of that frame               */
 	uint64_t plc_next_ts;         /**< Timestamp just after it           */
@@ -583,13 +583,13 @@ set(_OLD_AR2 [=[
 static int aurecv_stream_decode(struct audio_recv *ar,
 ]=])
 set(_NEW_AR2 [=[
-/* EchoSDK-patched: src/core.c references this, so a build without burst
+/* Medut-patched: src/core.c references this, so a build without burst
  * concealment fails to link instead of shipping without it. */
 extern const char bsdk_patch_aurecv_plc[];
-const char bsdk_patch_aurecv_plc[] = "echosdk-patch aurecv-plc v2";
+const char bsdk_patch_aurecv_plc[] = "medut-patch aurecv-plc v2";
 
 
-/* EchoSDK-patched: how many of `lostc` lost frames to conceal.  None that
+/* Medut-patched: how many of `lostc` lost frames to conceal.  None that
  * playout concealment has already played: again, they would only add delay.
  * Of the rest, always the last — the arriving packet's FEC rebuilds it, for
  * at most a frame of extra buffer — and otherwise as many as put the playout
@@ -620,7 +620,7 @@ static unsigned aurecv_plc_needed(struct audio_recv *ar, unsigned lostc)
 }
 
 
-/* EchoSDK-patched: the device wants `need` bytes and the buffer holds less.
+/* Medut-patched: the device wants `need` bytes and the buffer holds less.
  * Decode concealment into it now, rather than let it run dry into silence
  * and conceal the gap only when — and after — the next packet arrives.  Up
  * to 1 s of it after the last real frame: past that the stream has stopped
@@ -678,7 +678,7 @@ set(_NEW_AR3 [=[
 	if (!ac)
 		return 0;
 
-	/* EchoSDK-patched: playout concealment has already played this slot.
+	/* Medut-patched: playout concealment has already played this slot.
 	 * Decoded, the packet would be spliced into the concealment in
 	 * timestamp order and its length would stay on the delay.  Bounded:
 	 * the RTP timestamp is not unwrapped here, and without the bound a
@@ -703,7 +703,7 @@ set(_OLD_AR4 [=[
 ]=])
 set(_NEW_AR4 [=[
 	if (lostc && ac->plch) {
-		/* EchoSDK-patched: only the last aurecv_plc_needed() of them. */
+		/* Medut-patched: only the last aurecv_plc_needed() of them. */
 		for (unsigned i = lostc - aurecv_plc_needed(ar, lostc);
 		     i < lostc; i++) {
 ]=])
@@ -715,7 +715,7 @@ set(_OLD_AR5 [=[
 ]=])
 set(_NEW_AR5 [=[
 	err = aurecv_push_aubuf(ar, &af);
-	/* EchoSDK-patched: where burst concealment measures and continues. */
+	/* Medut-patched: where burst concealment measures and continues. */
 	if (!err && ar->aubuf && af.sampc && af.srate && af.ch) {
 		ar->plc_level    = aubuf_cur_size(ar->aubuf);
 		ar->plc_frame_sz = auframe_size(&af);
@@ -736,7 +736,7 @@ set(_OLD_AR6 [=[
 ]=])
 set(_NEW_AR6 [=[
 	if (ar->aubuf) {
-		/* EchoSDK-patched: conceal now rather than run dry */
+		/* Medut-patched: conceal now rather than run dry */
 		if (aubuf_cur_size(ar->aubuf) < auframe_size(af))
 			aurecv_plc_playout(ar, auframe_size(af));
 		aubuf_read_auframe(ar->aubuf, af);
@@ -754,7 +754,7 @@ set(_NEW_AR7 [=[
 	if (ac != ar->ac) {
 		ar->ac = ac;
 		ar->dec = mem_deref(ar->dec);
-		/* EchoSDK-patched: nothing to conceal from until the new
+		/* Medut-patched: nothing to conceal from until the new
 		 * codec's first frame. */
 		ar->plc_level    = 0;
 		ar->plc_frame_sz = 0;
@@ -769,7 +769,7 @@ const struct aucodec *aurecv_codec(const struct audio_recv *ar)
 {
 ]=])
 set(_NEW_AR8 [=[
-/* EchoSDK-patched: the decoder's state, for codec-specific counters that
+/* Medut-patched: the decoder's state, for codec-specific counters that
  * only it keeps (modules/opus/decode.c: the FEC/PLC split). */
 struct audec_state *aurecv_decoder(const struct audio_recv *ar)
 {
@@ -781,7 +781,7 @@ const struct aucodec *aurecv_codec(const struct audio_recv *ar)
 {
 ]=])
 set(_keys AR1 AR2 AR3 AR4 AR5 AR6 AR7 AR8)
-bsdk_patch_file("${AURECV_C}" "echosdk-patch aurecv-plc v2"
+bsdk_patch_file("${AURECV_C}" "medut-patch aurecv-plc v2"
   "burst concealment at playout"
   "plays a burst of loss as silence, or leaves the call permanently delayed after one")
 
@@ -790,7 +790,7 @@ bsdk_patch_file("${AURECV_C}" "echosdk-patch aurecv-plc v2"
 #
 # module_init() reads the opus_* config keys into file-scope globals and only
 # ever writes the ones a key is present for, so a value set by one
-# echosdk_init() survives into the next that leaves the key out: complexity
+# medut_init() survives into the next that leaves the key out: complexity
 # 0 stays 0, a pinned expected loss stays pinned.  The channel count is the
 # same one-way street — `if (!stereo || !sprop_stereo) opus.ch = 1;` can turn
 # stereo off and nothing ever turns it back on, so after one mono init every
@@ -808,10 +808,10 @@ static int module_init(void)
 {
 ]=])
 set(_NEW_OI1 [=[
-/* EchoSDK-patched: src/core.c references this, so a build without the
+/* Medut-patched: src/core.c references this, so a build without the
  * defaults reset below fails to link instead of shipping without it. */
 extern const char bsdk_patch_opus_init[];
-const char bsdk_patch_opus_init[] = "echosdk-patch opus-init v2";
+const char bsdk_patch_opus_init[] = "medut-patch opus-init v2";
 
 
 static int module_init(void)
@@ -825,8 +825,8 @@ set(_NEW_OI2 [=[
 	fmtp[0] = '\0';
 	fmtp_mirror[0] = '\0';
 
-	/* EchoSDK-patched: from the defaults every time; see job 7 in
-	 * EchoSDK's cmake/patch-baresip-sources.cmake. */
+	/* Medut-patched: from the defaults every time; see job 7 in
+	 * Medut's cmake/patch-baresip-sources.cmake. */
 	opus.ch          = 2;
 	opus.srate       = 48000;
 	opus.fmtp        = fmtp;
@@ -842,14 +842,14 @@ set(_OLD_OI3 [=[
 		opus.ch = 1;
 ]=])
 set(_NEW_OI3 [=[
-	opus.ch = (stereo && sprop_stereo) ? 2 : 1;   /* EchoSDK-patched */
+	opus.ch = (stereo && sprop_stereo) ? 2 : 1;   /* Medut-patched */
 ]=])
 set(_OLD_OI4 [=[
 opus_int32 opus_packet_loss = 0;
 ]=])
 set(_NEW_OI4 [=[
 opus_int32 opus_packet_loss = 0;
-opus_int32 opus_dtx = 0;   /* EchoSDK-patched: local DTX switch, encode.c */
+opus_int32 opus_dtx = 0;   /* Medut-patched: local DTX switch, encode.c */
 ]=])
 set(_OLD_OI5 [=[
 	if (0 == conf_get_bool(conf, "opus_dtx", &b)) {
@@ -860,12 +860,12 @@ set(_OLD_OI5 [=[
 set(_NEW_OI5 [=[
 	if (0 == conf_get_bool(conf, "opus_dtx", &b)) {
 
-		opus_dtx = b;   /* EchoSDK-patched: ours to switch, not the peer's */
+		opus_dtx = b;   /* Medut-patched: ours to switch, not the peer's */
 		n = re_snprintf(p, sizeof(fmtp) - str_len(p),
 				";usedtx=%d", b);
 ]=])
 set(_keys OI1 OI2 OI3 OI4 OI5)
-bsdk_patch_file("${OPUS_C}" "echosdk-patch opus-init v2"
+bsdk_patch_file("${OPUS_C}" "medut-patch opus-init v2"
   "defaults reset on every init, local DTX switch"
   "carries one init's opus settings, and mono, into every later one")
 
@@ -907,7 +907,7 @@ set(_NEW_JB1 [=[
 	JBUF_DRIFT_WINDOW  = 10 * 1000 /* [ms] */
 };
 
-/* EchoSDK-patched: adaptive sizing, see delay_target() */
+/* Medut-patched: adaptive sizing, see delay_target() */
 enum {
 	JB_HIST_BIN_MS     = 10,    /* delay histogram bin [ms]           */
 	JB_HIST_BINS       = 128,   /* bins; the last also holds above    */
@@ -925,7 +925,7 @@ set(_OLD_JB2 [=[
 ]=])
 set(_NEW_JB2 [=[
 		int32_t max_skew_ms;	 /**< Max. skew in [ms]              */
-		/* EchoSDK-patched: see delay_target() */
+		/* Medut-patched: see delay_target() */
 		float hist[JB_HIST_BINS]; /**< Decaying histogram of delay
 					   over the fastest packet      */
 		float hist_sum;		 /**< Total weight in hist           */
@@ -937,13 +937,13 @@ static uint32_t adjust_due_to_jitter(struct jbuf *jb, struct packet *p)
 {
 ]=])
 set(_NEW_JB3 [=[
-/* EchoSDK-patched: src/core.c references this, so a build without the
+/* Medut-patched: src/core.c references this, so a build without the
  * adaptive sizing below fails to link instead of shipping without it. */
 extern const char bsdk_patch_jbuf_adapt[];
-const char bsdk_patch_jbuf_adapt[] = "echosdk-patch jbuf-adapt v1";
+const char bsdk_patch_jbuf_adapt[] = "medut-patch jbuf-adapt v1";
 
 
-/* EchoSDK-patched: one packet's delay over the fastest packet seen
+/* Medut-patched: one packet's delay over the fastest packet seen
  * (jb->p.offset) goes into a histogram that forgets with JB_TAU_S. */
 static void delay_note(struct jbuf *jb, uint32_t transit)
 {
@@ -963,7 +963,7 @@ static void delay_note(struct jbuf *jb, uint32_t transit)
 }
 
 
-/* EchoSDK-patched: the delay that JB_QUANTILE of recent packets arrived
+/* Medut-patched: the delay that JB_QUANTILE of recent packets arrived
  * within, plus JB_MARGIN_MS, in timestamp units.  Grows at once; shrinks
  * by at most JB_SHRINK_MS per JB_SHRINK_EVERY_MS, so a quiet second does
  * not throw away the buffer the next burst needs, and each step is small. */
@@ -1023,7 +1023,7 @@ set(_NEW_JB4 [=[
 
 	uint32_t d_ms = delay_ms(d, jb->srate);
 
-	/* EchoSDK-patched: a timestamp jump with the sequence running on (a
+	/* Medut-patched: a timestamp jump with the sequence running on (a
 	 * PBX prompt handing over to an echo, say) is a new timeline, not
 	 * delay: start the fastest-packet baseline over instead of letting a
 	 * one-second step count as jitter. */
@@ -1045,7 +1045,7 @@ set(_OLD_JB5 [=[
 	}
 ]=])
 set(_NEW_JB5 [=[
-	/* EchoSDK-patched: size the buffer from the delays actually seen.
+	/* Medut-patched: size the buffer from the delays actually seen.
 	 * Upstream reset it to 2x the mean jitter on every third late packet,
 	 * which on a link whose delay comes in spikes sits far below the
 	 * spikes — and could shrink the buffer in answer to lateness. */
@@ -1063,7 +1063,7 @@ set(_NEW_JB6 [=[
 			STAT_INC(n_late_lost);
 			jb->p.late_pkts++;
 
-			/* EchoSDK-patched: the packets that came too late are
+			/* Medut-patched: the packets that came too late are
 			 * the ones the buffer most needs to hear about. */
 			if (jb->jbtype == JBUF_ADAPTIVE && jb->p.offset) {
 				delay_note(jb, (uint32_t)hdr->ts_arrive -
@@ -1072,7 +1072,7 @@ set(_NEW_JB6 [=[
 			}
 ]=])
 set(_keys JB1 JB2 JB3 JB4 JB5 JB6)
-bsdk_patch_file("${JBUF_C}" "echosdk-patch jbuf-adapt v1"
+bsdk_patch_file("${JBUF_C}" "medut-patch jbuf-adapt v1"
   "adaptive sizing from the delays seen"
   "holds the adaptive buffer at 2x the mean jitter, below every delay spike")
 
@@ -1099,7 +1099,7 @@ set(_OLD_AT1 [=[
 ]=])
 set(_NEW_AT1 [=[
  out:
-	/* EchoSDK-patched: a frame the encoder dropped (Opus DTX) leaves the
+	/* Medut-patched: a frame the encoder dropped (Opus DTX) leaves the
 	 * marker set, for the first packet after the gap (RFC 7587 3.1.3). */
 	tx->marker = (len == 0);
 }
@@ -1109,16 +1109,16 @@ static int tx_thread(void *arg)
 {
 ]=])
 set(_NEW_AT2 [=[
-/* EchoSDK-patched: src/core.c references this, so a build without the DTX
+/* Medut-patched: src/core.c references this, so a build without the DTX
  * marker fix fails to link instead of shipping without it. */
 extern const char bsdk_patch_audio_tx[];
-const char bsdk_patch_audio_tx[] = "echosdk-patch audio-tx v1";
+const char bsdk_patch_audio_tx[] = "medut-patch audio-tx v1";
 
 
 struct audec_state *aurecv_decoder(const struct audio_recv *ar);
 
 
-/* EchoSDK-patched: the receive decoder's state, for the codec-specific
+/* Medut-patched: the receive decoder's state, for the codec-specific
  * counters only it keeps (src/stats.c: the Opus FEC/PLC split). */
 struct audec_state *audio_decoder_state(const struct audio *a);
 struct audec_state *audio_decoder_state(const struct audio *a)
@@ -1131,7 +1131,7 @@ static int tx_thread(void *arg)
 {
 ]=])
 set(_keys AT1 AT2)
-bsdk_patch_file("${AUDIO_C}" "echosdk-patch audio-tx v1"
+bsdk_patch_file("${AUDIO_C}" "medut-patch audio-tx v1"
   "DTX marker and decoder state accessor"
   "sends the first packet after a DTX gap without its marker")
 
@@ -1158,7 +1158,7 @@ set(_OLD_PR1 [=[
 ]=])
 set(_NEW_PR1 [=[
 	uint64_t samps;
-	uint64_t holes;   /* EchoSDK-patched: NULL peeks zero-filled so far */
+	uint64_t holes;   /* Medut-patched: NULL peeks zero-filled so far */
 
 	void *arg;
 };
@@ -1174,7 +1174,7 @@ set(_NEW_PR2 [=[
 			memcpy((uint8_t *) st->sampv + idx, pabuf, rlen);
 		}
 		else {
-			/* EchoSDK-patched (echosdk-patch pulse-holes v1): a hole
+			/* Medut-patched (medut-patch pulse-holes v1): a hole
 			 * is the server's gap, not the microphone's silence.  It
 			 * has to be zero-filled, but never quietly: downstream
 			 * it reads exactly like a dead microphone (-127 dBov). */
@@ -1186,6 +1186,6 @@ set(_NEW_PR2 [=[
 		}
 ]=])
 set(_keys PR1 PR2)
-bsdk_patch_file("${PULSE_REC_C}" "echosdk-patch pulse-holes v1"
+bsdk_patch_file("${PULSE_REC_C}" "medut-patch pulse-holes v1"
   "capture holes counted"
   "zero-fills capture holes silently, indistinguishable from a dead microphone")

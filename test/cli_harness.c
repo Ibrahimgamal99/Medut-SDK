@@ -18,7 +18,7 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
-#include "../include/echosdk.h"
+#include "../include/medut.h"
 
 /* ── State machine ───────────────────────────────────────────────────────── */
 
@@ -27,27 +27,27 @@ static atomic_int g_established = 0;
 static atomic_int g_ended = 0;
 static atomic_int g_failed = 0;
 
-static echosdk_account_handle_t g_acct = NULL;
-static echosdk_call_handle_t    g_call = NULL;
+static medut_account_handle_t g_acct = NULL;
+static medut_call_handle_t    g_call = NULL;
 static const char              *g_call_target = NULL;
 
 /* ── Event callback ──────────────────────────────────────────────────────── */
 
-static void event_handler(const echosdk_event_t *ev, void *ud)
+static void event_handler(const medut_event_t *ev, void *ud)
 {
 	(void)ud;
 
 	switch (ev->type) {
 
-	case ECHOSDK_EV_REG_STATE:
+	case MEDUT_EV_REG_STATE:
 		switch (ev->u.reg.state) {
-		case ECHOSDK_REG_REGISTERED:
+		case MEDUT_REG_REGISTERED:
 			printf("[REG] Registered\n");
 			atomic_store(&g_registered, 1);
 
 			/* Place outgoing call if requested */
 			if (g_call_target && !g_call) {
-				int err = echosdk_call_invite(g_acct,
+				int err = medut_call_invite(g_acct,
 				                              g_call_target, &g_call);
 				if (err) {
 					printf("[ERR] invite failed: %d\n", err);
@@ -62,10 +62,10 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 			break;
 		/* RECONNECTING carries the same failure with a retry armed; the
 		 * harness has one shot, so it reports and stops either way. */
-		case ECHOSDK_REG_RECONNECTING:
-		case ECHOSDK_REG_FAILED:
+		case MEDUT_REG_RECONNECTING:
+		case MEDUT_REG_FAILED:
 			fprintf(stderr, "[REG] %s: %s\n",
-			        ev->u.reg.state == ECHOSDK_REG_RECONNECTING
+			        ev->u.reg.state == MEDUT_REG_RECONNECTING
 			                ? "Reconnecting" : "Failed",
 			        ev->u.reg.error_str ? ev->u.reg.error_str : "?");
 			atomic_store(&g_failed, 1);
@@ -75,19 +75,19 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 		}
 		break;
 
-	case ECHOSDK_EV_CALL_STATE:
+	case MEDUT_EV_CALL_STATE:
 		switch (ev->u.call_state.state) {
-		case ECHOSDK_CALL_ESTABLISHED:
+		case MEDUT_CALL_ESTABLISHED:
 			printf("[CALL] Established\n");
 			atomic_store(&g_established, 1);
 			/* Immediately hang up for test */
-			echosdk_call_hangup(ev->u.call_state.call);
+			medut_call_hangup(ev->u.call_state.call);
 			break;
-		case ECHOSDK_CALL_ENDED:
+		case MEDUT_CALL_ENDED:
 			printf("[CALL] Ended\n");
 			atomic_store(&g_ended, 1);
 			break;
-		case ECHOSDK_CALL_FAILED:
+		case MEDUT_CALL_FAILED:
 			fprintf(stderr, "[CALL] Failed: %s\n",
 			        ev->u.call_state.reason ? ev->u.call_state.reason : "?");
 			atomic_store(&g_failed, 1);
@@ -97,12 +97,12 @@ static void event_handler(const echosdk_event_t *ev, void *ud)
 		}
 		break;
 
-	case ECHOSDK_EV_LOG:
+	case MEDUT_EV_LOG:
 		if (getenv("HARNESS_VERBOSE"))
 			printf("[LOG] %s", ev->u.log.message);
 		break;
 
-	case ECHOSDK_EV_SDP_NEGOTIATION:
+	case MEDUT_EV_SDP_NEGOTIATION:
 		printf("[SDP] codec=%s crypto=%s\n",
 		       ev->u.sdp.negotiated_codec  ? ev->u.sdp.negotiated_codec  : "?",
 		       ev->u.sdp.negotiated_crypto ? ev->u.sdp.negotiated_crypto : "?");
@@ -154,34 +154,34 @@ int main(int argc, char *argv[])
 	g_call_target = call_to;
 
 	/* Init */
-	echosdk_config_t cfg;
-	echosdk_config_init(&cfg);
+	medut_config_t cfg;
+	medut_config_init(&cfg);
 	cfg.event_cb   = event_handler;
 	cfg.server_url = server;
 	cfg.log_level  = getenv("HARNESS_VERBOSE") ? 3 : 0;
 
-	int err = echosdk_init(&cfg);
+	int err = medut_init(&cfg);
 	if (err) {
-		fprintf(stderr, "[ERR] echosdk_init: %d\n", err);
+		fprintf(stderr, "[ERR] medut_init: %d\n", err);
 		return 1;
 	}
 
 	/* Create account */
-	echosdk_account_config_t acfg = {
+	medut_account_config_t acfg = {
 		.uri      = user,
 		.password = pass,
 	};
-	err = echosdk_account_create(&acfg, &g_acct);
+	err = medut_account_create(&acfg, &g_acct);
 	if (err) {
 		fprintf(stderr, "[ERR] account_create: %d\n", err);
-		echosdk_shutdown();
+		medut_shutdown();
 		return 1;
 	}
 
-	err = echosdk_account_register(g_acct);
+	err = medut_account_register(g_acct);
 	if (err) {
 		fprintf(stderr, "[ERR] account_register: %d\n", err);
-		echosdk_shutdown();
+		medut_shutdown();
 		return 1;
 	}
 
@@ -190,7 +190,7 @@ int main(int argc, char *argv[])
 	while (time(NULL) < deadline) {
 		if (atomic_load(&g_failed)) {
 			fprintf(stderr, "[FAIL] Operation failed\n");
-			echosdk_shutdown();
+			medut_shutdown();
 			return 1;
 		}
 		if (atomic_load(&g_ended))
@@ -206,6 +206,6 @@ int main(int argc, char *argv[])
 		printf("[OK] Test passed\n");
 	}
 
-	echosdk_shutdown();
+	medut_shutdown();
 	return result;
 }

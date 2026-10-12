@@ -1,5 +1,5 @@
 # patch-re-sources.cmake
-# Apply EchoSDK's libre patches at build time.
+# Apply Medut's libre patches at build time.
 # Usage: cmake -DSOURCE_DIR=path/to/re -P patch-re-sources.cmake
 #
 # third_party/re is fetched by scripts/fetch-third-party.sh at a pinned
@@ -8,13 +8,13 @@
 # Each patch is idempotent — it is skipped when its replacement text is
 # already in the file — and fails loudly when a libre bump moves the text it
 # splices at, in the spirit of the configure-time prototype guard in
-# CMakeLists.txt.  Every replacement carries an "EchoSDK-patched" comment so
+# CMakeLists.txt.  Every replacement carries an "Medut-patched" comment so
 # a patched tree is recognisable by eye and by grep.
 #
 # Why patches instead of GNU ld's --wrap (which used to carry two of these
 # fixes on Linux/Android): Apple's linker has no --wrap, so iOS builds
 # silently shipped without them.  The rename patches below are the
-# compile-time equivalent — libre's definition moves to __real_*, EchoSDK's
+# compile-time equivalent — libre's definition moves to __real_*, Medut's
 # src/ws_path.c owns the public name, and every call site resolves to it at
 # link time on every platform.  No linker flags, and dist/ archives no longer
 # require consumers to pass any.
@@ -25,13 +25,13 @@ endif()
 
 # Splice NEW in place of OLD in FILE, or verify it already happened.
 # OLD must match byte-for-byte (tabs included); NEW should carry an
-# "EchoSDK-patched" comment so the change is findable in the tree.
+# "Medut-patched" comment so the change is findable in the tree.
 #
 # Idempotency is decided per hunk, not per file: NEW itself is the marker.
-# It used to be "the file contains 'EchoSDK-patched' anywhere", which is one
+# It used to be "the file contains 'Medut-patched' anywhere", which is one
 # bit per file — the first hunk applied to ice/candpair.c would have made the
 # second report itself as already done and silently ship unapplied.
-function(echosdk_patch FILE OLD NEW WHAT)
+function(medut_patch FILE OLD NEW WHAT)
   if(NOT EXISTS "${FILE}")
     message(FATAL_ERROR "patch-re-sources: ${FILE} does not exist (${WHAT})")
   endif()
@@ -70,7 +70,7 @@ endfunction()
 # intended semantic anyway: these records exist to retransmit the response
 # until the ACK arrives.  A plain bug fix, upstreamable as-is.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/sipsess/reply.c"
+medut_patch("${SOURCE_DIR}/src/sipsess/reply.c"
 [=[
 int sipsess_reply_ack(struct sipsess *sess, const struct sip_msg *msg)
 {
@@ -89,7 +89,7 @@ int sipsess_reply_ack(struct sipsess *sess, const struct sip_msg *msg)
 [=[
 int sipsess_reply_ack(struct sipsess *sess, const struct sip_msg *msg)
 {
-	/* EchoSDK-patched: drain every reply record this ACK matches.
+	/* Medut-patched: drain every reply record this ACK matches.
 	 *
 	 * A UAS that sent a 1xx and the 2xx holds two records with the same
 	 * INVITE CSeq, and cmp_handler matches on the CSeq alone; freeing
@@ -124,11 +124,11 @@ int sipsess_reply_ack(struct sipsess *sess, const struct sip_msg *msg)
 # Record-Route, libre falls back to the peer's Contact — behind a reverse
 # proxy that names the server's own internal address, so the request dies in
 # DNS after being reported sent (RFC 7118 B.2 says a WebSocket client's
-# requests belong on the flow the registration established).  EchoSDK decides
+# requests belong on the flow the registration established).  Medut decides
 # the route in bsdk_ws_route_override() (src/ws_path.c); this rename lets it
 # own the public accessor.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/sip/dialog.c"
+medut_patch("${SOURCE_DIR}/src/sip/dialog.c"
 [=[
 const struct uri *sip_dialog_route(const struct sip_dialog *dlg)
 {
@@ -137,9 +137,9 @@ const struct uri *sip_dialog_route(const struct sip_dialog *dlg)
 ]=]
 [=[
 #ifdef RE_SIP_DIALOG_ROUTE_OVERRIDE
-/* EchoSDK-patched: the SDK owns the public accessor so in-dialog WebSocket
+/* Medut-patched: the SDK owns the public accessor so in-dialog WebSocket
  * requests can be routed over the registration flow (RFC 7118 B.2); see
- * EchoSDK's src/ws_path.c.  Same compile-time rename websock.c carries for
+ * Medut's src/ws_path.c.  Same compile-time rename websock.c carries for
  * RE_WEBSOCK_CONNECT_OVERRIDE — call sites keep the public name and resolve
  * to the SDK's definition at link time; no linker tricks involved. */
 const struct uri *__real_sip_dialog_route(const struct sip_dialog *dlg)
@@ -157,11 +157,11 @@ const struct uri *sip_dialog_route(const struct sip_dialog *dlg)
 #
 # The hook ws_path.c and the MSVC/Apple builds have referenced all along
 # (fix-msvc-re.cmake documents it) but which never actually existed in the
-# pinned libre — Apple builds could not even link.  EchoSDK's wrapper pins
+# pinned libre — Apple builds could not even link.  Medut's wrapper pins
 # the connect URI to the configured server and injects Origin/extra headers
 # and the keepalive override.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/websock/websock.c"
+medut_patch("${SOURCE_DIR}/src/websock/websock.c"
 [=[
 int websock_connect(struct websock_conn **connp, struct websock *sock,
 		    struct http_cli *cli, const char *uri, unsigned kaint,
@@ -170,9 +170,9 @@ int websock_connect(struct websock_conn **connp, struct websock *sock,
 ]=]
 [=[
 #ifdef RE_WEBSOCK_CONNECT_OVERRIDE
-/* EchoSDK-patched: the SDK owns the public name so it can pin the connect
+/* Medut-patched: the SDK owns the public name so it can pin the connect
  * URI to the configured server and inject the Origin/extra headers; see
- * EchoSDK's src/ws_path.c. */
+ * Medut's src/ws_path.c. */
 int __real_websock_connect(struct websock_conn **connp, struct websock *sock,
 		    struct http_cli *cli, const char *uri, unsigned kaint,
 		    websock_estab_h *estabh, websock_recv_h *recvh,
@@ -203,7 +203,7 @@ int websock_connect(struct websock_conn **connp, struct websock *sock,
 # ".invalid" domain, taken from the instance-id baresip already advertises in
 # the contact params.  The full rationale is in the hunk.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 static int send_handler(enum sip_transp tp, struct sa *src,
 			const struct sa *dst, struct mbuf *mb,
@@ -236,7 +236,7 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 }
 ]=]
 [=[
-/* EchoSDK-patched: the Contact host for a WebSocket registration.
+/* Medut-patched: the Contact host for a WebSocket registration.
  *
  * RFC 7118 s5.2.1 asks a WebSocket client to register a Contact whose host is
  * a random name in the ".invalid" domain, stable for the life of the instance.
@@ -249,7 +249,7 @@ static int send_handler(enum sip_transp tp, struct sa *src,
  * and callers differ: baresip passes the instance in the header params (which
  * land after `;expires=`), while a caller using
  * sipreg_set_contact_params() puts them inside the URI. */
-static int echosdk_ws_contact_host(char *buf, size_t sz,
+static int medut_ws_contact_host(char *buf, size_t sz,
 				   const struct sipreg *reg)
 {
 	const char *srcv[2];
@@ -298,7 +298,7 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 
 	reg->laddr = *src;
 
-	/* EchoSDK-patched: keep the local address out of a WebSocket Contact.
+	/* Medut-patched: keep the local address out of a WebSocket Contact.
 	 *
 	 * Over WS the address is meaningless — the server answers down the
 	 * connection the REGISTER arrived on — but it is not harmless, because
@@ -317,7 +317,7 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 	 * behaviour: a duplicate binding is a delay, while an unroutable Contact
 	 * would be a registration that never receives a call at all. */
 	if ((tp == SIP_TRANSP_WS || tp == SIP_TRANSP_WSS) &&
-	    0 == echosdk_ws_contact_host(host, sizeof(host), reg)) {
+	    0 == medut_ws_contact_host(host, sizeof(host), reg)) {
 
 		err = mbuf_printf(mb,
 				  "Contact: <sip:%s@%s%s%s%s>;expires=%u%s%s",
@@ -379,33 +379,33 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 # unaffected, and so is every address-based Contact, where the old binding is
 # a different URI and removing it is the point.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 static int request(struct sipreg *reg, bool reset_ls);
 ]=]
 [=[
 static int request(struct sipreg *reg, bool reset_ls);
-/* EchoSDK-patched: see echosdk_contact_is_instance() below. */
-static bool echosdk_contact_is_instance(const struct sipreg *reg);
+/* Medut-patched: see medut_contact_is_instance() below. */
+static bool medut_contact_is_instance(const struct sipreg *reg);
 ]=]
-"forward declaration of echosdk_contact_is_instance")
+"forward declaration of medut_contact_is_instance")
 
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 	if (reg->terminated && !reg->registered)
 		goto out;
 ]=]
 [=[
-	/* EchoSDK-patched: a terminated client with an instance Contact does
+	/* Medut-patched: a terminated client with an instance Contact does
 	 * not answer a challenge either — the retry would go out as an
 	 * authenticated expires=0 for the binding a successor now holds. */
 	if (reg->terminated &&
-	    (!reg->registered || echosdk_contact_is_instance(reg)))
+	    (!reg->registered || medut_contact_is_instance(reg)))
 		goto out;
 ]=]
 "terminated instance-Contact registration: no re-challenge")
 
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 	else if (reg->terminated) {
 		if (!reg->registered || request(reg, true))
@@ -414,17 +414,17 @@ echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 ]=]
 [=[
 	else if (reg->terminated) {
-		/* EchoSDK-patched: the deferred un-REGISTER of a freed client.
+		/* Medut-patched: the deferred un-REGISTER of a freed client.
 		 * For an instance Contact it would land after the successor's
 		 * REGISTER and delete that binding. */
-		if (!reg->registered || echosdk_contact_is_instance(reg) ||
+		if (!reg->registered || medut_contact_is_instance(reg) ||
 		    request(reg, true))
 			mem_deref(reg);
 	}
 ]=]
 "terminated instance-Contact registration: no deferred un-REGISTER")
 
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 void sipreg_unregister(struct sipreg *reg)
 {
@@ -456,14 +456,14 @@ void sipreg_unregister(struct sipreg *reg)
 }
 
 
-/* EchoSDK-patched: does this registration's Contact name the instance rather
+/* Medut-patched: does this registration's Contact name the instance rather
  * than the local address?
  *
  * True for a WebSocket registration carrying the per-instance ".invalid"
  * host (see send_handler()).  That Contact is the same URI on every network
  * and from every registration client of this instance, so any later REGISTER
  * from it refreshes the very binding this client holds. */
-static bool echosdk_contact_is_instance(const struct sipreg *reg)
+static bool medut_contact_is_instance(const struct sipreg *reg)
 {
 	char host[64];
 
@@ -473,12 +473,12 @@ static bool echosdk_contact_is_instance(const struct sipreg *reg)
 	if (reg->tp != SIP_TRANSP_WS && reg->tp != SIP_TRANSP_WSS)
 		return false;
 
-	return 0 == echosdk_ws_contact_host(host, sizeof(host), reg);
+	return 0 == medut_ws_contact_host(host, sizeof(host), reg);
 }
 
 
 /**
- * EchoSDK-patched: free a registration client that a new one is replacing
+ * Medut-patched: free a registration client that a new one is replacing
  *
  * Like mem_deref(), except that a client whose Contact names the instance
  * sends no un-REGISTER on the way out: its successor is about to REGISTER
@@ -491,7 +491,7 @@ static bool echosdk_contact_is_instance(const struct sipreg *reg)
  */
 struct sipreg *sipreg_release(struct sipreg *reg)
 {
-	if (reg && echosdk_contact_is_instance(reg))
+	if (reg && medut_contact_is_instance(reg))
 		reg->registered = false;
 
 	return mem_deref(reg);
@@ -499,13 +499,13 @@ struct sipreg *sipreg_release(struct sipreg *reg)
 ]=]
 "sipreg_release(): free a replaced client without un-REGISTERing")
 
-echosdk_patch("${SOURCE_DIR}/include/re_sipreg.h"
+medut_patch("${SOURCE_DIR}/include/re_sipreg.h"
 [=[
 void sipreg_unregister(struct sipreg *reg);
 ]=]
 [=[
 void sipreg_unregister(struct sipreg *reg);
-/* EchoSDK-patched: see src/sipreg/reg.c */
+/* Medut-patched: see src/sipreg/reg.c */
 struct sipreg *sipreg_release(struct sipreg *reg);
 ]=]
 "sipreg_release() declaration")
@@ -539,7 +539,7 @@ struct sipreg *sipreg_release(struct sipreg *reg);
 # A transport flush (handover) frees the list without signalling it, so the
 # SDK's own re-REGISTER is not doubled.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/src/sip/sip.h"
+medut_patch("${SOURCE_DIR}/src/sip/sip.h"
 [=[
 int  sip_keepalive_tcp(struct sip_keepalive *ka, struct sip_conn *conn,
 		       uint32_t interval);
@@ -547,12 +547,12 @@ int  sip_keepalive_tcp(struct sip_keepalive *ka, struct sip_conn *conn,
 [=[
 int  sip_keepalive_tcp(struct sip_keepalive *ka, struct sip_conn *conn,
 		       uint32_t interval);
-/* EchoSDK-patched: see sip_keepalive_watch() */
+/* Medut-patched: see sip_keepalive_watch() */
 int  sip_keepalive_conn_watch(struct sip_keepalive *ka, struct sip_conn *conn);
 ]=]
 "sip_keepalive_conn_watch() declaration")
 
-echosdk_patch("${SOURCE_DIR}/src/sip/transp.c"
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
 [=[
 		tmr_start(&conn->tmr_ka, sip_keepalive_wait(conn->ka_interval),
 			  conn_keepalive_handler, conn);
@@ -570,7 +570,7 @@ echosdk_patch("${SOURCE_DIR}/src/sip/transp.c"
 }
 
 
-/* EchoSDK-patched: be told when this connection closes, and nothing else —
+/* Medut-patched: be told when this connection closes, and nothing else —
  * no keepalive pings.  conn_close() signals conn->kal; a connection freed
  * by a transport flush drops the list without signalling it. */
 int  sip_keepalive_conn_watch(struct sip_keepalive *ka, struct sip_conn *conn)
@@ -585,7 +585,7 @@ int  sip_keepalive_conn_watch(struct sip_keepalive *ka, struct sip_conn *conn)
 ]=]
 "sip_keepalive_conn_watch(): watch a connection for close")
 
-echosdk_patch("${SOURCE_DIR}/src/sip/keepalive.c"
+medut_patch("${SOURCE_DIR}/src/sip/keepalive.c"
 [=[
 uint64_t sip_keepalive_wait(uint32_t interval)
 {
@@ -600,7 +600,7 @@ uint64_t sip_keepalive_wait(uint32_t interval)
 
 
 /**
- * EchoSDK-patched: call a handler when the connection a message arrived on
+ * Medut-patched: call a handler when the connection a message arrived on
  * closes
  *
  * The close-detection half of sip_keepalive_start(), without its keepalive
@@ -659,7 +659,7 @@ int sip_keepalive_watch(struct sip_keepalive **kap, struct sip *sip,
 ]=]
 "sip_keepalive_watch(): close notification without pings")
 
-echosdk_patch("${SOURCE_DIR}/include/re_sip.h"
+medut_patch("${SOURCE_DIR}/include/re_sip.h"
 [=[
 int sip_keepalive_start(struct sip_keepalive **kap, struct sip *sip,
 			const struct sip_msg *msg, uint32_t interval,
@@ -669,14 +669,14 @@ int sip_keepalive_start(struct sip_keepalive **kap, struct sip *sip,
 int sip_keepalive_start(struct sip_keepalive **kap, struct sip *sip,
 			const struct sip_msg *msg, uint32_t interval,
 			sip_keepalive_h *kah, void *arg);
-/* EchoSDK-patched: see src/sip/keepalive.c */
+/* Medut-patched: see src/sip/keepalive.c */
 int sip_keepalive_watch(struct sip_keepalive **kap, struct sip *sip,
 			const struct sip_msg *msg,
 			sip_keepalive_h *kah, void *arg);
 ]=]
 "sip_keepalive_watch() declaration")
 
-echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
 		if (reg->regid > 0 && !reg->terminated && !reg->ka)
 			start_outbound(reg, msg);
@@ -686,7 +686,7 @@ echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 		if (reg->regid > 0 && !reg->terminated && !reg->ka)
 			start_outbound(reg, msg);
 
-		/* EchoSDK-patched: without outbound, still hear about the
+		/* Medut-patched: without outbound, still hear about the
 		 * connection this binding lives on closing — keepalive_handler()
 		 * turns that into a registration failure, as it does for an
 		 * outbound flow.  A no-op over UDP.  See sip_keepalive_watch(). */
@@ -709,7 +709,7 @@ echosdk_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 # back.  libre parses the number (rtcp_rr.last_seq) and drops it; keeping it
 # lets src/adapt.c see a report that has not moved while we kept sending.
 # ---------------------------------------------------------------------------
-echosdk_patch("${SOURCE_DIR}/include/re_rtp.h"
+medut_patch("${SOURCE_DIR}/include/re_rtp.h"
 [=[
 	struct {
 		uint32_t sent;  /**< Tx RTP Packets                  */
@@ -722,25 +722,25 @@ echosdk_patch("${SOURCE_DIR}/include/re_rtp.h"
 		uint32_t sent;  /**< Tx RTP Packets                  */
 		int lost;       /**< Tx RTP Packets Lost             */
 		uint32_t jit;   /**< Tx Inter-arrival Jitter in [us] */
-		/* EchoSDK-patched: see src/rtp/sess.c handle_rr_block() */
+		/* Medut-patched: see src/rtp/sess.c handle_rr_block() */
 		uint32_t ehsn;  /**< Highest seq. the peer has received */
 	} tx;
 ]=]
 "rtcp_stats: peer's extended highest sequence number")
 
-echosdk_patch("${SOURCE_DIR}/src/rtp/rtcp.h"
+medut_patch("${SOURCE_DIR}/src/rtp/rtcp.h"
 [=[
 	uint32_t rtt;             /**< Round-trip time in [us]             */
 };
 ]=]
 [=[
 	uint32_t rtt;             /**< Round-trip time in [us]             */
-	uint32_t ehsn;            /**< EchoSDK-patched: peer's highest seq */
+	uint32_t ehsn;            /**< Medut-patched: peer's highest seq */
 };
 ]=]
 "rtp_member: peer's extended highest sequence number")
 
-echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
+medut_patch("${SOURCE_DIR}/src/rtp/sess.c"
 [=[
 	/* Lost */
 	mbr->cum_lost = rr->lost;
@@ -749,12 +749,12 @@ echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
 	/* Lost */
 	mbr->cum_lost = rr->lost;
 
-	/* EchoSDK-patched: what the peer has heard of us at all */
+	/* Medut-patched: what the peer has heard of us at all */
 	mbr->ehsn = rr->last_seq;
 ]=]
 "handle_rr_block: keep the peer's extended highest sequence number")
 
-echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
+medut_patch("${SOURCE_DIR}/src/rtp/sess.c"
 [=[
 	stats->tx.lost = mbr->cum_lost;
 	stats->tx.jit  = mbr->jit;
@@ -762,6 +762,6 @@ echosdk_patch("${SOURCE_DIR}/src/rtp/sess.c"
 [=[
 	stats->tx.lost = mbr->cum_lost;
 	stats->tx.jit  = mbr->jit;
-	stats->tx.ehsn = mbr->ehsn;   /* EchoSDK-patched */
+	stats->tx.ehsn = mbr->ehsn;   /* Medut-patched */
 ]=]
 "rtcp_stats: report the peer's extended highest sequence number")

@@ -8,7 +8,7 @@ Usage:
     python quickstart.py alice@pbx.example.com secret bob@...  # legacy CLI mode (dial)
 
 Debug:
-    ECHOSDK_DEBUG_INIT=1 python quickstart.py account.json     # verbose init/shutdown trace
+    MEDUT_DEBUG_INIT=1 python quickstart.py account.json     # verbose init/shutdown trace
 
 Minimal JSON account config (account.json):
 {
@@ -45,7 +45,7 @@ import threading
 import time
 from typing import Optional
 
-import echo_sdk as sdk
+import medut as sdk
 
 STATS_INTERVAL_S = 5.0
 

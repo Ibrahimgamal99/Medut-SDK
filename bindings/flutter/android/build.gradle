@@ -11,11 +11,11 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-group = 'dev.echosdk.flutter'
+group = 'dev.medut.flutter'
 version = '1.0.0'
 
 android {
-    namespace = 'dev.echosdk.flutter'
+    namespace = 'dev.medut.flutter'
     // AGP 9 requires compileSdk >= 35; harmless on older AGP.
     compileSdk = 36
 
@@ -32,7 +32,7 @@ android {
         jvmTarget = '17'
     }
 
-    // Prebuilt libechosdk.so per ABI lives in src/main/jniLibs/<abi>/
+    // Prebuilt libmedut.so per ABI lives in src/main/jniLibs/<abi>/
     // (populated by scripts/build-android.sh).
     packagingOptions {
         jniLibs {

@@ -1,5 +1,5 @@
 /**
- * @file ice_gen.c  echo-ice: generation lifecycle
+ * @file ice_gen.c  medut-ice: generation lifecycle
  *
  * A generation is one ICE credential set — the initial one, or one restart.
  * It owns its ports, candidates, pairs and the ping table, and exactly one

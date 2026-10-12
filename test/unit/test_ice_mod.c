@@ -1,5 +1,5 @@
 /**
- * @file test_ice_mod.c  echo-ice: the baresip media-NAT module, driven as
+ * @file test_ice_mod.c  medut-ice: the baresip media-NAT module, driven as
  *                        baresip drives it
  *
  * Two "calls" on loopback with real UDP sockets.  The test plays baresip:
@@ -15,7 +15,7 @@
 #include <string.h>
 #include <re.h>
 #include <baresip.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 #include "../../src/ice/ice_internal.h"
 
 struct bsdk_ctx g_bsdk;
@@ -162,18 +162,18 @@ void bsdk_netmon_call_ice_state(struct call *bc, int prev, int now)
 }
 
 /* The SDK's call registry and event queue: the module looks the baresip
- * call up to record its ICE state and to post ECHOSDK_EV_ICE_STATE.  No
+ * call up to record its ICE state and to post MEDUT_EV_ICE_STATE.  No
  * wrappers exist here, so nothing is found and nothing is posted. */
-struct echosdk_call *bsdk_call_find(const struct call *bc)
+struct medut_call *bsdk_call_find(const struct call *bc)
 {
 	(void)bc;
 	return NULL;
 }
-struct echosdk_queued_event *bsdk_qev_alloc(void)
+struct medut_queued_event *bsdk_qev_alloc(void)
 {
-	return mem_zalloc(sizeof(struct echosdk_queued_event), NULL);
+	return mem_zalloc(sizeof(struct medut_queued_event), NULL);
 }
-bool bsdk_event_post_qev(struct echosdk_queued_event *qev)
+bool bsdk_event_post_qev(struct medut_queued_event *qev)
 {
 	mem_deref(qev);
 	return true;

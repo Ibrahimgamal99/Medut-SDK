@@ -14,7 +14,7 @@
 
 #include <unistd.h>
 #include <re.h>
-#include "../../src/echosdk_internal.h"
+#include "../../src/medut_internal.h"
 
 const char *bsdk_platform_ca_bundle(const char *dir)
 {
@@ -34,7 +34,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 			return bundles[i];
 	}
 
-	warning("EchoSDK: no system CA bundle found; TLS server verification "
+	warning("Medut: no system CA bundle found; TLS server verification "
 	        "will fail unless ca_cert_path is set\n");
 	return NULL;
 }

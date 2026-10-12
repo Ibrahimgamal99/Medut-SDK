@@ -1,5 +1,5 @@
 /**
- * @file ice_mod.c  echo-ice: the baresip media-NAT module and SDK seams
+ * @file ice_mod.c  medut-ice: the baresip media-NAT module and SDK seams
  *
  * Registers as media-NAT "ice" (the id baresip matches to advertise
  * `Supported: ice`, and ftag "+sip.ice" for the Contact) and owns
@@ -22,7 +22,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "echosdk_internal.h"
+#include "medut_internal.h"
 #include "ice_internal.h"
 
 
@@ -383,7 +383,7 @@ static void release_offer(struct icea_sess *s, const char *why)
 		 * candidates would make the peer fall back to c= — a policy
 		 * violation.  Initial offer: fail the call fast.  Restart:
 		 * no re-INVITE, report, leave the call as it is. */
-		warning("EchoSDK/ice: relay-only policy and no relayed"
+		warning("Medut/ice: relay-only policy and no relayed"
 			" candidate (%s) — %s\n", why,
 			s->restarting ? "not re-offering" : "failing the call");
 		if (s->restarting) {
@@ -401,7 +401,7 @@ static void release_offer(struct icea_sess *s, const char *why)
 		/* A late report on an offer already out (2026-08-31 lesson):
 		 * never a re-INVITE mid-handshake.  The prflx rule in
 		 * on_selected() decides whether the new address needs one. */
-		debug("EchoSDK/ice: gathering reported again after the offer"
+		debug("Medut/ice: gathering reported again after the offer"
 		      " went out (%s) — nothing to send\n", why);
 		return;
 	}
@@ -410,7 +410,7 @@ static void release_offer(struct icea_sess *s, const char *why)
 	s->restarting = false;
 	s->released   = true;
 
-	info("EchoSDK/ice: %s — %s\n",
+	info("Medut/ice: %s — %s\n",
 	     was_restart ? "restart gathered" : "gathered", why);
 
 	estab_release(s, 0, 0, NULL);
@@ -432,7 +432,7 @@ static void gather_deadline_h(void *arg)
 	if (s->released && !s->restarting)
 		return;
 
-	warning("EchoSDK/ice: %s gathering did not complete in %u ms —"
+	warning("Medut/ice: %s gathering did not complete in %u ms —"
 		" offering what exists\n",
 		s->restarting ? "restart" : "candidate",
 		g_bsdk.cfg.ice_gathering_timeout_ms
@@ -505,14 +505,14 @@ static enum icea_state sess_state(const struct icea_sess *s)
 }
 
 
-/* ECHOSDK_EV_ICE_STATE, built the way netmon_emit() builds its events:
+/* MEDUT_EV_ICE_STATE, built the way netmon_emit() builds its events:
  * strings packed into the queued event's own buffer, the call handle borrowed
  * (the wrapper outlives every event queued before its CALL_ENDED). */
 static void emit_ice_state(struct icea_sess *s, struct icea_media *m,
 			   enum icea_state prev, enum icea_state now)
 {
-	struct echosdk_call *lc = bsdk_call_find((struct call *)s->call);
-	struct echosdk_queued_event *qev;
+	struct medut_call *lc = bsdk_call_find((struct call *)s->call);
+	struct medut_queued_event *qev;
 	const struct icea_pair *p = m->cur ? m->cur->selected[0] : NULL;
 	size_t off = 0;
 	int n;
@@ -526,18 +526,18 @@ static void emit_ice_state(struct icea_sess *s, struct icea_media *m,
 	if (!qev)
 		return;
 
-	qev->ev.type              = ECHOSDK_EV_ICE_STATE;
-	qev->ev.u.ice.call        = (echosdk_call_handle_t)lc;
-	qev->ev.u.ice.state       = (echosdk_ice_state_t)now;
-	qev->ev.u.ice.prev        = (echosdk_ice_state_t)prev;
+	qev->ev.type              = MEDUT_EV_ICE_STATE;
+	qev->ev.u.ice.call        = (medut_call_handle_t)lc;
+	qev->ev.u.ice.state       = (medut_ice_state_t)now;
+	qev->ev.u.ice.prev        = (medut_ice_state_t)prev;
 	qev->ev.u.ice.generation  = m->cur ? m->cur->seq : 0;
-	qev->ev.u.ice.local_type  = p ? (echosdk_ice_cand_type_t)p->lc->type
-				      : ECHOSDK_ICE_CAND_NONE;
-	qev->ev.u.ice.remote_type = p ? (echosdk_ice_cand_type_t)p->rc->type
-				      : ECHOSDK_ICE_CAND_NONE;
+	qev->ev.u.ice.local_type  = p ? (medut_ice_cand_type_t)p->lc->type
+				      : MEDUT_ICE_CAND_NONE;
+	qev->ev.u.ice.remote_type = p ? (medut_ice_cand_type_t)p->rc->type
+				      : MEDUT_ICE_CAND_NONE;
 	qev->ev.u.ice.rtt_ms      = p ? (float)p->rtt_ms : 0.f;
-	qev->ev.u.ice.error       = now == ICEA_STATE_FAILED ? ECHOSDK_ERR_TIMEOUT
-							     : ECHOSDK_OK;
+	qev->ev.u.ice.error       = now == ICEA_STATE_FAILED ? MEDUT_ERR_TIMEOUT
+							     : MEDUT_OK;
 
 	qev->ev.u.ice.local_addr = qev->buf + off;
 	n = p ? re_snprintf(qev->buf + off, sizeof(qev->buf) - off, "%J",
@@ -567,7 +567,7 @@ static void on_state(struct icea_gen *gen, enum icea_state prev,
 	if (!s)
 		return;
 
-	info("EchoSDK/ice: '%s' gen %u: %s -> %s\n", sdp_media_name(m->sdpm),
+	info("Medut/ice: '%s' gen %u: %s -> %s\n", sdp_media_name(m->sdpm),
 	     gen->seq, icea_state_name(prev), icea_state_name(now));
 
 	if (now == ICEA_STATE_FAILED) {
@@ -611,7 +611,7 @@ static void on_selected(struct icea_gen *gen, unsigned compid, void *arg)
 	if (!m->connh_fired && p->ws == ICEA_WS_WRITABLE) {
 		if (!answer_is_out(s)) {
 			if (!m->held)
-				info("EchoSDK/ice: '%s' concluded on %J while"
+				info("Medut/ice: '%s' concluded on %J while"
 				     " ringing — media starts with the answer\n",
 				     sdp_media_name(m->sdpm), &p->rc->addr);
 			m->held = true;
@@ -631,7 +631,7 @@ static void on_selected(struct icea_gen *gen, unsigned compid, void *arg)
 	    p->lc->type == ICE_CAND_TYPE_PRFLX && s->released &&
 	    !s->restarting) {
 		s->reoffered = true;
-		info("EchoSDK/ice: selected local candidate %J was never"
+		info("Medut/ice: selected local candidate %J was never"
 		     " signalled (offered %J) — re-offering it\n",
 		     &p->lc->addr, &m->signalled);
 		s->reoffer_due = icea_now() + ICEA_REOFFER_SECURE_DEADLINE_MS;
@@ -843,14 +843,14 @@ static bool extra_if_h(const char *ifname, const struct sa *sa, void *arg)
 		err = icea_port_alloc(gen, i + 1, sa, ifname, cost, ctx->pmin,
 				      ctx->pmax, &port);
 		if (err) {
-			debug("EchoSDK/ice: no pinned port on %s (%j): %m —"
+			debug("Medut/ice: no pinned port on %s (%j): %m —"
 			      " not gathering there\n", ifname, sa, err);
 			return false;
 		}
 	}
 
 	ctx->added++;
-	info("EchoSDK/ice: also gathering on %s (%j, cost %d)\n", ifname, sa,
+	info("Medut/ice: also gathering on %s (%j, cost %d)\n", ifname, sa,
 	     cost);
 	return false;
 }
@@ -903,7 +903,7 @@ static void gen_carry_ports(struct icea_media *m, struct icea_gen *gen,
 		port->primary = sig_ifname && !strcmp(port->ifname, sig_ifname);
 		list_append(&gen->portl, &port->le, port);
 
-		info("EchoSDK/ice: carrying %s (%J%s) into generation %u\n",
+		info("Medut/ice: carrying %s (%J%s) into generation %u\n",
 		     port->ifname, &port->laddr,
 		     port->gathered ? ", mapping known" : "", gen->seq);
 	}
@@ -1044,7 +1044,7 @@ static void sess_start_gathering(struct icea_sess *s)
 			continue;
 		err = media_start_gather(m);
 		if (err)
-			warning("EchoSDK/ice: '%s': gathering failed to start"
+			warning("Medut/ice: '%s': gathering failed to start"
 				" (%m)\n", sdp_media_name(m->sdpm), err);
 	}
 }
@@ -1060,7 +1060,7 @@ static void media_maybe_start_checks(struct icea_media *m)
 		return;
 
 	if (icea_gen_start_checks(gen))
-		warning("EchoSDK/ice: '%s': could not start checks\n",
+		warning("Medut/ice: '%s': could not start checks\n",
 			sdp_media_name(m->sdpm));
 }
 
@@ -1086,7 +1086,7 @@ static void prime_conncheck(struct icea_sess *s)
 			media_maybe_start_checks(m);
 	}
 	s->primed = true;
-	info("EchoSDK/ice: running the connectivity checks while the call"
+	info("Medut/ice: running the connectivity checks while the call"
 	     " rings\n");
 }
 
@@ -1126,7 +1126,7 @@ static void media_watchdog_h(void *arg)
 
 		p = m->cur->selected[0];
 		if (p && p->ws == ICEA_WS_WRITABLE) {
-			warning("EchoSDK/ice: '%s': ICE is %s on %J but media"
+			warning("Medut/ice: '%s': ICE is %s on %J but media"
 				" never started — starting it now\n",
 				sdp_media_name(m->sdpm),
 				icea_state_name(m->cur->state), &p->rc->addr);
@@ -1137,7 +1137,7 @@ static void media_watchdog_h(void *arg)
 		pending = true;
 		if (!m->nomedia_warned) {
 			m->nomedia_warned = true;
-			warning("EchoSDK/ice: '%s': no writable ICE pair %u ms"
+			warning("Medut/ice: '%s': no writable ICE pair %u ms"
 				" after the answer (ICE %s) — no audio until"
 				" there is one\n", sdp_media_name(m->sdpm),
 				ICEA_MEDIA_START_DEADLINE_MS,
@@ -1182,14 +1182,14 @@ static void bounce_h(void *arg)
 				return;
 			}
 			s->reoffer_due = 0;
-			warning("EchoSDK/ice: media encryption not secure after"
+			warning("Medut/ice: media encryption not secure after"
 				" %u ms — dropping the candidate re-offer\n",
 				ICEA_REOFFER_SECURE_DEADLINE_MS);
 			return;
 		}
 		s->reoffer_due = 0;
 		write_all_sdp(s);
-		info("EchoSDK/ice: re-offering the selected candidate\n");
+		info("Medut/ice: re-offering the selected candidate\n");
 		estab_release(s, 0, 0, NULL);
 		return;
 	}
@@ -1205,7 +1205,7 @@ static void bounce_h(void *arg)
 			struct icea_media *m = le->data;
 			if (m->held) {
 				m->held = false;
-				info("EchoSDK/ice: '%s': answer is out —"
+				info("Medut/ice: '%s': answer is out —"
 				     " starting media\n", sdp_media_name(m->sdpm));
 				fire_connh(m);
 			}
@@ -1216,7 +1216,7 @@ static void bounce_h(void *arg)
 		s->bounce_restart = false;
 		int err = bsdk_ice_restart(s->call, NULL);
 		if (err && err != EALREADY)
-			warning("EchoSDK/ice: restart in answer to the peer's"
+			warning("Medut/ice: restart in answer to the peer's"
 				" failed (%m)\n", err);
 	}
 }
@@ -1379,21 +1379,21 @@ static void srv_dns_h(int err, const struct sa *srv, void *arg)
 	struct icea_server *server = NULL;
 
 	if (err || !srv || !sa_isset(srv, SA_ADDR)) {
-		warning("EchoSDK/ice: %s server %s could not be resolved (%m)"
+		warning("Medut/ice: %s server %s could not be resolved (%m)"
 			" — skipped\n", lk->turn ? "TURN" : "STUN", lk->host,
 			err);
 	}
 	else if (lk->proto != IPPROTO_UDP && !lk->turn) {
 		if (!s->srv_tcp_warned) {
 			s->srv_tcp_warned = true;
-			warning("EchoSDK/ice: STUN over TCP/TLS (%s) is not used"
+			warning("Medut/ice: STUN over TCP/TLS (%s) is not used"
 				" for gathering — skipped\n", lk->host);
 		}
 	}
 	else if (0 == icea_server_alloc(&server, lk->turn, lk->proto, lk->tls,
 					srv, lk->host, lk->user, lk->pass)) {
 		list_append(&s->serverl, &server->le, server);
-		info("EchoSDK/ice: %s server %J (%s)\n",
+		info("Medut/ice: %s server %J (%s)\n",
 		     lk->turn ? "TURN" : "STUN", srv, lk->host);
 	}
 
@@ -1423,7 +1423,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 	if (bsdk_ice_servers_for_call((const struct call *)s->call, &snap))
 		return 0;
 
-	s->conf.policy = snap.policy == ECHOSDK_ICE_TRANSPORT_RELAY
+	s->conf.policy = snap.policy == MEDUT_ICE_TRANSPORT_RELAY
 		       ? ICEA_TRANSPORT_RELAY : ICEA_TRANSPORT_ALL;
 
 	/* Pre-charge: a numeric host answers synchronously below. */
@@ -1438,7 +1438,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 			break;
 		lk->sess = s;
 		if (ice_url_parse(snap.v[i].url, lk)) {
-			warning("EchoSDK/ice: ICE server URL '%s' not understood"
+			warning("Medut/ice: ICE server URL '%s' not understood"
 				" — skipped\n", snap.v[i].url);
 			mem_deref(lk);
 			continue;
@@ -1464,7 +1464,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 					   s->af, lk->host, lk->port,
 					   srv_dns_h, lk);
 		if (err) {
-			warning("EchoSDK/ice: lookup of %s failed (%m)\n",
+			warning("Medut/ice: lookup of %s failed (%m)\n",
 				lk->host, err);
 			if (s->srv_pending)
 				s->srv_pending--;
@@ -1688,14 +1688,14 @@ static int icea_updateh(struct mnat_sess *sess)
 			 * module left the stream waiting for ever here;
 			 * we start plain media on the signalled address. */
 			if (!m->plain)
-				info("EchoSDK/ice: '%s': peer offers no ICE —"
+				info("Medut/ice: '%s': peer offers no ICE —"
 				     " plain RTP to the signalled address\n",
 				     sdp_media_name(m->sdpm));
 			fire_connh_plain(m);
 			continue;
 		}
 		if (!icea_sdp_peer_supports_ice(m->cur, m->sdpm)) {
-			warning("EchoSDK/ice: '%s': ICE mismatch — using the"
+			warning("Medut/ice: '%s': ICE mismatch — using the"
 				" signalled address\n", sdp_media_name(m->sdpm));
 			fire_connh_plain(m);
 			media_write_sdp(s, m);
@@ -1719,25 +1719,25 @@ static int icea_updateh(struct mnat_sess *sess)
 		 * backstop. */
 		if (sess_awaiting_secure(s)) {
 			if (s->restarting || s->bounce_restart) {
-				info("EchoSDK/ice: peer restarted ICE; ours is"
+				info("Medut/ice: peer restarted ICE; ours is"
 				     " already under way\n");
 			}
 			else if (s->rrestarts < ICEA_MAX_REMOTE_RESTARTS) {
 				s->rrestarts++;
-				info("EchoSDK/ice: peer restarted ICE (%u/%u) —"
+				info("Medut/ice: peer restarted ICE (%u/%u) —"
 				     " restarting ours\n", s->rrestarts,
 				     ICEA_MAX_REMOTE_RESTARTS);
 				s->bounce_restart = true;
 				tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 			}
 			else {
-				warning("EchoSDK/ice: peer has restarted ICE %u"
+				warning("Medut/ice: peer has restarted ICE %u"
 					" times — not answering again\n",
 					s->rrestarts);
 			}
 		}
 		else {
-			info("EchoSDK/ice: peer changed its ICE credentials"
+			info("Medut/ice: peer changed its ICE credentials"
 			     " while media is up — checks continue against"
 			     " the new ones\n");
 			/* The peer offered the restart, so it has taken the
@@ -1865,7 +1865,7 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 		 * carrying media until the new one is nominated */
 		err = gen_new(m, laddr);
 		if (err) {
-			warning("EchoSDK/ice: restart: '%s' failed (%m)\n",
+			warning("Medut/ice: restart: '%s' failed (%m)\n",
 				sdp_media_name(m->sdpm), err);
 			continue;
 		}
@@ -1914,10 +1914,10 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 	tmr_start(&s->tmr_gather, deadline, gather_deadline_h, s);
 
 	if (laddr && sa_isset(laddr, SA_ADDR))
-		info("EchoSDK/ice: restarting ICE on %j — new credentials,"
+		info("Medut/ice: restarting ICE on %j — new credentials,"
 		     " re-gathering, re-INVITE within %u ms\n", laddr, deadline);
 	else
-		info("EchoSDK/ice: restarting ICE — new credentials,"
+		info("Medut/ice: restarting ICE — new credentials,"
 		     " re-gathering, re-INVITE within %u ms\n", deadline);
 
 	return err;
@@ -2050,7 +2050,7 @@ void bsdk_ice_network_changed(void)
 			(void)media_start_gather(m);
 		}
 
-		info("EchoSDK/ice: network changed — re-gathering reflexive"
+		info("Medut/ice: network changed — re-gathering reflexive"
 		     " candidates\n");
 	}
 }
