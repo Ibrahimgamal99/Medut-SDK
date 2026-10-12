@@ -1,5 +1,5 @@
  
-              const char *medut_version(void);
+            const char *medut_version(void);
  const char *medut_strerror(int err);
 
 typedef struct medut_account *medut_account_handle_t;

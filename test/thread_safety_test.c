@@ -87,8 +87,8 @@ int main(void)
 	}
 
 	medut_account_config_t acfg = {
-		.aor       = "sip:test@127.0.0.1",
-		.auth_pass = "test",
+		.uri      = "sip:test@127.0.0.1",
+		.password = "test",
 	};
 	err = medut_account_create(&acfg, &g_acct);
 	if (err) {

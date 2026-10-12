@@ -133,8 +133,11 @@ test_ice_agent: test_ice_agent.c $(ICE_ENGINE_SRCS)
 
 # The module itself, with baresip's call/stream/log/config symbols stubbed
 # — the same discipline as test_ice_deadline (no libbaresip link).
+# glibc 2.42+ declares once_flag in <stdlib.h> under _GNU_SOURCE, and
+# re_thread.h typedefs its own unless ONCE_FLAG_INIT is already defined:
+# pre-including <stdlib.h> lets re see glibc's and skip the duplicate.
 test_ice_mod: test_ice_mod.c $(ICE_ENGINE_SRCS) ../../src/ice/ice_mod.c
-	$(CC) $(CFLAGS) -Wno-unused-parameter -D_GNU_SOURCE \
+	$(CC) $(CFLAGS) -Wno-unused-parameter -D_GNU_SOURCE -include stdlib.h \
 	  -I$(SYSROOT)/include -I$(SYSROOT)/include/re -I../../include -I../../src \
 	  -o $@ $^ -L$(SYSROOT)/lib -lre -lssl -lcrypto -lpthread -lz \
 	  $(LDFLAGS)
