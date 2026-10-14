@@ -65,16 +65,32 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
     private val calls = ConcurrentHashMap<String, Call>()
     private val endedCalls = ArrayDeque<String>()
     private var routesListener: (() -> Unit)? = null
+    private var audioErrorHandler: ((String, String) -> Unit)? = null
+    private var hostAudioErrorHandler: ((String, String) -> Unit)? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         MedutHostApi.setUp(binding.binaryMessenger, this)
         events = MedutEventsApi(binding.binaryMessenger)
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        // Nothing is forwarded, and no SDK hook is taken, until Dart starts:
+        // an app that drives the SDK natively and never calls Dart's start()
+        // keeps its own handlers and pays for no events.
+    }
+
+    /** Dart's start(): forward events from here on.  Before the stack starts,
+     *  so its first events reach Dart. */
+    private fun attach() {
+        if (subscription != null) return
         subscription = Medut.addListener(mainExecutor) { forward(it) }
-        MedutAndroid.onAppOwnedAudioError = { code, message ->
+        // Chain to a handler the host app set rather than replace it.
+        hostAudioErrorHandler = MedutAndroid.onAppOwnedAudioError
+        val handler: (String, String) -> Unit = { code, message ->
+            hostAudioErrorHandler?.invoke(code, message)
             send(EventMessage(type = APP_OWNED_AUDIO_ERROR, errorCode = code, message = message))
         }
+        audioErrorHandler = handler
+        MedutAndroid.onAppOwnedAudioError = handler
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -82,7 +98,11 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
         subscription = null
         routesListener?.let { l -> runCatching { MedutAndroid.audioRoutes.removeListener(l) } }
         routesListener = null
-        MedutAndroid.onAppOwnedAudioError = null
+        if (audioErrorHandler != null && MedutAndroid.onAppOwnedAudioError === audioErrorHandler) {
+            MedutAndroid.onAppOwnedAudioError = hostAudioErrorHandler
+        }
+        audioErrorHandler = null
+        hostAudioErrorHandler = null
         MedutHostApi.setUp(binding.binaryMessenger, null)
         events = null
         scope?.cancel()
@@ -121,6 +141,7 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
     // ── Lifecycle ────────────────────────────────────────────────────────
 
     override fun start(config: ConfigMessage, options: StartOptionsMessage): StartResultMessage = sdk {
+        attach()
         val reattached = Medut.isRunning
         if (!reattached) {
             MedutAndroid.start(context, config.toSdk(), AndroidOptions(

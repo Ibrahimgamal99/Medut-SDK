@@ -15,6 +15,8 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
     private var events: MedutEventsApi?
     private var subscription: MedutSubscription?
     private var routesObserver: NSObjectProtocol?
+    private var attached = false
+    private var hostAudioErrorHandler: ((String, String) -> Void)?
 
     // Objects Dart refers to by id.  Ended calls stay until Dart releases
     // them (or the cap below evicts them), so methods on an ended Dart Call
@@ -31,23 +33,37 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
         let plugin = MedutPlugin()
         MedutHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: plugin)
         plugin.events = MedutEventsApi(binaryMessenger: registrar.messenger())
-        plugin.subscription = Medut.shared.addEventHandler(queue: .main) { [weak plugin] event in
-            plugin?.forward(event)
-        }
-        MedutAudioSession.shared.onAppOwnedAudioError = { [weak plugin] code, message in
-            DispatchQueue.main.async {
-                plugin?.send(EventMessage(type: MedutPlugin.appOwnedAudioError, message: message,
-                                          errorCode: code))
-            }
-        }
-        plugin.routesObserver = NotificationCenter.default.addObserver(
-            forName: MedutAudioSession.routesDidChangeNotification, object: nil, queue: .main
-        ) { [weak plugin] _ in
-            guard let plugin = plugin else { return }
-            plugin.send(EventMessage(type: MedutPlugin.audioRoutesChanged, routes: plugin.routes()))
-        }
+        // Nothing is forwarded, and no SDK hook is taken, until Dart starts:
+        // an app that drives MedutKit natively and never calls Dart's start()
+        // keeps its own handlers and pays for no events.
         // Keeps the instance alive and gets it detachFromEngine.
         registrar.publish(plugin)
+    }
+
+    /// Dart's start(): forward events from here on.  Before the stack
+    /// starts, so its first events reach Dart.
+    private func attach() {
+        guard !attached else { return }
+        attached = true
+        subscription = Medut.shared.addEventHandler(queue: .main) { [weak self] event in
+            self?.forward(event)
+        }
+        // Chain to a handler the host app set rather than replace it.
+        hostAudioErrorHandler = MedutAudioSession.shared.onAppOwnedAudioError
+        let host = hostAudioErrorHandler
+        MedutAudioSession.shared.onAppOwnedAudioError = { [weak self] code, message in
+            host?(code, message)
+            DispatchQueue.main.async {
+                self?.send(EventMessage(type: MedutPlugin.appOwnedAudioError, message: message,
+                                        errorCode: code))
+            }
+        }
+        routesObserver = NotificationCenter.default.addObserver(
+            forName: MedutAudioSession.routesDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.send(EventMessage(type: MedutPlugin.audioRoutesChanged, routes: self.routes()))
+        }
     }
 
     public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
@@ -57,7 +73,9 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
             NotificationCenter.default.removeObserver(observer)
             routesObserver = nil
         }
-        MedutAudioSession.shared.onAppOwnedAudioError = nil
+        if attached { MedutAudioSession.shared.onAppOwnedAudioError = hostAudioErrorHandler }
+        hostAudioErrorHandler = nil
+        attached = false
         MedutHostApiSetup.setUp(binaryMessenger: registrar.messenger(), api: nil)
         events = nil
     }
@@ -92,7 +110,8 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
     // ── Lifecycle ────────────────────────────────────────────────────────
 
     func start(config: ConfigMessage, options: StartOptionsMessage) throws -> StartResultMessage {
-        try sdk {
+        attach()
+        return try sdk {
             let reattached = Medut.shared.isRunning
             if !reattached {
                 var startOptions = StartOptions()
