@@ -1,8 +1,8 @@
-# Medut
+# Medut SDK
 
-There was no production-ready VoIP SDK for Python — if you wanted SIP calling, you had to wrap C libraries yourself or glue together low-level tools. Medut fixes that.
+There was no production-ready VoIP SDK for Python — if you wanted SIP calling, you had to wrap C libraries yourself or glue together low-level tools. Medut SDK fixes that.
 
-Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [Medut](https://github.com/Ibrahimgamal99/Medut-SDK), built on [baresip](https://github.com/baresip/baresip) + [libre](https://github.com/baresip/re).
+Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [Medut SDK](https://github.com/Ibrahimgamal99/Medut-SDK), built on [baresip](https://github.com/baresip/baresip) + [libre](https://github.com/baresip/re).
 
 ```bash
 pip install medut

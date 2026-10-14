@@ -1,4 +1,4 @@
-# Medut for Android: Kotlin binding
+# Medut SDK for Android: Kotlin binding
 
 Kotlin API for the Medut SIP SDK. It wraps the same C core as the Flutter,
 Swift, Python and C++ bindings (`include/medut.h`), and is written for apps

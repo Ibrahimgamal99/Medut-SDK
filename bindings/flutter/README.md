@@ -1,4 +1,4 @@
-# Medut
+# Medut SDK
 
 SIP softphone SDK for Flutter on Android and iOS: a thin Pigeon layer over
 the native Medut SDKs, which own a self-contained SIP stack (baresip/libre)

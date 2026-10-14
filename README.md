@@ -1,4 +1,4 @@
-# Medut
+# Medut SDK
 
 **A general-purpose SIP client SDK.** Register against any standards-compliant
 SIP server, place and answer calls, and let the SDK handle SIP parsing, RTP
@@ -39,7 +39,7 @@ The same flow in C++ and Dart is in [Quick start](#quick-start) below.
 
 ---
 
-## Why Medut
+## Why Medut SDK
 
 | | |
 |---|---|
@@ -314,7 +314,7 @@ Everything lives in [`docs/`](docs/index.md):
 
 ## License
 
-Medut is released under the [BSD 3-Clause License](LICENSE).
+Medut SDK is released under the [BSD 3-Clause License](LICENSE).
 
 The shipped libraries statically link baresip, libre and Opus (all BSD-3-Clause)
 and OpenSSL (Apache-2.0), which is built from source on Android and iOS. Each

@@ -27,7 +27,7 @@ class MedutExampleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Medut example',
+      title: 'MedutSDK',
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       home: const PhonePage(),
     );
@@ -611,7 +611,7 @@ class _PhonePageState extends State<PhonePage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Medut'),
+        title: const Text('MedutSDK'),
         bottom: TabBar(controller: _tabs, tabs: const [
           Tab(icon: Icon(Icons.account_circle), text: 'Account'),
           Tab(icon: Icon(Icons.call), text: 'Call'),
