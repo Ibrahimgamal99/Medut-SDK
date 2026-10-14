@@ -1,5 +1,6 @@
 package dev.medut.android.telecom
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -46,6 +47,10 @@ data class TelecomOptions(
     val notificationChannelId: String = "medut_calls",
     /** The notification channel's name, as the user sees it in settings. */
     val notificationChannelName: String = "Calls",
+    /** The activity the built-in notification opens (tap, full-screen
+     *  intent, and after Answer), with [MedutTelecom.EXTRA_CALL_ID]; null
+     *  opens the app's launch activity. */
+    val callActivity: Class<out Activity>? = null,
 )
 
 /**
@@ -155,9 +160,13 @@ object MedutTelecom {
     @Volatile
     internal var bridge: TelecomBridge? = null
 
-    internal const val ACTION_ANSWER = "dev.medut.action.ANSWER"
-    internal const val ACTION_DECLINE = "dev.medut.action.DECLINE"
-    internal const val EXTRA_CALL_ID = "dev.medut.extra.CALL_ID"
+    /** The action of the intent that opens [TelecomOptions.callActivity]
+     *  after the built-in notification's Answer (already carried out). */
+    const val ACTION_ANSWER = "dev.medut.action.ANSWER"
+    const val ACTION_DECLINE = "dev.medut.action.DECLINE"
+    /** On the intents the built-in notification sends: the call's key, for
+     *  [callFor] (a push ring's key resolves once its INVITE is in). */
+    const val EXTRA_CALL_ID = "dev.medut.extra.CALL_ID"
 
     /**
      * The call a notification action or launch intent refers to.  For a
@@ -169,7 +178,9 @@ object MedutTelecom {
         return Medut.calls.firstOrNull { it.id.toString() == id } ?: bridge?.ringCall(id)
     }
 
-    internal fun handleAction(context: Context, intent: Intent) {
+    /** The built-in notification's Answer or Decline (MedutAnswerActivity,
+     *  MedutCallActionReceiver).  Main thread. */
+    internal fun handleAction(intent: Intent) {
         val key = intent.getStringExtra(EXTRA_CALL_ID) ?: return
         val bridge = bridge
         // A push ring answers and declines through its connection, which
@@ -180,19 +191,24 @@ object MedutTelecom {
             ACTION_ANSWER -> {
                 if (ring != null) ring.onAnswer()
                 else runCatching { call!!.answer() }.onFailure { Log.w(TAG, "answer: $it") }
-                bridge?.notifier?.cancel(key)
-                context.packageManager.getLaunchIntentForPackage(context.packageName)?.let { launch ->
-                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    launch.putExtra(EXTRA_CALL_ID, key)
-                    runCatching { context.startActivity(launch) }
-                }
             }
             ACTION_DECLINE -> {
                 if (ring != null) ring.onReject()
                 else runCatching { call!!.reject(603, "Decline") }.onFailure { Log.w(TAG, "decline: $it") }
-                bridge?.notifier?.cancel(key)
             }
         }
+        bridge?.notifier?.cancel(key)
+    }
+
+    /** The intent that opens the app's call screen for [key]. */
+    internal fun callScreenIntent(context: Context, key: String, action: String?): Intent? {
+        val options = bridge?.options
+        val intent = options?.callActivity?.let { Intent(context, it) }
+            ?: context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: return null
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        action?.let { intent.action = it }
+        return intent.putExtra(EXTRA_CALL_ID, key)
     }
 }
 
@@ -206,7 +222,7 @@ object MedutTelecom {
 @RequiresApi(Build.VERSION_CODES.O)
 internal class TelecomBridge(
     context: Context,
-    private val options: TelecomOptions,
+    val options: TelecomOptions,
     private val platform: AndroidPlatform,
 ) : AudioRoutes.TelecomRouter {
     private val app = context.applicationContext

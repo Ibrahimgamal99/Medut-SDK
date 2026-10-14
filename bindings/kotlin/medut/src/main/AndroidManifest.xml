@@ -31,5 +31,14 @@
         <receiver
             android:name="dev.medut.android.telecom.MedutCallActionReceiver"
             android:exported="false" />
+        <!-- Answer from the incoming-call notification: an activity, since
+             Android 12 lets no receiver start one from a notification. -->
+        <activity
+            android:name="dev.medut.android.telecom.MedutAnswerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>

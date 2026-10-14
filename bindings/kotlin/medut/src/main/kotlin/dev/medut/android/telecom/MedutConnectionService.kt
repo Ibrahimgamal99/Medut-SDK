@@ -1,9 +1,11 @@
 package dev.medut.android.telecom
 
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.telecom.Connection
 import android.telecom.ConnectionRequest
 import android.telecom.ConnectionService
@@ -61,9 +63,30 @@ class MedutConnectionService : ConnectionService() {
         Connection.createFailedConnection(DisconnectCause(DisconnectCause.ERROR))
 }
 
-/** Answer / Decline from the built-in incoming-call notification. */
+/** Decline from the built-in incoming-call notification. */
 class MedutCallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        MedutTelecom.handleAction(context, intent)
+        MedutTelecom.handleAction(intent)
+    }
+}
+
+/**
+ * Answer from the built-in incoming-call notification.  An activity, not a
+ * receiver: Android 12 stops a receiver a notification started from opening
+ * an activity (a notification trampoline).  Invisible: it answers, opens the
+ * app's call screen ([TelecomOptions.callActivity], else the launch activity)
+ * with [MedutTelecom.ACTION_ANSWER] and the call's key, and finishes.
+ */
+class MedutAnswerActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) setShowWhenLocked(true)
+        val key = intent?.getStringExtra(MedutTelecom.EXTRA_CALL_ID)
+        if (key != null) {
+            MedutTelecom.handleAction(intent)
+            MedutTelecom.callScreenIntent(this, key, MedutTelecom.ACTION_ANSWER)
+                ?.let { runCatching { startActivity(it) } }
+        }
+        finish()
     }
 }

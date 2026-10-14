@@ -120,10 +120,12 @@ the active connection. Nothing else changes: `account.call()` places a call,
 and hanging up from the system side drive the call back.
 
 An incoming call with no app UI up gets the built-in incoming-call
-notification: a ringing `CallStyle` notification (API 31+) with Answer and
-Decline, whose full-screen intent opens the app's launch activity with the
-call id in `MedutTelecom.EXTRA_CALL_ID` (`MedutTelecom.callFor(intent)`).
-Request `POST_NOTIFICATIONS` on API 33+. To show your own UI instead, set
+notification: a `CallStyle` notification (API 31+) that rings until it is
+answered or declined, with Answer and Decline. Its full-screen intent opens
+`TelecomOptions.callActivity` (else the launch activity) with the call id in
+`MedutTelecom.EXTRA_CALL_ID` (`MedutTelecom.callFor(intent)`); Answer answers
+first and opens it with `MedutTelecom.ACTION_ANSWER`. Request
+`POST_NOTIFICATIONS` on API 33+. To show your own UI instead, set
 `MedutTelecom.onShowIncomingCallUi`. `MedutTelecom.onOutgoingCallRefused`
 reports an outgoing call Telecom would not create (another call has the
 line).

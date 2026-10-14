@@ -37,15 +37,18 @@ internal class IncomingCallNotifier(private val context: Context, private val op
         ensureChannel()
         val id = ids.getOrPut(callId) { next.incrementAndGet() }
 
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(MedutTelecom.EXTRA_CALL_ID, callId)
-        }
-        val open = launch?.let {
+        val open = MedutTelecom.callScreenIntent(context, callId, null)?.let {
             PendingIntent.getActivity(context, id, it,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
-        val answer = action(MedutTelecom.ACTION_ANSWER, callId, id + 1)
+        // Answer opens an activity directly: Android 12+ blocks one started
+        // from a receiver a notification triggered.
+        val answer = PendingIntent.getActivity(context, id + 1,
+            Intent(context, MedutAnswerActivity::class.java)
+                .setAction(MedutTelecom.ACTION_ANSWER)
+                .putExtra(MedutTelecom.EXTRA_CALL_ID, callId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val decline = action(MedutTelecom.ACTION_DECLINE, callId, id + 2)
 
         val builder = Notification.Builder(context, options.notificationChannelId)
@@ -69,7 +72,10 @@ internal class IncomingCallNotifier(private val context: Context, private val op
             @Suppress("DEPRECATION")
             builder.setPriority(Notification.PRIORITY_MAX)
         }
-        nm.notify(id, builder.build())
+        val notification = builder.build()
+        // Ring until answered, declined or gone, not once.
+        notification.flags = notification.flags or Notification.FLAG_INSISTENT
+        nm.notify(id, notification)
     }
 
     fun cancel(callId: String) {
