@@ -765,3 +765,142 @@ medut_patch("${SOURCE_DIR}/src/rtp/sess.c"
 	stats->tx.ehsn = mbr->ehsn;   /* Medut-patched */
 ]=]
 "rtcp_stats: report the peer's extended highest sequence number")
+
+
+# ---------------------------------------------------------------------------
+# R. sipreg/reg.c — refresh an RFC 8599 push binding in place
+#
+# A push-capable registrar keys a device's binding on its push params
+# (pn-provider / pn-prid / pn-param, put in the Contact URI by baresip job 11),
+# and releases a held INVITE when that binding is *refreshed*.  OpenSIPS, for
+# one, forks the INVITE on the usrloc UPDATE event: an un-REGISTER followed by
+# a REGISTER is a DELETE and an INSERT, and the call is never delivered.
+#
+# Two things went out as exactly that pair:
+#
+#   - A wake-up push had nothing to send but a fresh REGISTER, and baresip's
+#     reg_register() frees the old client first, which un-REGISTERs it.
+#     sipreg_refresh() sends the refresh from the client that holds the
+#     binding (same Call-ID, next CSeq), as its own timer would.
+#   - A handover or retry re-creates the client the same way.
+#     sipreg_handoff_push() tells a departing client that its successor
+#     carries the same push binding, so it leaves holding no binding:
+#     nothing sent, the successor's REGISTER refreshes the binding.
+#     A different binding (a new token) is un-REGISTERed as before, so the
+#     registrar stops pushing to the token that was replaced.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	bool registered;
+	bool terminated;
+	char *params;
+]=]
+[=[
+	bool registered;
+	bool terminated;
+	bool medut_handoff;   /* Medut-patched: sipreg_handoff_push() */
+	char *params;
+]=]
+"sipreg: handed-off flag")
+
+# Not in medut_contact_is_instance(): hunk O's text recognises O as applied,
+# so nothing may be spliced inside it.  A client that holds no binding
+# (registered false) already sends no un-REGISTER on any path; this keeps a
+# handed-off client that way when its in-flight REGISTER is answered.
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+		reg->registered = reg->wait > 0;
+]=]
+[=[
+		/* Medut-patched: a handed-off client holds no binding of its
+		 * own; see sipreg_handoff_push(). */
+		reg->registered = reg->wait > 0 && !reg->medut_handoff;
+]=]
+"sipreg: a handed-off client stays unregistered")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+struct sipreg *sipreg_release(struct sipreg *reg)
+{
+	if (reg && medut_contact_is_instance(reg))
+		reg->registered = false;
+
+	return mem_deref(reg);
+}
+]=]
+[=[
+struct sipreg *sipreg_release(struct sipreg *reg)
+{
+	if (reg && medut_contact_is_instance(reg))
+		reg->registered = false;
+
+	return mem_deref(reg);
+}
+
+
+/**
+ * Medut-patched: the client replacing this one carries `cparams`
+ *
+ * When those are this client's own Contact params and name an RFC 8599 push
+ * binding, the registrar keys the binding on them, so the successor's
+ * REGISTER refreshes it: sipreg_release() then frees this client without an
+ * un-REGISTER.  Otherwise nothing changes.
+ *
+ * @param reg      SIP Registration client about to be released
+ * @param cparams  Contact URI params of its successor
+ */
+void sipreg_handoff_push(struct sipreg *reg, const char *cparams)
+{
+	if (!reg || !reg->cparams || !cparams)
+		return;
+
+	if (!strstr(reg->cparams, "pn-prid=") || 0 != strcmp(reg->cparams, cparams))
+		return;
+
+	reg->medut_handoff = true;
+	reg->registered = false;
+}
+
+
+/**
+ * Medut-patched: refresh the binding now (RFC 8599 s4.1.3)
+ *
+ * Sends the REGISTER the refresh timer would, from this client: same Call-ID,
+ * next CSeq, same Contact.  A registrar sees a refresh of the binding it
+ * holds, not a new one.
+ *
+ * @param reg  SIP Registration client
+ *
+ * @return 0 if a refresh is on its way, EALREADY if a REGISTER is already in
+ *         flight (it refreshes the binding itself), ENOENT if this client
+ *         holds no binding to refresh
+ */
+int sipreg_refresh(struct sipreg *reg)
+{
+	if (!reg)
+		return EINVAL;
+
+	if (reg->req)
+		return EALREADY;
+
+	if (reg->terminated || !reg->registered)
+		return ENOENT;
+
+	tmr_start(&reg->tmr, 0, tmr_handler, reg);
+	return 0;
+}
+]=]
+"sipreg_handoff_push(), sipreg_refresh()")
+
+medut_patch("${SOURCE_DIR}/include/re_sipreg.h"
+[=[
+/* Medut-patched: see src/sipreg/reg.c */
+struct sipreg *sipreg_release(struct sipreg *reg);
+]=]
+[=[
+/* Medut-patched: see src/sipreg/reg.c */
+struct sipreg *sipreg_release(struct sipreg *reg);
+void sipreg_handoff_push(struct sipreg *reg, const char *cparams);
+int sipreg_refresh(struct sipreg *reg);
+]=]
+"sipreg_handoff_push(), sipreg_refresh() declarations")

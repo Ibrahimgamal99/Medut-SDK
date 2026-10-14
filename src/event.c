@@ -392,6 +392,8 @@ static void bevent_handler(enum bevent_ev bev,
 			/* Registered and reachable — start probing so we notice if
 			 * that stops being true before the next refresh. */
 			bsdk_account_keepalive_arm(acct);
+			/* A push token that changed mid-REGISTER goes out now. */
+			bsdk_account_push_settled(acct);
 			(void)bsdk_account_reg_ev_prepare(acct, &ev);
 		}
 		break;

@@ -139,6 +139,14 @@ struct medut_account {
 	char                     *cfg_outbound_proxy;  /* alias for outbound */
 	char                     *cfg_push_token;
 	char                     *cfg_push_param;
+	/* RFC 8599 Contact URI params built from the push fields
+	 * ("pn-provider=fcm;pn-prid=...;pn-param=..."), "" when push is off.
+	 * baresip's reg_register() reads them through bsdk_reg_cparams_h
+	 * (job 11 of cmake/patch-baresip-sources.cmake).  re_main only. */
+	char                     *pn_cparams;
+	/* A push token changed while a REGISTER was in flight: send another
+	 * once it settles, so the binding carries the new token.  re_main only. */
+	bool                      pn_refresh;
 	/* ICE server list: the config copy, replaceable at runtime through
 	 * medut_account_set_ice_servers() (re_main only) */
 	struct bsdk_ice_server   *ice_srvv;
@@ -596,6 +604,10 @@ void bsdk_account_reconnect_reset(struct medut_account *acct);
  * successful registration, _cancel() when the account stops being
  * registered. */
 void bsdk_account_keepalive_arm(struct medut_account *acct);
+/* Install the Contact-params hook in baresip's reg.c (core init), and send
+ * the REGISTER a push-token change deferred (REGISTERED event). */
+void bsdk_account_push_init(void);
+void bsdk_account_push_settled(struct medut_account *acct);
 void bsdk_account_keepalive_cancel(struct medut_account *acct);
 /* Send the keepalive probe's request — OPTIONS to the account's domain via
  * its outbound proxy — with the caller's own response handler, outside the

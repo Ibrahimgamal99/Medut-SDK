@@ -173,6 +173,7 @@ void bsdk_acct_cfg_deep_free(struct medut_account *acct)
 	mem_deref(acct->cfg_outbound_proxy); acct->cfg_outbound_proxy = NULL;
 	mem_deref(acct->cfg_push_token);   acct->cfg_push_token = NULL;
 	mem_deref(acct->cfg_push_param);   acct->cfg_push_param = NULL;
+	mem_deref(acct->pn_cparams);       acct->pn_cparams = NULL;
 	bsdk_ice_servers_free(&acct->ice_srvv, &acct->ice_srv_api, &acct->ice_srvc);
 	acct->cfg.ice_servers = NULL;
 	acct->cfg.ice_server_count = 0;
@@ -465,6 +466,51 @@ static int build_push_contact_params(const struct medut_account *acct,
 		                acct->cfg.push_token);
 
 	return (n > 0) ? n : -1;
+}
+
+/* Rebuild acct->pn_cparams from the push config.  re_main only. */
+static int push_cparams_update(struct medut_account *acct)
+{
+	char buf[BSDK_PUSH_PARAMS_BUFSZ];
+	int n = build_push_contact_params(acct, buf, sizeof(buf));
+	if (n < 0)
+		return MEDUT_ERR_INVAL;   /* token too long */
+
+	acct->pn_cparams = mem_deref(acct->pn_cparams);
+	if (n > 0 && str_dup(&acct->pn_cparams, buf))
+		return MEDUT_ERR_NOMEM;
+	return MEDUT_OK;
+}
+
+/* Defined by job 11 of cmake/patch-baresip-sources.cmake. */
+extern const char *(*bsdk_reg_cparams_h)(const struct ua *ua);
+
+/* baresip's reg_register(), on re_main, asking for the Contact URI params of
+ * the REGISTER it is about to send.  The account list is only ever changed
+ * on re_main, so it is walked here without acct_lock: a medut_account_foreach()
+ * callback that re-registers would otherwise take that lock twice. */
+static const char *reg_cparams_handler(const struct ua *ua)
+{
+	struct le *le;
+	LIST_FOREACH(&g_bsdk.accounts, le) {
+		const struct medut_account *acct = le->data;
+		if (acct->ua == ua)
+			return acct->pn_cparams;
+	}
+	return NULL;
+}
+
+void bsdk_account_push_init(void)
+{
+	bsdk_reg_cparams_h = reg_cparams_handler;
+}
+
+void bsdk_account_push_settled(struct medut_account *acct)
+{
+	if (!acct || !acct->pn_refresh || !acct->ua || !acct->reg_wanted)
+		return;
+	acct->pn_refresh = false;
+	ua_register(acct->ua);
 }
 
 
@@ -1562,6 +1608,15 @@ static void create_fn(void *arg)
 		return;
 	}
 
+	/* RFC 8599: the push binding rides in the Contact of every REGISTER.
+	 * A token too long for it is refused here rather than sent truncated. */
+	err = push_cparams_update(acct);
+	if (err) {
+		mem_deref(acct);
+		ctx->result = err;
+		return;
+	}
+
 	/* Parse "user@host" or "user@host:port" from uri */
 	parse_account_uri(acct->cfg.uri,
 	                  acct->parsed_user, sizeof(acct->parsed_user),
@@ -1785,6 +1840,32 @@ int medut_account_register(medut_account_handle_t acct)
 	return bsdk_dispatch(register_fn, acct);
 }
 
+/* Defined by job 11 of cmake/patch-baresip-sources.cmake. */
+extern int bsdk_ua_refresh_register(struct ua *ua);
+
+static void refresh_registration_fn(void *arg)
+{
+	struct medut_account *acct = arg;
+	if (acct->destroyed || !acct->ua)
+		return;
+
+	/* A binding to refresh, or a REGISTER already on its way: that is the
+	 * refresh.  Anything else (never registered, failed, mid-retry) needs
+	 * a REGISTER from a new client, as register() sends. */
+	if (acct->reg_state == MEDUT_REG_REGISTERED &&
+	    0 == bsdk_ua_refresh_register(acct->ua)) {
+		acct->reg_wanted = true;
+		return;
+	}
+	register_fn(acct);
+}
+
+int medut_account_refresh_registration(medut_account_handle_t acct)
+{
+	if (!acct) return MEDUT_ERR_INVAL;
+	return bsdk_dispatch(refresh_registration_fn, acct);
+}
+
 static void unregister_fn(void *arg)
 {
 	struct medut_account *acct = arg;
@@ -1976,29 +2057,43 @@ static void set_push_token_fn(void *arg)
 		return;
 	}
 
-	mem_deref(acct->cfg_push_token);
+	/* All or nothing: a token too long for the Contact leaves the old
+	 * one, and the binding it is in, as they were. */
+	char *old_token = acct->cfg_push_token;
 	acct->cfg_push_token = bsdk_strdup(ctx->push_token);
 	acct->cfg.push_token = acct->cfg_push_token;
 
-	char pn_params[BSDK_PUSH_PARAMS_BUFSZ];
-	int n = build_push_contact_params(acct, pn_params, sizeof(pn_params));
-	if (n < 0) {
-		ctx->result = MEDUT_ERR_INVAL;  /* token too long */
+	ctx->result = push_cparams_update(acct);
+	if (ctx->result) {
+		mem_deref(acct->cfg_push_token);
+		acct->cfg_push_token = old_token;
+		acct->cfg.push_token = old_token;
 		return;
 	}
+	mem_deref(old_token);
 
-	(void)n; /* ua_set_contact_params not available in this baresip build */
+	/* The new params reach the wire with the next client reg_register()
+	 * allocates, so send a REGISTER now (RFC 8599 s4.1.3) — unless one is in
+	 * flight or a retry is armed.  A retry re-registers anyway; an
+	 * in-flight one is answered first, and its REGISTERED event sends
+	 * the refresh (bsdk_account_push_settled). */
+	if (!acct->reg_wanted)
+		return;   /* the app's own register() will carry them */
+	if (acct->cfg.push_provider == MEDUT_PUSH_PROVIDER_NONE)
+		return;   /* no push binding: nothing on the wire changes */
 
-	/* Re-register only when safe: skip if mid-transaction or mid-retry.
-	 * The new cparams are already stored on the UA; the next natural
-	 * ua_register() call will pick them up. */
 	bool reg_in_flight = (acct->reg_state == MEDUT_REG_REGISTERING ||
 	                      acct->reg_state == MEDUT_REG_UNREGISTERING ||
 	                      acct->reg_state == MEDUT_REG_RECONNECTING);
 	bool retry_pending = tmr_isrunning(&acct->retry_tmr);
 
-	if (!reg_in_flight && !retry_pending)
-		ua_register(acct->ua);
+	if (retry_pending)
+		return;
+	if (reg_in_flight) {
+		acct->pn_refresh = true;
+		return;
+	}
+	ua_register(acct->ua);
 }
 
 int medut_account_set_push_token(medut_account_handle_t acct,

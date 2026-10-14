@@ -93,6 +93,7 @@ check_sym "medut_call_set_rtp_timeout"
 check_sym "medut_call_set_bitrate"
 check_sym "medut_set_adaptive_bitrate"
 check_sym "medut_account_keepalive_now"
+check_sym "medut_account_refresh_registration"
 
 # Underlying baresip/libre internals (should still be in the merged archive)
 check_sym "baresip_init"

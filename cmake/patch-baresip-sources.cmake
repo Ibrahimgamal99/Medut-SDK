@@ -15,6 +15,8 @@
 #   9. Set the marker on the first packet after an Opus DTX gap, and reach
 #      the receive decoder's state for the counters only it keeps.
 #  10. Count PulseAudio capture holes instead of zero-filling them silently.
+#  11. RFC 8599 push: Contact URI parameters on every REGISTER, a push binding
+#      that survives a re-created client, and a refresh in place.
 # Usage: cmake -DSOURCE_DIR=path/to/baresip -P patch-baresip-sources.cmake
 #
 # third_party/baresip is fetched by scripts/fetch-third-party.sh at a pinned
@@ -1189,3 +1191,164 @@ set(_keys PR1 PR2)
 bsdk_patch_file("${PULSE_REC_C}" "medut-patch pulse-holes v1"
   "capture holes counted"
   "zero-fills capture holes silently, indistinguishable from a dead microphone")
+
+# ---------------------------------------------------------------------------
+# Job 11: reg.c, ua.c — RFC 8599 push bindings
+#
+# RFC 8599 puts the push binding in the Contact URI of every REGISTER:
+#   Contact: <sip:alice@192.0.2.1;transport=tls;pn-provider=fcm;pn-prid=...>
+# libre can print those (sipreg_set_contact_params()), but baresip allocates a
+# fresh sipreg on every reg_register() and never sets them, and nothing outside
+# reg.c can reach the client in between.  So the params the SDK built from
+# medut_account_config_t never reached the wire, and a push-capable server had
+# no token to push to.  bsdk_reg_cparams_h asks the SDK for the account's
+# current params each time a client is allocated, so a token change applies
+# on the next REGISTER.
+#
+# Such a server releases a held INVITE when the device *refreshes* that
+# binding (libre hunk R in patch-re-sources.cmake has the why):
+#   - reg_register() hands the binding over (sipreg_handoff_push()) when the
+#     new client carries the same push params, so the old one leaves without
+#     an un-REGISTER;
+#   - bsdk_ua_refresh_register() refreshes it in place (sipreg_refresh()),
+#     which is what a wake-up push sends.
+#
+# Runs on the re thread, where the SDK keeps those params.  src/account.c
+# sets the hook and calls the refresh, so a tree without this job fails to
+# link.  Its own anchor checks, like job 3, rather than bsdk_patch_file():
+# reg.c already carries job 3's "Medut-patched", and bsdk_restore_if_stale()
+# would restore the file (dropping job 3) to apply this one.
+# ---------------------------------------------------------------------------
+
+set(_CP_MARK "medut-patch reg-cparams v3")
+set(_OLD_CP1 [=[
+int reg_register(struct reg *reg, const char *reg_uri, const char *params,
+		 uint32_t regint, const char *outbound)
+{
+]=])
+set(_NEW_CP1 [=[
+/* Medut-patched (medut-patch reg-cparams v3): Contact URI params for this
+ * UA's next REGISTER, e.g. RFC 8599 "pn-provider=fcm;pn-prid=...".  Set by
+ * Medut's src/account.c; NULL or "" adds none. */
+const char *(*bsdk_reg_cparams_h)(const struct ua *ua);
+
+/* Medut-patched: refresh this client's binding in place; see
+ * sipreg_refresh() in libre. */
+int bsdk_reg_refresh(struct reg *reg)
+{
+	return reg ? sipreg_refresh(reg->sipreg) : EINVAL;
+}
+
+int reg_register(struct reg *reg, const char *reg_uri, const char *params,
+		 uint32_t regint, const char *outbound)
+{
+	const char *medut_cp;
+]=])
+# Spliced in front of job 3's text, which stays whole: job 3 recognises
+# itself by it.
+set(_OLD_CP0 [=[
+	failed = sipreg_failed(reg->sipreg);
+	/* Medut-patched: the new client refreshes this one's binding; see
+]=])
+set(_NEW_CP0 [=[
+	/* Medut-patched: the same push binding is handed over, not removed;
+	 * see sipreg_handoff_push() in libre. */
+	medut_cp = bsdk_reg_cparams_h ? bsdk_reg_cparams_h(reg->ua) : NULL;
+	sipreg_handoff_push(reg->sipreg, medut_cp);
+
+	failed = sipreg_failed(reg->sipreg);
+	/* Medut-patched: the new client refreshes this one's binding; see
+]=])
+set(_OLD_CP2 [=[
+	if (failed)
+		sipreg_incfailc(reg->sipreg);
+
+	if (err) {
+]=])
+set(_NEW_CP2 [=[
+	if (failed)
+		sipreg_incfailc(reg->sipreg);
+
+	/* Medut-patched: see bsdk_reg_cparams_h above. */
+	if (!err && medut_cp && medut_cp[0])
+		err = sipreg_set_contact_params(reg->sipreg, medut_cp);
+
+	if (err) {
+]=])
+
+file(READ "${REG_C}" RCONTENT)
+string(FIND "${RCONTENT}" "${_CP_MARK}" _CP_DONE)
+if(NOT _CP_DONE EQUAL -1)
+  message(STATUS "patch-baresip-sources: ${REG_C} already patched (push bindings)")
+else()
+  foreach(_k CP1 CP0 CP2)
+    string(FIND "${RCONTENT}" "${_OLD_${_k}}" _pos)
+    if(_pos EQUAL -1)
+      message(FATAL_ERROR
+        "patch-baresip-sources: anchor ${_k} not found in ${REG_C} for "
+        "push bindings.\nThe pinned baresip revision has moved "
+        "reg_register(), or an older version of this job is applied "
+        "(re-fetch third_party/baresip). Re-derive this patch — building "
+        "without it sends every REGISTER without its RFC 8599 push "
+        "parameters.")
+    endif()
+  endforeach()
+  foreach(_k CP1 CP0 CP2)
+    string(REPLACE "${_OLD_${_k}}" "${_NEW_${_k}}" RCONTENT "${RCONTENT}")
+  endforeach()
+  file(WRITE "${REG_C}" "${RCONTENT}")
+  message(STATUS "patch-baresip-sources: patched ${REG_C} (push bindings)")
+endif()
+
+set(UA_C "${SOURCE_DIR}/src/ua.c")
+set(_OLD_UR [=[
+/**
+ * Unregister all Register clients of a User-Agent
+]=])
+set(_NEW_UR [=[
+/* Medut-patched (medut-patch reg-cparams v3): refresh every binding of this
+ * UA in place (src/reg.c).  0 when at least one refresh is on its way or
+ * already in flight; otherwise the first error, ENOENT when the UA holds no
+ * binding to refresh. */
+int bsdk_reg_refresh(struct reg *reg);
+int bsdk_ua_refresh_register(struct ua *ua);
+int bsdk_ua_refresh_register(struct ua *ua)
+{
+	struct le *le;
+	int err = ENOENT;
+
+	if (!ua)
+		return EINVAL;
+
+	for (le = ua->regl.head; le; le = le->next) {
+		int e = bsdk_reg_refresh(le->data);
+
+		if (e == 0 || e == EALREADY)
+			return 0;
+		if (err == ENOENT)
+			err = e;
+	}
+
+	return err;
+}
+
+
+/**
+ * Unregister all Register clients of a User-Agent
+]=])
+file(READ "${UA_C}" UCONTENT)
+string(FIND "${UCONTENT}" "${_CP_MARK}" _UR_DONE)
+if(NOT _UR_DONE EQUAL -1)
+  message(STATUS "patch-baresip-sources: ${UA_C} already patched (push refresh)")
+else()
+  string(FIND "${UCONTENT}" "${_OLD_UR}" _pos)
+  if(_pos EQUAL -1)
+    message(FATAL_ERROR
+      "patch-baresip-sources: anchor not found in ${UA_C} for push refresh.\n"
+      "The pinned baresip revision has moved ua_unregister(). Re-derive this "
+      "patch — building without it fails to link.")
+  endif()
+  string(REPLACE "${_OLD_UR}" "${_NEW_UR}" UCONTENT "${UCONTENT}")
+  file(WRITE "${UA_C}" "${UCONTENT}")
+  message(STATUS "patch-baresip-sources: patched ${UA_C} (push refresh)")
+endif()

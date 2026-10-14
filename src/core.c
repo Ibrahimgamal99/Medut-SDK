@@ -513,6 +513,10 @@ int medut_init(const medut_config_t *cfg)
 	if (bsdk_ice_module_init() == 0)
 		BSDK_TRACE("[bsdk] step 9b: medut-ice media-NAT registered\n");
 
+	/* RFC 8599 push params into every REGISTER's Contact (job 11 of
+	 * cmake/patch-baresip-sources.cmake). */
+	bsdk_account_push_init();
+
 	/* Platform audio session setup (iOS AVAudioSession; no-op elsewhere).
 	 * Non-fatal: a session category the OS refuses right now (e.g. during
 	 * a CallKit-owned activation) still leaves the stack usable. */

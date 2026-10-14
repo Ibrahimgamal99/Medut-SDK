@@ -1363,7 +1363,7 @@ typedef struct {
 	 * interfaces are never used).  A handover then offers candidates that
 	 * already exist instead of waiting on a fresh gather.  On Android the
 	 * extra interface must be known through
-	 * medut_network_set_interface_handle(); the Flutter plugin does that
+	 * medut_network_set_interface_handle(); the Kotlin SDK does that
 	 * when MedutConfig.iceMultipath is set.  Experimental: verified on
 	 * Linux; on Android the pinned socket got no replies on the device it
 	 * was tried on (docs/guides/network_handover.md).  Default false.
@@ -1461,10 +1461,11 @@ typedef struct {
 	const char              *push_token;
 
 	/**
-	 * Provider-specific parameter (pn-param).
-	 * APNs: app bundle ID, e.g. "com.example.MyApp".
-	 * FCM:  app package name, e.g. "com.example.myapp".
-	 * NULL → pn-param omitted.
+	 * Provider-specific parameter (pn-param), passed through as is for the
+	 * server to pick the push credentials by.  RFC 8599 has:
+	 * APNs: "<Team ID>.<bundle ID>.voip", e.g. "ABCDE12345.com.example.app.voip".
+	 * FCM:  the Firebase project ID, e.g. "example-voip".
+	 * Servers with a single app often ignore it.  NULL → pn-param omitted.
 	 */
 	const char              *push_param;
 
@@ -1600,6 +1601,24 @@ MEDUT_EXPORT void medut_account_destroy(medut_account_handle_t acct);
  *  MEDUT_REG_FAILED. */
 MEDUT_EXPORT int medut_account_register(medut_account_handle_t acct);
 
+/**
+ * Refresh the registration now: what to call when a push wakes the app.
+ *
+ * On a registered account the REGISTER goes out from the client that holds
+ * the binding — same Call-ID, next CSeq, same Contact — so the registrar
+ * sees the binding refreshed, which is what RFC 8599 servers wait for before
+ * they release a held INVITE (RFC 8599 s4.1.3).  medut_account_register()
+ * starts a new client instead; over UDP, TCP and TLS that un-REGISTERs the
+ * old binding first, and a server such as OpenSIPS then sees a binding
+ * removed and a new one added, and forwards nothing.
+ *
+ * On an account that is not registered (never registered, FAILED,
+ * RECONNECTING) this is medut_account_register().  A REGISTER already in
+ * flight counts as the refresh.  Progress arrives as MEDUT_EV_REG_STATE; a
+ * refresh that succeeds reports REGISTERED again, with no REGISTERING first.
+ */
+MEDUT_EXPORT int medut_account_refresh_registration(medut_account_handle_t acct);
+
 /** Unregister (sends REGISTER with Expires: 0). */
 MEDUT_EXPORT int medut_account_unregister(medut_account_handle_t acct);
 
@@ -1646,17 +1665,22 @@ MEDUT_EXPORT int medut_account_set_ice_servers(
 /**
  * Update the push token for an account at runtime (e.g. on OS token rotation).
  *
- * The new token is stored and the Contact URI params are updated.  A new
- * REGISTER is sent immediately unless the account is mid-call, mid-transaction,
- * or in retry backoff — in those cases the update is deferred to the next
- * natural re-registration.  Callers that need the token applied before the
- * next call should wait for MEDUT_EV_CALL_STATE ENDED first.
+ * The new token is stored and the RFC 8599 Contact URI params are rebuilt.
+ * On a registered account a REGISTER carrying them goes out at once
+ * (RFC 8599 s4.1.3).  If a REGISTER is already in flight, another follows once
+ * it is answered; if a retry is armed, the retry carries them.  An account
+ * the app has not asked to register just keeps them for its first REGISTER.
+ * On an account created without a push_provider the token is kept and
+ * nothing is sent, so a token refresh can be applied to every account.
  *
  * Pass NULL to clear push params and re-register without pn-* Contact params.
+ * A token too long for the Contact is refused with MEDUT_ERR_INVAL and the
+ * previous one stays in force.
  *
- * @param acct        Account handle (must have push_provider set in config)
+ * @param acct        Account handle
  * @param push_token  New device token string, or NULL to clear
- * @return MEDUT_OK on success, MEDUT_ERR_STATE if account has no UA yet
+ * @return MEDUT_OK on success, MEDUT_ERR_STATE if account has no UA yet,
+ *         MEDUT_ERR_INVAL for a token too long
  */
 MEDUT_EXPORT int medut_account_set_push_token(medut_account_handle_t acct,
                                                    const char *push_token);
@@ -2367,8 +2391,10 @@ MEDUT_EXPORT bool medut_network_is_up(void);
 /* ── pcap ─────────────────────────────────────────────────────────────────── */
 
 /**
- * Start capturing SIP + RTP to a Wireshark-compatible pcap file.
- * Writes synthetic Ethernet/IP/UDP headers around each SIP message.
+ * Start capturing SIP to a Wireshark-compatible pcap file.
+ * Writes synthetic Ethernet/IP/UDP headers around each SIP message.  RTP,
+ * STUN and DTLS are not captured (the media sockets have no tap yet); for
+ * those, capture on the network.
  */
 MEDUT_EXPORT int medut_pcap_start(const char *path);
 
