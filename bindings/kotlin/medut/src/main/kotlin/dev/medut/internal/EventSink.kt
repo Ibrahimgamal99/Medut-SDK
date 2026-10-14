@@ -75,7 +75,8 @@ internal object EventSink {
                     Medut.platform?.onCallLive(call)
                 }
                 MedutEvent.CallStateChanged(call.account ?: registry.account(r.account),
-                    call, state, error, r.reason)
+                    call, state, error, r.reason,
+                    endedLocally = state.isTerminal && call.endRequestedLocally)
             }
 
             EventType.CALL_DTMF -> MedutEvent.Dtmf(registry.trackCallOrNull(r.call), r.digit.toChar())

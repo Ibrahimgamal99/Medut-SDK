@@ -33,6 +33,12 @@ sealed interface MedutEvent {
         val state: CallState,
         val error: MedutError?,
         val reason: String?,
+        /** On a terminal state: this side ended the call ([Call.hangup] /
+         *  [Call.reject]), from the app or from the system: a Decline in
+         *  Telecom's UI, a Bluetooth headset or a watch.  An incoming call
+         *  that ends unanswered with this set was declined, not missed.
+         *  False on non-terminal states. */
+        val endedLocally: Boolean = false,
     ) : MedutEvent
 
     data class Dtmf(override val call: Call?, val digit: Char) : MedutEvent

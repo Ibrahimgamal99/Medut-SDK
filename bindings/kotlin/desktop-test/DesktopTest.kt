@@ -92,11 +92,24 @@ fun main() {
     expect(call.isEnded, "isEnded (${call.state})")
     expect(Medut.calls.isEmpty(), "untracked once ended")
     println("       ended: ${call.state} error=${call.endError} reason=${call.endReason}")
+    expect(!terminal.endedLocally, "a timeout is not ended locally")
     val info = call.info()
     expect(info.state == call.state, "info() after end (${info.state})")
     call.hangup() // no-op
     expect(!call.isHeld, "isHeld false")
     expectThrows(MedutError.Code.CALL_ENDED, "hold() on an ended call") { call.hold() }
+
+    println("a hangup is reported as ended locally")
+    val hungUp = CountDownLatch(1)
+    val hangupListener = Medut.addListener({ it.run() }) { ev ->
+        if (ev is MedutEvent.CallStateChanged && ev.state.isTerminal) hungUp.countDown()
+    }
+    val local = account.call("sip:carol@192.0.2.1:5060")
+    local.hangup()
+    expect(hungUp.await(20, TimeUnit.SECONDS), "terminal state within 20 s")
+    hangupListener.cancel()
+    val localEnd = events.filterIsInstance<MedutEvent.CallStateChanged>().last { it.call === local }
+    expect(localEnd.endedLocally, "endedLocally after hangup() (${localEnd.state})")
 
     println("events")
     expect(events.any { it is MedutEvent.Log }, "log events decoded")
