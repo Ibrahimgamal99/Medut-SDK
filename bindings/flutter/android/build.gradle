@@ -44,6 +44,9 @@ android {
 
     sourceSets {
         main {
+            // The SDK's manifest too: its permissions, the Telecom
+            // ConnectionService and the notification action receiver.
+            manifest.srcFile "${medutSdk}/src/main/AndroidManifest.xml"
             java.srcDirs += "${medutSdk}/src/main/kotlin"
             jniLibs.srcDirs = ["${medutSdk}/src/main/jniLibs"]
         }

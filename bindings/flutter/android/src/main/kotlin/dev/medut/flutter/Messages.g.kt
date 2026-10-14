@@ -653,7 +653,12 @@ data class StartOptionsMessage (
    */
   val audioMode: Long,
   /** Hand the microphone and speaker to the SDK's app-owned engine. */
-  val appOwnedAudio: Boolean
+  val appOwnedAudio: Boolean,
+  /**
+   * Android: register every call with Telecom through the SDK's own
+   * self-managed ConnectionService (implies audioMode 1).  Ignored on iOS.
+   */
+  val telecom: Boolean
 )
  {
   companion object {
@@ -661,7 +666,8 @@ data class StartOptionsMessage (
       val monitorNetwork = pigeonVar_list[0] as Boolean
       val audioMode = pigeonVar_list[1] as Long
       val appOwnedAudio = pigeonVar_list[2] as Boolean
-      return StartOptionsMessage(monitorNetwork, audioMode, appOwnedAudio)
+      val telecom = pigeonVar_list[3] as Boolean
+      return StartOptionsMessage(monitorNetwork, audioMode, appOwnedAudio, telecom)
     }
   }
   fun toList(): List<Any?> {
@@ -669,6 +675,7 @@ data class StartOptionsMessage (
       monitorNetwork,
       audioMode,
       appOwnedAudio,
+      telecom,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -679,7 +686,7 @@ data class StartOptionsMessage (
       return true
     }
     val other = other as StartOptionsMessage
-    return MessagesPigeonUtils.deepEquals(this.monitorNetwork, other.monitorNetwork) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.appOwnedAudio, other.appOwnedAudio)
+    return MessagesPigeonUtils.deepEquals(this.monitorNetwork, other.monitorNetwork) && MessagesPigeonUtils.deepEquals(this.audioMode, other.audioMode) && MessagesPigeonUtils.deepEquals(this.appOwnedAudio, other.appOwnedAudio) && MessagesPigeonUtils.deepEquals(this.telecom, other.telecom)
   }
 
   override fun hashCode(): Int {
@@ -687,10 +694,11 @@ data class StartOptionsMessage (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.monitorNetwork)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.audioMode)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.appOwnedAudio)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.telecom)
     return result
   }
   override fun toString(): String {
-    return "StartOptionsMessage(monitorNetwork=$monitorNetwork, audioMode=$audioMode, appOwnedAudio=$appOwnedAudio)"
+    return "StartOptionsMessage(monitorNetwork=$monitorNetwork, audioMode=$audioMode, appOwnedAudio=$appOwnedAudio, telecom=$telecom)"
   }
 }
 

@@ -658,6 +658,7 @@ class StartOptionsMessage {
     required this.monitorNetwork,
     required this.audioMode,
     required this.appOwnedAudio,
+    required this.telecom,
   });
 
   /// Drive handover from the OS connectivity callback.
@@ -670,11 +671,16 @@ class StartOptionsMessage {
   /// Hand the microphone and speaker to the SDK's app-owned engine.
   bool appOwnedAudio;
 
+  /// Android: register every call with Telecom through the SDK's own
+  /// self-managed ConnectionService (implies audioMode 1).  Ignored on iOS.
+  bool telecom;
+
   List<Object?> _toList() {
     return <Object?>[
       monitorNetwork,
       audioMode,
       appOwnedAudio,
+      telecom,
     ];
   }
 
@@ -687,6 +693,7 @@ class StartOptionsMessage {
       monitorNetwork: result[0]! as bool,
       audioMode: result[1]! as int,
       appOwnedAudio: result[2]! as bool,
+      telecom: result[3]! as bool,
     );
   }
 
@@ -699,7 +706,7 @@ class StartOptionsMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(monitorNetwork, other.monitorNetwork) && _deepEquals(audioMode, other.audioMode) && _deepEquals(appOwnedAudio, other.appOwnedAudio);
+    return _deepEquals(monitorNetwork, other.monitorNetwork) && _deepEquals(audioMode, other.audioMode) && _deepEquals(appOwnedAudio, other.appOwnedAudio) && _deepEquals(telecom, other.telecom);
   }
 
   @override
@@ -708,7 +715,7 @@ class StartOptionsMessage {
 
   @override
   String toString() {
-    return 'StartOptionsMessage(monitorNetwork: $monitorNetwork, audioMode: $audioMode, appOwnedAudio: $appOwnedAudio)';
+    return 'StartOptionsMessage(monitorNetwork: $monitorNetwork, audioMode: $audioMode, appOwnedAudio: $appOwnedAudio, telecom: $telecom)';
   }
 }
 

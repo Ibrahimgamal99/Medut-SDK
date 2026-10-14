@@ -107,6 +107,10 @@ class _PhonePageState extends State<PhonePage>
   bool _held = false;
   bool _speaker = false;
   bool _appAudio = false;
+
+  /// Android: register calls with Telecom (system call UI, incoming calls
+  /// ring with no UI up).  Read once, when the SDK first starts.
+  bool _telecom = false;
   MediaStats? _stats;
 
   /// When the call was answered, and a 1 Hz tick to redraw the elapsed time.
@@ -299,8 +303,14 @@ class _PhonePageState extends State<PhonePage>
       _logLine('microphone permission: $mic (calls will be one-way)');
     }
 
+    if (_telecom && _sdk == null) {
+      // The built-in incoming-call notification needs this on API 33+.
+      await Permission.notification.request();
+    }
+
     try {
       _sdk ??= await Medut.start(
+        telecom: _telecom,
         config: const MedutConfig(
           logLevel: 3,
           // Experimental: gather on cellular next to Wi-Fi so a handover can
@@ -749,6 +759,16 @@ class _PhonePageState extends State<PhonePage>
         ),
       ),
       const SizedBox(height: 8),
+      SwitchListTile(
+        title: const Text('System call UI (Telecom, Android)'),
+        subtitle: Text(_sdk == null
+            ? 'Calls show in the system call UI and ring with the app '
+                'closed. Applies when the SDK starts, on the first Register.'
+            : 'Fixed for this run: the SDK is already started.'),
+        isThreeLine: true,
+        value: _telecom,
+        onChanged: _sdk == null ? (v) => setState(() => _telecom = v) : null,
+      ),
       SwitchListTile(
         title: const Text('Remember this account'),
         subtitle: const Text('Settings are restored on the next launch; the '

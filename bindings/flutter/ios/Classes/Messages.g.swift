@@ -724,6 +724,9 @@ struct StartOptionsMessage: Hashable, CustomStringConvertible {
   var audioMode: Int64
   /// Hand the microphone and speaker to the SDK's app-owned engine.
   var appOwnedAudio: Bool
+  /// Android: register every call with Telecom through the SDK's own
+  /// self-managed ConnectionService (implies audioMode 1).  Ignored on iOS.
+  var telecom: Bool
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -731,11 +734,13 @@ struct StartOptionsMessage: Hashable, CustomStringConvertible {
     let monitorNetwork = pigeonVar_list[0] as! Bool
     let audioMode = pigeonVar_list[1] as! Int64
     let appOwnedAudio = pigeonVar_list[2] as! Bool
+    let telecom = pigeonVar_list[3] as! Bool
 
     return StartOptionsMessage(
       monitorNetwork: monitorNetwork,
       audioMode: audioMode,
-      appOwnedAudio: appOwnedAudio
+      appOwnedAudio: appOwnedAudio,
+      telecom: telecom
     )
   }
   func toList() -> [Any?] {
@@ -743,13 +748,14 @@ struct StartOptionsMessage: Hashable, CustomStringConvertible {
       monitorNetwork,
       audioMode,
       appOwnedAudio,
+      telecom,
     ]
   }
   static func == (lhs: StartOptionsMessage, rhs: StartOptionsMessage) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return MessagesPigeonInternal.deepEquals(lhs.monitorNetwork, rhs.monitorNetwork) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.appOwnedAudio, rhs.appOwnedAudio)
+    return MessagesPigeonInternal.deepEquals(lhs.monitorNetwork, rhs.monitorNetwork) && MessagesPigeonInternal.deepEquals(lhs.audioMode, rhs.audioMode) && MessagesPigeonInternal.deepEquals(lhs.appOwnedAudio, rhs.appOwnedAudio) && MessagesPigeonInternal.deepEquals(lhs.telecom, rhs.telecom)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -757,10 +763,11 @@ struct StartOptionsMessage: Hashable, CustomStringConvertible {
     MessagesPigeonInternal.deepHash(value: monitorNetwork, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: audioMode, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: appOwnedAudio, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: telecom, hasher: &hasher)
   }
 
   public var description: String {
-    return "StartOptionsMessage(monitorNetwork: \(String(describing: monitorNetwork)), audioMode: \(String(describing: audioMode)), appOwnedAudio: \(String(describing: appOwnedAudio)))"
+    return "StartOptionsMessage(monitorNetwork: \(String(describing: monitorNetwork)), audioMode: \(String(describing: audioMode)), appOwnedAudio: \(String(describing: appOwnedAudio)), telecom: \(String(describing: telecom)))"
   }
 }
 

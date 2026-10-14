@@ -105,7 +105,24 @@ if (sdk.reattached) {
 `sdk.detach()` stops listening and leaves the stack running.
 `sdk.shutdown()` stops the stack itself.
 
-### CallKit / Telecom
+### Telecom (Android)
+
+```dart
+final sdk = await Medut.start(telecom: true);
+```
+
+The Kotlin SDK then registers every call with Telecom through its own
+self-managed ConnectionService (API 26+): calls show in the system call UI
+and on Bluetooth, Android Auto and Wear; a cellular call and a SIP call never
+fight for audio; and an incoming call rings with the built-in call
+notification when no Flutter engine is up, whose full-screen intent opens the
+app. Nothing else in the Dart API changes. Request the notification
+permission on API 33+ (for example `Permission.notification.request()`).
+
+With `Medut.start(telecom: true)` the native side forwards Telecom's audio
+activation itself, so `notifyCallKitAudioActive` is not needed.
+
+### CallKit, or your own Telecom integration
 
 When a platform call framework owns call audio, tell the SDK so it does not
 activate audio itself:
@@ -123,10 +140,19 @@ Apple requires it to happen in `provider(_:didActivateAudioSession:)`. Answer
 the SIP call from there, not from `CXAnswerCallAction`, so media opens against
 an active session.
 
-For background calls, add PushKit + CallKit (iOS) and FCM + a self-managed
-ConnectionService (Android) on the native side. Apple kills background
-sockets, and push is the sanctioned wake-up. Pair it with
-`account.setPushToken()` (RFC 8599) or your own server-side push.
+### Push wake-up
+
+Push handling is native: there is no Dart isolate to wait for when the
+process is started by a push. On Android, start the stack from
+`Application.onCreate`, give the account its RFC 8599 push parameters
+(`AccountConfig.pushProvider` / `pushToken` / `pushParam`,
+`account.setPushToken()` on refresh), and call `MedutPush.wake(this)` from
+your `FirebaseMessagingService` — see the
+[Kotlin README](../../bindings/kotlin/README.md#push-wake-up-fcm). With
+Telecom on, the system rings; when Flutter comes up, `Medut.start()` attaches
+and finds the call in `sdk.calls`. On iOS, add PushKit + CallKit on the
+native side; Apple kills background sockets, and push is the sanctioned
+wake-up.
 
 ## 3 — Register an account (any transport)
 

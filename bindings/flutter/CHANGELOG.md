@@ -21,6 +21,12 @@ MedutKit on iOS), which own the stack for the process lifetime.  Breaking:
   now).  An ended `Call` stays usable for as long as it is held.
 - **App-owned audio** lives in the native SDKs; `appOwnedAudioActive()` and
   `appOwnedAudioFormat()` are async.
+- **Telecom (Android).** `Medut.start(telecom: true)` registers every call
+  with the system through the Kotlin SDK's self-managed ConnectionService:
+  system call UI, Bluetooth / Auto / Wear, and incoming calls that ring with
+  no Flutter engine up.
+- **Built-in Kotlin.** The Android plugin no longer applies the Kotlin
+  Gradle Plugin itself. Minimum Flutter 3.44 / Dart 3.12.
 
 ## 1.0.0
 

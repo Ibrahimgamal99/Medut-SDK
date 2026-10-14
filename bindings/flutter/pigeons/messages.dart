@@ -128,6 +128,7 @@ class StartOptionsMessage {
     required this.monitorNetwork,
     required this.audioMode,
     required this.appOwnedAudio,
+    required this.telecom,
   });
 
   /// Drive handover from the OS connectivity callback.
@@ -139,6 +140,10 @@ class StartOptionsMessage {
 
   /// Hand the microphone and speaker to the SDK's app-owned engine.
   bool appOwnedAudio;
+
+  /// Android: register every call with Telecom through the SDK's own
+  /// self-managed ConnectionService (implies audioMode 1).  Ignored on iOS.
+  bool telecom;
 }
 
 /// medut_account_config_t.  Optional fields left null use the C default.

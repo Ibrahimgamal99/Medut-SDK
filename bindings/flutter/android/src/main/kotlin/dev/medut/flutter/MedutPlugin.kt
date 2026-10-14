@@ -31,6 +31,7 @@ import dev.medut.android.AndroidOptions
 import dev.medut.android.AudioModePolicy
 import dev.medut.android.AudioRoute
 import dev.medut.android.MedutAndroid
+import dev.medut.android.telecom.TelecomOptions
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
@@ -129,6 +130,7 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
                     2L -> AudioModePolicy.MANUAL
                     else -> AudioModePolicy.AUTOMATIC
                 },
+                telecom = if (options.telecom) TelecomOptions() else null,
             ))
         }
         if (options.appOwnedAudio) MedutAndroid.useAppOwnedAudio(true)

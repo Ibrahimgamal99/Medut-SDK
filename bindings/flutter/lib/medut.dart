@@ -395,10 +395,20 @@ class Medut {
   /// [audioSession] says who activates call audio (see [AudioSessionMode]).
   /// [monitorNetwork] lets the SDK drive network handover from the OS
   /// connectivity callback.
+  ///
+  /// [telecom] (Android, API 26+) registers every call with Telecom through
+  /// the SDK's own self-managed ConnectionService: calls show in the system
+  /// call UI and on Bluetooth / Auto / Wear, never fight a cellular call for
+  /// audio, and an incoming call rings with no Flutter engine up.  It implies
+  /// [AudioSessionMode.callFramework]; the SDK forwards Telecom's audio
+  /// activation itself, so [notifyCallKitAudioActive] is not needed.  Request
+  /// the notification permission on API 33+ for the built-in incoming-call
+  /// notification.  Ignored on iOS.
   static Future<Medut> start({
     MedutConfig config = const MedutConfig(),
     AudioSessionMode audioSession = AudioSessionMode.automatic,
     bool monitorNetwork = true,
+    bool telecom = false,
   }) async {
     final existing = _instance;
     if (existing != null) return existing;
@@ -414,8 +424,11 @@ class Medut {
               config._toMessage(),
               StartOptionsMessage(
                 monitorNetwork: monitorNetwork,
-                audioMode: audioSession.index,
+                audioMode: telecom
+                    ? AudioSessionMode.callFramework.index
+                    : audioSession.index,
                 appOwnedAudio: config.appOwnedAudio,
+                telecom: telecom,
               )));
     } catch (_) {
       MedutEventsApi.setUp(null);

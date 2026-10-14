@@ -97,6 +97,13 @@ Behaviour worth knowing:
 - **Cached state.** `call.state` and `account.regState` follow the events.
 - **Config defaults.** `MedutConfig` fields left `null` keep the C library's
   defaults.
+- **Telecom (Android).** `Medut.start(telecom: true)` registers calls with
+  the system: system call UI, Bluetooth / Auto / Wear, incoming calls that
+  ring with no Flutter engine up. Request the notification permission on
+  API 33+.
+- **Push wake-up** is native: start the stack from `Application.onCreate`
+  and call `MedutPush.wake()` from your FCM service
+  ([Kotlin README](../kotlin/README.md#push-wake-up-fcm)).
 
 See [`example/`](example/) for a runnable app and
 [`docs/quickstart/flutter.md`](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md)
