@@ -132,29 +132,40 @@ line).
 
 The SDK carries no Firebase dependency. Give the server the RFC 8599 push
 parameters through `AccountConfig(pushProvider = PushProvider.FCM, pushToken
-= token, pushParam = packageName)`, update the token with
-`account.setPushToken()`, and handle the push in your messaging service:
+= token, pushParam = firebaseProjectId)` and hand the messaging service's two
+calls to the SDK:
 
 ```kotlin
 class PushService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         // Application.onCreate started the stack and re-created the accounts.
-        val call = MedutPush.wake(this)       // re-registers, waits for the INVITE
-        // With Telecom on, the system is already ringing; otherwise show `call`.
+        val call = MedutPush.wake(this, message.data)
+        // With Telecom on, the phone is already ringing; otherwise show `call`.
     }
 
     override fun onNewToken(token: String) {
-        Medut.accounts.forEach { it.setPushToken(token) }
+        MedutPush.onNewToken(token)           // live accounts and the account store
     }
 }
 ```
 
-`MedutPush.wake` holds a wake lock, makes every account reachable again (a
-keepalive probe on a registered account, a retry on one that is reconnecting
-or failed, a REGISTER on one that is not registered), and returns the
-incoming call, or null after the timeout. Send the push as a high-priority
-data message so Android starts the process. `MedutPush.reachAccounts()` is
-the same recovery without the wait, for a foreground return.
+`MedutPush.wake` holds a wake lock and reads the data message
+(`type`, `call_id`, `caller_uri`, `caller_name`, `aor`; the names are
+configurable in `MedutPush.payloadKeys`):
+
+- **A call.** With Telecom on, the phone rings at once with the caller from
+  the push. Every account refreshes its registration in place
+  (`Account.refreshRegistration()`), which is what an RFC 8599 server waits
+  for before it releases the INVITE. The INVITE takes over the ringing call,
+  matched by Call-ID when the push has one. An Answer already tapped is
+  carried out; a Decline turns the INVITE away with 603. `wake` returns the
+  call, or null when none came in time; the ring then ends as missed.
+- **A cancel.** Ends a ring whose INVITE never came.
+
+Send the push as a high-priority data message so Android starts the process.
+`MedutPush.reachAccounts()` is the same refresh without the wait, for a
+foreground return. The payload, the server side and an OpenSIPS
+configuration are in [docs/guides/push.md](../../docs/guides/push.md).
 
 ## Accounts across restarts
 

@@ -51,12 +51,25 @@ class Account internal constructor(
     /** Skip the backoff and re-register now. */
     fun retryNow() = perform("medut_account_retry_now") { Native.accountRetryNow(it) }
 
-    /** Probe the registration (SIP OPTIONS) now, e.g. on a push wake before
-     *  placing a call.  A failure arrives as a registration event. */
+    /**
+     * Refresh the registration now: what a push wake-up sends.  A registered
+     * account re-sends its REGISTER in place (same Call-ID and Contact), so
+     * an RFC 8599 server sees the binding refreshed and releases the INVITE
+     * it holds; any other account registers.  See
+     * medut_account_refresh_registration() in medut.h.
+     */
+    fun refreshRegistration() =
+        perform("medut_account_refresh_registration") { Native.accountRefreshRegistration(it) }
+
+    /** Probe the registration (SIP OPTIONS) now, e.g. before placing a call.
+     *  A failure arrives as a registration event.  Not what a push wake-up
+     *  wants: see [refreshRegistration]. */
     fun keepaliveNow() = perform("medut_account_keepalive_now") { Native.accountKeepaliveNow(it) }
 
     /** Update the push token (FCM token refresh).  null clears the push
-     *  parameters.  The account must have been created with a pushProvider. */
+     *  parameters.  An account without a pushProvider keeps it and sends
+     *  nothing.  [dev.medut.android.MedutPush.onNewToken] also updates the
+     *  saved accounts. */
     fun setPushToken(token: String?) =
         perform("medut_account_set_push_token") { Native.accountSetPushToken(it, token) }
 

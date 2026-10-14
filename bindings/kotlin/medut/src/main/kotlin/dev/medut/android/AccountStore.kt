@@ -52,6 +52,25 @@ class AccountStore(context: Context) {
         store(load().filterNot { keyOf(it.uri) == key } + config)
     }
 
+    /**
+     * Replace the push token of the saved account with this URI or AOR, or
+     * of every saved account when [uri] is null, skipping any without a push
+     * provider, so a process a push starts registers with the current token.
+     * Returns how many were updated.  [MedutPush.onNewToken] calls this.
+     */
+    @JvmOverloads
+    fun updatePushToken(token: String?, uri: String? = null): Int = synchronized(lock) {
+        val key = uri?.let { keyOf(it) }
+        var changed = 0
+        val updated = load().map {
+            if (it.pushProvider == PushProvider.NONE || it.pushToken == token ||
+                (key != null && keyOf(it.uri) != key)) it
+            else it.copy(pushToken = token).also { changed++ }
+        }
+        if (changed > 0) store(updated)
+        changed
+    }
+
     /** Forget the account with this URI or AOR.  Returns true if one was saved. */
     fun remove(uri: String): Boolean = synchronized(lock) {
         val key = keyOf(uri)

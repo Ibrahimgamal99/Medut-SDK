@@ -12,7 +12,6 @@ import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import androidx.annotation.RequiresApi
-import dev.medut.Call
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -23,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * is a `CallStyle` notification, which the system shows as a call.
  *
  * The app gets the call id back as [MedutTelecom.EXTRA_CALL_ID] on the launch
- * intent ([MedutTelecom.callFor]).  Needs POST_NOTIFICATIONS on API 33+.
+ * intent ([MedutTelecom.callFor]); for a call a push announced, the ring's key,
+ * which [MedutTelecom.callFor] resolves once the INVITE has arrived.  Needs POST_NOTIFICATIONS on API 33+.
  */
 @RequiresApi(Build.VERSION_CODES.O)
 internal class IncomingCallNotifier(private val context: Context, private val options: TelecomOptions) {
@@ -31,11 +31,11 @@ internal class IncomingCallNotifier(private val context: Context, private val op
     private val ids = ConcurrentHashMap<String, Int>()
     private val next = AtomicInteger(0x4D45_0000)
 
-    fun show(call: Call) {
+    /** Show the ringing notification for [callId], the key the actions and
+     *  the launch intent carry ([MedutTelecom.EXTRA_CALL_ID]). */
+    fun show(callId: String, title: String) {
         ensureChannel()
-        val callId = call.id.toString()
         val id = ids.getOrPut(callId) { next.incrementAndGet() }
-        val title = call.remoteDisplayName?.takeIf { it.isNotBlank() } ?: call.remoteUri
 
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -72,8 +72,8 @@ internal class IncomingCallNotifier(private val context: Context, private val op
         nm.notify(id, builder.build())
     }
 
-    fun cancel(call: Call) {
-        ids.remove(call.id.toString())?.let { nm.cancel(it) }
+    fun cancel(callId: String) {
+        ids.remove(callId)?.let { nm.cancel(it) }
     }
 
     fun cancelAll() {

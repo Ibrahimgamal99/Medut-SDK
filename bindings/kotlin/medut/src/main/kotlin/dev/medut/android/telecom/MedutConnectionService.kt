@@ -21,8 +21,11 @@ class MedutConnectionService : ConnectionService() {
         from: PhoneAccountHandle?, request: ConnectionRequest,
     ): Connection {
         val bridge = MedutTelecom.bridge ?: return failed()
-        val call = bridge.takePending(request.extras?.getString(MedutTelecom.EXTRA_CALL_ID))
-            ?: return failed()
+        val id = request.extras?.getString(MedutTelecom.EXTRA_CALL_ID)
+        bridge.takeRing(id)?.let { ring ->
+            return MedutConnection(ring, bridge).also { bridge.attachRing(ring, it) }
+        }
+        val call = bridge.takePending(id) ?: return failed()
         return MedutConnection(call, bridge).also { bridge.attach(call, it) }
     }
 
@@ -30,8 +33,11 @@ class MedutConnectionService : ConnectionService() {
         from: PhoneAccountHandle?, request: ConnectionRequest,
     ) {
         val bridge = MedutTelecom.bridge ?: return
-        bridge.takePending(request.extras?.getString(MedutTelecom.EXTRA_CALL_ID))
-            ?.let { bridge.incomingRefused(it) }
+        val id = request.extras?.getString(MedutTelecom.EXTRA_CALL_ID)
+        // A push ring Telecom refused: its INVITE rings (or is refused)
+        // the ordinary way when it comes.
+        bridge.takeRing(id)?.let { bridge.ringRefused(it); return }
+        bridge.takePending(id)?.let { bridge.incomingRefused(it) }
     }
 
     override fun onCreateOutgoingConnection(

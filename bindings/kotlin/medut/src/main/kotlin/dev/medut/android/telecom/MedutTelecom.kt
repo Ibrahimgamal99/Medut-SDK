@@ -26,6 +26,9 @@ import dev.medut.MedutSubscription
 import dev.medut.android.AndroidPlatform
 import dev.medut.android.AudioRoute
 import dev.medut.android.AudioRoutes
+import dev.medut.android.MedutPush
+import dev.medut.android.PushPayload
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 
@@ -82,6 +85,17 @@ object MedutTelecom {
     var onShowIncomingCallUi: ((Call) -> Unit)? = null
 
     /**
+     * The same, for a call a push announced ([dev.medut.android.MedutPush.wake])
+     * that is ringing before its INVITE has arrived: there is no [Call] yet,
+     * only what the push said.  Main thread.  Null shows the built-in
+     * notification when it is on.  When the INVITE arrives,
+     * [onShowIncomingCallUi] is called with the call.
+     */
+    @JvmStatic
+    @Volatile
+    var onShowPushIncomingCallUi: ((PushPayload) -> Unit)? = null
+
+    /**
      * Telecom refused to create the connection for an outgoing call (another
      * call has the line).  The SIP call has been hung up by the time this
      * runs.  Main thread.
@@ -97,28 +111,38 @@ object MedutTelecom {
     internal const val ACTION_DECLINE = "dev.medut.action.DECLINE"
     internal const val EXTRA_CALL_ID = "dev.medut.extra.CALL_ID"
 
-    /** The call a notification action or launch intent refers to. */
+    /**
+     * The call a notification action or launch intent refers to.  For a
+     * call a push announced, null until its INVITE has arrived.
+     */
     @JvmStatic
     fun callFor(intent: Intent?): Call? {
         val id = intent?.getStringExtra(EXTRA_CALL_ID) ?: return null
-        return Medut.calls.firstOrNull { it.id.toString() == id }
+        return Medut.calls.firstOrNull { it.id.toString() == id } ?: bridge?.ringCall(id)
     }
 
     internal fun handleAction(context: Context, intent: Intent) {
-        val call = callFor(intent) ?: return
+        val key = intent.getStringExtra(EXTRA_CALL_ID) ?: return
+        val bridge = bridge
+        // A push ring answers and declines through its connection, which
+        // carries the choice over to an INVITE still on its way.
+        val ring = bridge?.ringConnection(key)
+        val call = if (ring == null) callFor(intent) ?: return else null
         when (intent.action) {
             ACTION_ANSWER -> {
-                runCatching { call.answer() }.onFailure { Log.w(TAG, "answer: $it") }
-                bridge?.notifier?.cancel(call)
+                if (ring != null) ring.onAnswer()
+                else runCatching { call!!.answer() }.onFailure { Log.w(TAG, "answer: $it") }
+                bridge?.notifier?.cancel(key)
                 context.packageManager.getLaunchIntentForPackage(context.packageName)?.let { launch ->
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    launch.putExtra(EXTRA_CALL_ID, call.id.toString())
+                    launch.putExtra(EXTRA_CALL_ID, key)
                     runCatching { context.startActivity(launch) }
                 }
             }
             ACTION_DECLINE -> {
-                runCatching { call.reject(603, "Decline") }.onFailure { Log.w(TAG, "decline: $it") }
-                bridge?.notifier?.cancel(call)
+                if (ring != null) ring.onReject()
+                else runCatching { call!!.reject(603, "Decline") }.onFailure { Log.w(TAG, "decline: $it") }
+                bridge?.notifier?.cancel(key)
             }
         }
     }
@@ -151,6 +175,10 @@ internal class TelecomBridge(
     /** Calls handed to Telecom and not yet wrapped in a connection. */
     private val pending = ConcurrentHashMap<String, Call>()
     private val connections = ConcurrentHashMap<Call, MedutConnection>()
+    /** Push rings by key, from [ringForPush] until their connection ends
+     *  (or, declined, until their INVITE is turned away or they expire).
+     *  Changed on the main thread only; read from any. */
+    private val rings = ConcurrentHashMap<String, PushRing>()
     private var subscription: MedutSubscription? = null
     private var audioActive = false
 
@@ -184,6 +212,8 @@ internal class TelecomBridge(
         }
         connections.clear()
         pending.clear()
+        for (ring in rings.values) ring.connection?.endUnbound(DisconnectCause.LOCAL)
+        rings.clear()
         notifier.cancelAll()
         runCatching { tm.unregisterPhoneAccount(handle) }
     }
@@ -230,6 +260,7 @@ internal class TelecomBridge(
     private fun onIncoming(call: Call) {
         val id = call.id.toString()
         if (connections.containsKey(call) || pending.containsKey(id)) return
+        if (claimForRing(call)) return
         if (!tm.isIncomingCallPermitted(handle)) {
             runCatching { call.reject(486, "Busy Here") }
             return
@@ -248,6 +279,130 @@ internal class TelecomBridge(
         }
     }
 
+    // ── Push rings ───────────────────────────────────────────────────────
+
+    /**
+     * Ring for a call [payload] announced, before its INVITE: Telecom gets an
+     * incoming connection now, and [onIncoming] hands it the INVITE.  Any
+     * thread; the work happens on the main thread.
+     */
+    fun ringForPush(payload: PushPayload, timeoutMs: Long) {
+        main.post {
+            // FCM can deliver a push twice, and a server may push again.
+            val duplicate = rings.values.any {
+                it.state == PushRing.State.RINGING &&
+                    (it.payload.callId == null || it.payload.callId == payload.callId)
+            }
+            if (duplicate) return@post
+            if (!tm.isIncomingCallPermitted(handle)) {
+                // Another call has the line; the INVITE gets a 486 from
+                // onIncoming when it comes.
+                return@post
+            }
+            val ring = PushRing("push:${UUID.randomUUID()}", payload)
+            rings[ring.key] = ring
+            val extras = Bundle().apply {
+                putString(MedutTelecom.EXTRA_CALL_ID, ring.key)
+                putParcelable(TelecomManager.EXTRA_INCOMING_CALL_ADDRESS, addressOf(payload.callerUri))
+            }
+            try {
+                tm.addNewIncomingCall(handle, extras)
+            } catch (e: SecurityException) {
+                rings.remove(ring.key)
+                Log.w(TAG, "addNewIncomingCall (push): $e")
+                return@post
+            }
+            main.postDelayed({ expire(ring) }, timeoutMs)
+        }
+    }
+
+    /** A cancel push: end the rings it names (all unbound ones when it
+     *  names no Call-ID).  A ring whose INVITE has arrived ends with it. */
+    fun cancelPushRing(payload: PushPayload) {
+        main.post {
+            for (ring in rings.values.toList()) {
+                if (ring.state != PushRing.State.RINGING) continue
+                if (payload.callId != null && ring.payload.callId != null &&
+                    payload.callId != ring.payload.callId) continue
+                end(ring, DisconnectCause.MISSED)
+            }
+        }
+    }
+
+    /** The INVITE a push ring is waiting for: bind it.  Main thread. */
+    private fun claimForRing(call: Call): Boolean {
+        val ring = rings.values.firstOrNull {
+            (it.state == PushRing.State.RINGING || it.state == PushRing.State.DECLINED) &&
+                MedutPush.matches(it.payload, call)
+        } ?: return false
+        if (ring.state == PushRing.State.DECLINED) {
+            rings.remove(ring.key)
+            ring.state = PushRing.State.ENDED
+            runCatching { call.reject(603, "Decline") }
+            return true
+        }
+        ring.state = PushRing.State.BOUND
+        ring.call = call
+        val connection = ring.connection ?: return true   // bound on creation
+        connections[call] = connection
+        connection.bind(call)
+        MedutTelecom.onShowIncomingCallUi?.let { custom ->
+            notifier.cancel(connection.key)
+            custom(call)
+        }
+        return true
+    }
+
+    private fun expire(ring: PushRing) {
+        when (ring.state) {
+            PushRing.State.RINGING -> end(ring, DisconnectCause.MISSED)
+            PushRing.State.DECLINED -> {
+                rings.remove(ring.key)
+                ring.state = PushRing.State.ENDED
+            }
+            PushRing.State.BOUND, PushRing.State.ENDED -> {}
+        }
+    }
+
+    private fun end(ring: PushRing, code: Int) {
+        ring.state = PushRing.State.ENDED
+        rings.remove(ring.key)
+        notifier.cancel(ring.key)
+        ring.connection?.endUnbound(code)
+    }
+
+    /** Telecom created the connection for a push ring.  Main thread. */
+    fun takeRing(key: String?): PushRing? {
+        val ring = key?.let { rings[it] } ?: return null
+        return ring.takeIf { it.connection == null && it.state != PushRing.State.ENDED }
+    }
+
+    fun attachRing(ring: PushRing, connection: MedutConnection) {
+        ring.connection = connection
+        ring.call?.let { call ->
+            connections[call] = connection
+            connection.bind(call)
+        }
+    }
+
+    /** Declined before the INVITE: keep the ring so the INVITE is turned
+     *  away when it comes, rather than ringing again. */
+    fun ringDeclined(connection: MedutConnection) {
+        val ring = connection.ring ?: return
+        if (ring.state == PushRing.State.RINGING) ring.state = PushRing.State.DECLINED
+    }
+
+    /** Telecom would not take a push ring (another call has the line). */
+    fun ringRefused(ring: PushRing) {
+        ring.state = PushRing.State.ENDED
+        rings.remove(ring.key)
+        ring.call?.let { incomingRefused(it) }
+    }
+
+    fun ringConnection(key: String): MedutConnection? = rings[key]?.connection
+
+    fun ringCall(key: String): Call? = rings[key]?.call
+
     // ── Telecom -> SDK (from the service and the connections) ────────────
 
     fun takePending(id: String?): Call? = id?.let { pending.remove(it) }
@@ -258,9 +413,16 @@ internal class TelecomBridge(
         connection.sync(call.state, call.endError, call.endReason)
     }
 
-    fun detach(call: Call, connection: MedutConnection) {
-        connections.remove(call, connection)
-        notifier.cancel(call)
+    fun detach(connection: MedutConnection) {
+        connection.call?.let { connections.remove(it, connection) }
+        connection.ring?.let { ring ->
+            // A declined ring stays to turn its INVITE away.
+            if (ring.state != PushRing.State.DECLINED) {
+                ring.state = PushRing.State.ENDED
+                rings.remove(ring.key)
+            }
+        }
+        notifier.cancel(connection.key)
         updateAudioActive()
     }
 
@@ -273,24 +435,36 @@ internal class TelecomBridge(
         runCatching { call.reject(486, "Busy Here") }
     }
 
-    fun showIncomingUi(call: Call) {
+    /** No connection (Telecom refused us): show the call ourselves. */
+    private fun showIncomingUi(call: Call) {
         val custom = MedutTelecom.onShowIncomingCallUi
+        val title = call.remoteDisplayName?.takeIf { it.isNotBlank() } ?: call.remoteUri
         when {
             custom != null -> custom(call)
-            options.incomingCallNotification -> notifier.show(call)
+            options.incomingCallNotification -> notifier.show(call.id.toString(), title)
+        }
+    }
+
+    fun showIncomingUi(connection: MedutConnection) {
+        val call = connection.call
+        val custom = if (call != null) MedutTelecom.onShowIncomingCallUi?.let { { it(call) } }
+            else MedutTelecom.onShowPushIncomingCallUi?.let { { it(connection.ring!!.payload) } }
+        when {
+            custom != null -> custom()
+            options.incomingCallNotification -> notifier.show(connection.key, connection.title)
         }
     }
 
     fun connectionStateChanged(connection: MedutConnection, state: Int) {
         if (state == Connection.STATE_ACTIVE || state == Connection.STATE_DISCONNECTED) {
-            notifier.cancel(connection.call)
+            notifier.cancel(connection.key)
             updateAudioActive()
         }
     }
 
     fun audioStateChanged(connection: MedutConnection, state: CallAudioState) {
         audioState = state
-        runCatching { connection.call.setMuted(state.isMuted) }
+        runCatching { connection.call?.setMuted(state.isMuted) }
         platform.routes.notifyChanged()
     }
 
@@ -320,12 +494,34 @@ internal class TelecomBridge(
         return true
     }
 
-    fun addressOf(call: Call): Uri {
-        val uri = call.remoteUri
+    fun addressOf(call: Call): Uri = addressOf(call.remoteUri)
+
+    fun addressOf(uri: String?): Uri {
+        if (uri.isNullOrBlank()) return Uri.fromParts(PhoneAccount.SCHEME_SIP, "unknown", null)
         return Uri.parse(if (uri.contains(':')) uri else "sip:$uri")
     }
 
     private companion object {
         const val TAG = "MedutTelecom"
     }
+}
+
+/**
+ * A call a push announced, ringing in Telecom before its INVITE.  State
+ * changes on the main thread.
+ */
+internal class PushRing(val key: String, val payload: PushPayload) {
+    enum class State {
+        /** Ringing; no INVITE yet. */
+        RINGING,
+        /** The INVITE arrived and the connection carries it. */
+        BOUND,
+        /** The user declined before the INVITE; it is rejected on arrival. */
+        DECLINED,
+        ENDED,
+    }
+
+    @Volatile var state = State.RINGING
+    @Volatile var connection: MedutConnection? = null
+    @Volatile var call: Call? = null
 }

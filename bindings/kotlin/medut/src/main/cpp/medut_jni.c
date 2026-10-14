@@ -1041,6 +1041,7 @@ ACCOUNT_OP(accountUnregister,   medut_account_unregister)
 ACCOUNT_OP(accountCancelRetry,  medut_account_cancel_retry)
 ACCOUNT_OP(accountRetryNow,     medut_account_retry_now)
 ACCOUNT_OP(accountKeepaliveNow, medut_account_keepalive_now)
+ACCOUNT_OP(accountRefreshRegistration, medut_account_refresh_registration)
 
 JNIEXPORT jint FN(accountSetRetryPolicy)(JNIEnv *env, jclass cls, jlong a,
 					 jint initial_ms, jint max_ms,

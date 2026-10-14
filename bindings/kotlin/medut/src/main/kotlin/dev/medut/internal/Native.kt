@@ -32,6 +32,7 @@ internal object Native {
     @JvmStatic external fun accountCancelRetry(account: Long): Int
     @JvmStatic external fun accountRetryNow(account: Long): Int
     @JvmStatic external fun accountKeepaliveNow(account: Long): Int
+    @JvmStatic external fun accountRefreshRegistration(account: Long): Int
     @JvmStatic external fun accountSetRetryPolicy(
         account: Long, initialMs: Int, maxMs: Int, backoff: Float, maxAttempts: Int): Int
     @JvmStatic external fun accountSetIceServers(account: Long, servers: RawIceServers, policy: Int): Int
