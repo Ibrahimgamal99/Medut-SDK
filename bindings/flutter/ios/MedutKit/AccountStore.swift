@@ -35,6 +35,28 @@ public final class AccountStore: @unchecked Sendable {
         }
     }
 
+    /// Replace the push token of the saved account with this URI or AOR, or
+    /// of every saved account when `uri` is nil, skipping any without a push
+    /// provider, so a process a push starts registers with the current token.
+    /// Returns how many were updated.  `MedutPush.updatePushToken` calls this.
+    @discardableResult
+    public func updatePushToken(_ token: String?, uri: String? = nil) -> Int {
+        lock.locked {
+            let key = uri.map { AccountStore.key($0) }
+            var changed = 0
+            let updated = load().map { config -> AccountConfig in
+                guard config.pushProvider != .none, config.pushToken != token,
+                      key == nil || AccountStore.key(config.uri) == key else { return config }
+                var copy = config
+                copy.pushToken = token
+                changed += 1
+                return copy
+            }
+            if changed > 0 { store(updated) }
+            return changed
+        }
+    }
+
     /// Forget the account with this URI or AOR.  Returns true if one was saved.
     @discardableResult
     public func remove(_ uri: String) -> Bool {

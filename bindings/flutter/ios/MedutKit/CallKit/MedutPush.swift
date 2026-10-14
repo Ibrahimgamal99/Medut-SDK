@@ -72,7 +72,9 @@ public enum MedutPush {
     }
 
     /// Make every account reachable again without waiting for a call: the
-    /// part of `wake` an app wants on a token change or a foreground return.
+    /// part of `wake` an app wants on a foreground return.  Each account
+    /// sends a REGISTER: RFC 8599 servers release a held INVITE on the
+    /// binding refresh (s4.1.3), not on an OPTIONS probe.
     public static func reachAccounts() {
         // The process may have been suspended on a network that is gone;
         // coalesced and cheap when nothing changed.
@@ -80,9 +82,8 @@ public enum MedutPush {
         for account in Medut.shared.accounts {
             do {
                 switch account.registrationState {
-                case .registered: try account.keepaliveNow()
+                case .registered, .unregistered: try account.register()
                 case .reconnecting, .failed: try account.retryNow()
-                case .unregistered: try account.register()
                 case .registering, .unregistering: break
                 }
             } catch {
@@ -97,10 +98,14 @@ public enum MedutPush {
         updatePushToken(hex: token.map { String(format: "%02x", $0) }.joined())
     }
 
+    /// Every account with a push provider sends it (the others keep it and
+    /// send nothing), and the saved accounts keep it, so a process a later
+    /// push starts registers with this token and not the one it replaced.
     public static func updatePushToken(hex: String) {
         for account in Medut.shared.accounts {
             try? account.setPushToken(hex)
         }
+        Medut.shared.accountStore.updatePushToken(hex)
     }
 
     private static func string(_ payload: [AnyHashable: Any], _ key: String,

@@ -178,7 +178,12 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
     func accountKeepaliveNow(accountId: String) throws { try sdk { try account(accountId).keepaliveNow() } }
 
     func accountSetPushToken(accountId: String, token: String?) throws {
-        try sdk { try account(accountId).setPushToken(token) }
+        try sdk {
+            let target = try account(accountId)
+            try target.setPushToken(token)
+            // A remembered account must come back from a push with this token.
+            Medut.shared.accountStore.updatePushToken(token, uri: target.aor)
+        }
     }
 
     func accountSetIceServers(accountId: String, servers: [IceServerMessage], policy: Int64) throws {
