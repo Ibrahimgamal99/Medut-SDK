@@ -299,12 +299,16 @@ class Account {
   /// Skip the backoff delay and re-register now.
   Future<void> retryNow() => _run('retryNow', (a) => a.accountRetryNow(id));
 
-  /// Send a reachability probe (SIP OPTIONS) now, e.g. on a push wake before
-  /// placing a call.
+  /// Send a reachability probe (SIP OPTIONS) now, e.g. before placing a
+  /// call.  Not what a push wake wants: RFC 8599 servers release a held
+  /// INVITE on a REGISTER ([register]).
   Future<void> keepaliveNow() =>
       _run('keepaliveNow', (a) => a.accountKeepaliveNow(id));
 
-  /// Update the RFC 8599 push token; null clears the push params.
+  /// Update the RFC 8599 push token; null clears the push params.  A
+  /// remembered account keeps the new token, so a push that starts the app
+  /// registers with it.  On Android, prefer `MedutPush.onNewToken` in the
+  /// app's FirebaseMessagingService: it needs no Dart running.
   Future<void> setPushToken(String? token) =>
       _run('setPushToken', (a) => a.accountSetPushToken(id, token));
 

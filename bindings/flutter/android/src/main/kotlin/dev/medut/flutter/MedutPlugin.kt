@@ -202,8 +202,13 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
     override fun accountCancelRetry(accountId: String) = sdk { account(accountId).cancelRetry() }
     override fun accountRetryNow(accountId: String) = sdk { account(accountId).retryNow() }
     override fun accountKeepaliveNow(accountId: String) = sdk { account(accountId).keepaliveNow() }
-    override fun accountSetPushToken(accountId: String, token: String?) =
-        sdk { account(accountId).setPushToken(token) }
+    override fun accountSetPushToken(accountId: String, token: String?) = sdk {
+        val account = account(accountId)
+        account.setPushToken(token)
+        // A remembered account must come back from a push with this token.
+        MedutAndroid.accountStore.updatePushToken(token, account.aor)
+        Unit
+    }
 
     override fun accountSetIceServers(accountId: String, servers: List<IceServerMessage>, policy: Long) = sdk {
         account(accountId).setIceServers(servers.map { it.toSdk() },
