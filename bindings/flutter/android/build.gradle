@@ -1,14 +1,16 @@
 // No buildscript {} block on purpose. Flutter's plugin-loader
 // (dev.flutter.flutter-plugin-loader in the HOST app's settings.gradle)
-// supplies AGP and the Kotlin plugin on its classpath; a plugin that pins its
-// own AGP/Kotlin versions here drags a SECOND, usually older, toolchain into
-// the build and breaks host apps on newer Gradle (seen live: an AGP 9 /
-// Kotlin 2.x host failing on this plugin's AGP 8.3.2 classpath and
-// jvmTarget 11-vs-17 mismatch). The `plugins` DSL resolves whatever the host
-// already has — and must be the file's first statement (Gradle rule).
+// supplies AGP on its classpath; a plugin that pins its own AGP version here
+// drags a SECOND, usually older, toolchain into the build and breaks host
+// apps on newer Gradle. The `plugins` DSL resolves whatever the host already
+// has — and must be the file's first statement (Gradle rule).
+//
+// No Kotlin plugin either (Flutter's built-in Kotlin migration): Flutter's
+// Gradle plugin applies Kotlin to this project itself, from the host's
+// classpath or AGP's built-in Kotlin, so applying it here would be the second
+// toolchain again. Needs Flutter 3.44+.
 plugins {
     id 'com.android.library'
-    id 'org.jetbrains.kotlin.android'
 }
 
 group = 'dev.medut.flutter'
@@ -59,14 +61,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = '17'
-    }
-
     packagingOptions {
         jniLibs {
             useLegacyPackaging = false
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 
