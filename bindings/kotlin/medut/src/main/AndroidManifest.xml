@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- SIP signalling + RTP media -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Microphone capture for calls (runtime permission: request it before
+         the first call) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- MODE_IN_COMMUNICATION and call-audio routing -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- ConnectivityManager default-network callback (drives handover) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+</manifest>

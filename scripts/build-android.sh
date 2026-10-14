@@ -4,8 +4,9 @@
 #   dist/android/<abi>/medut.a       merged static archive
 #   dist/android/<abi>/libmedut.so   shared library (16 KB page aligned)
 #   dist/android/<abi>/include/
-# Also refreshes the Flutter plugin's bundled (stripped) copies in
-# bindings/flutter/android/src/main/jniLibs/<abi>/ — no second command to run.
+# Also refreshes the stripped copies the Kotlin binding packages (and the
+# Flutter plugin through it) in bindings/kotlin/medut/src/main/jniLibs/<abi>/
+# — no second command to run.
 #
 # Prerequisites:
 #   - Android NDK (set ANDROID_NDK, or detected from ANDROID_NDK_ROOT /
@@ -67,9 +68,9 @@ fi
 NDK_HOST_TAG="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 LLVM_BIN="${NDK}/toolchains/llvm/prebuilt/${NDK_HOST_TAG}/bin"
 
-# The Flutter plugin ships prebuilt .so files from src/main/jniLibs/<abi>/ —
-# Gradle never compiles the native side. Staged below, per ABI.
-JNILIBS="${ROOT}/bindings/flutter/android/src/main/jniLibs"
+# The Kotlin binding packages the core prebuilt from src/main/jniLibs/<abi>/;
+# Gradle only compiles its small JNI layer. Staged below, per ABI.
+JNILIBS="${ROOT}/bindings/kotlin/medut/src/main/jniLibs"
 
 for ABI in ${ABIS}; do
   echo "=== Building Android ${ABI} ==="
@@ -158,15 +159,15 @@ for ABI in ${ABIS}; do
     echo "ERROR: LOAD segment not 16 KB aligned: ${BAD_ALIGN}" >&2; exit 1
   fi
 
-  # ── Stage into the Flutter plugin ─────────────────────────────────────────
-  # Stripped of debug info: these copies are tracked in git and shipped inside
-  # the pub package, while the dist/ ones keep full symbols for debugging.
+  # ── Stage into the Kotlin binding ─────────────────────────────────────────
+  # Stripped of debug info: these copies are tracked in git and shipped in the
+  # AAR and the Flutter plugin, while the dist/ ones keep full symbols.
   mkdir -p "${JNILIBS}/${ABI}"
   "${LLVM_BIN}/llvm-strip" --strip-unneeded -o "${JNILIBS}/${ABI}/libmedut.so" "${SO}"
 
   echo "  -> dist/android/${ABI}/medut.a"
   echo "  -> dist/android/${ABI}/libmedut.so"
-  echo "  -> bindings/flutter/android/src/main/jniLibs/${ABI}/libmedut.so (stripped)"
+  echo "  -> bindings/kotlin/medut/src/main/jniLibs/${ABI}/libmedut.so (stripped)"
 done
 
 echo ""
@@ -174,6 +175,6 @@ echo "Done. Outputs:"
 find "${ROOT}/dist/android" \( -name "medut.a" -o -name "libmedut.so" \) -exec ls -lh {} \;
 
 echo ""
-echo "Flutter plugin jniLibs refreshed (commit these alongside the C change —"
+echo "Kotlin binding jniLibs refreshed (commit these alongside the C change —"
 echo "apps pin a git SHA, so an uncommitted rebuild never reaches consumers):"
 find "${JNILIBS}" -name '*.so' -exec ls -lh {} \;

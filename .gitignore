@@ -5,6 +5,8 @@ third_party/
 # Build output
 build/
 dist/
+# Android externalNativeBuild (CMake) intermediates
+.cxx/
 
 # CMake
 CMakeCache.txt
@@ -17,8 +19,9 @@ _deps/
 # Compiled binaries / libraries
 *.a
 *.so
-# ...except the prebuilt Android libs shipped inside the Flutter plugin
-!bindings/flutter/android/src/main/jniLibs/**/*.so
+# ...except the prebuilt Android core the Kotlin binding (and through it the
+# Flutter plugin) ships
+!bindings/kotlin/medut/src/main/jniLibs/**/*.so
 *.dylib
 *.dll
 *.lib
@@ -94,3 +97,8 @@ desktop.ini
 /test/unit/test_aurecv_plc
 /test/unit/test_jbuf_adapt
 /test/unit/test_stats_loss
+
+# Swift package: SwiftPM state.  Frameworks/Medut.xcframework is committed
+# (scripts/build-ios.sh or scripts/fetch-prebuilt.sh refresh it).
+bindings/swift/.build/
+bindings/swift/.swiftpm/
