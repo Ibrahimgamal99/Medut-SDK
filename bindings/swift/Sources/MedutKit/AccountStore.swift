@@ -143,7 +143,26 @@ public final class AccountStore: @unchecked Sendable {
 // Explicit keys and defaults, so a stored item written by an older build
 // still loads when a field is added later.
 
-extension ICEServer: Codable {}
+// Synthesis is only available in the declaring file, so this one is spelled
+// out.
+extension ICEServer: Codable {
+    private enum CodingKeys: String, CodingKey { case url, username, password }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(url: try c.decode(String.self, forKey: .url),
+                  username: try c.decodeIfPresent(String.self, forKey: .username),
+                  password: try c.decodeIfPresent(String.self, forKey: .password))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(url, forKey: .url)
+        try c.encodeIfPresent(username, forKey: .username)
+        try c.encodeIfPresent(password, forKey: .password)
+    }
+}
+
 extension Transport: Codable {}
 extension MediaEncryption: Codable {}
 extension ICETransportPolicy: Codable {}
