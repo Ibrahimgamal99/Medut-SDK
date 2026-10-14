@@ -1893,8 +1893,16 @@ interface MedutHostApi {
   fun shutdown()
   /** Let the native side release an ended call this side no longer holds. */
   fun releaseCall(callId: String)
-  fun createAccount(config: AccountConfigMessage): AccountMessage
-  fun accountDestroy(accountId: String)
+  /**
+   * [remember] keeps the config in the native account store, so a process
+   * started by a push re-creates and registers the account with no Dart.
+   */
+  fun createAccount(config: AccountConfigMessage, remember: Boolean): AccountMessage
+  /** [forget] also drops the account from the native store. */
+  fun accountDestroy(accountId: String, forget: Boolean)
+  /** URIs of the accounts the native store holds. */
+  fun rememberedAccounts(): List<String>
+  fun forgetAccount(uri: String)
   fun accountRegister(accountId: String)
   fun accountUnregister(accountId: String)
   fun accountRegistrationState(accountId: String): Long
@@ -2039,8 +2047,9 @@ interface MedutHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val configArg = args[0] as AccountConfigMessage
+            val rememberArg = args[1] as Boolean
             val wrapped: List<Any?> = try {
-              listOf(api.createAccount(configArg))
+              listOf(api.createAccount(configArg, rememberArg))
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)
             }
@@ -2056,8 +2065,42 @@ interface MedutHostApi {
           channel.setMessageHandler { message, reply ->
             val args = message as List<Any?>
             val accountIdArg = args[0] as String
+            val forgetArg = args[1] as Boolean
             val wrapped: List<Any?> = try {
-              api.accountDestroy(accountIdArg)
+              api.accountDestroy(accountIdArg, forgetArg)
+              listOf(null)
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.medut.MedutHostApi.rememberedAccounts$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { _, reply ->
+            val wrapped: List<Any?> = try {
+              listOf(api.rememberedAccounts())
+            } catch (exception: Throwable) {
+              MessagesPigeonUtils.wrapError(exception)
+            }
+            reply.reply(wrapped)
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.medut.MedutHostApi.forgetAccount$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val uriArg = args[0] as String
+            val wrapped: List<Any?> = try {
+              api.forgetAccount(uriArg)
               listOf(null)
             } catch (exception: Throwable) {
               MessagesPigeonUtils.wrapError(exception)

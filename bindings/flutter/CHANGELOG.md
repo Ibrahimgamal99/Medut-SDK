@@ -27,6 +27,12 @@ MedutKit on iOS), which own the stack for the process lifetime.  Breaking:
   no Flutter engine up.
 - **Built-in Kotlin.** The Android plugin no longer applies the Kotlin
   Gradle Plugin itself. Minimum Flutter 3.44 / Dart 3.12.
+- **Remembered accounts (Android).** `createAccount(remember: true)` hands
+  the config to the Kotlin SDK's encrypted account store; a process started
+  from `Application.onCreate` or a push registers it before any Dart runs,
+  and `Medut.start()` then attaches and finds it in `accounts`.
+  `Account.destroy(forget: true)`, `forgetAccount()` and
+  `rememberedAccounts()` manage the store.
 
 ## 1.0.0
 

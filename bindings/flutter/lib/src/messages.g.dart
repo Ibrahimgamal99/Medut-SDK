@@ -2156,14 +2156,16 @@ class MedutHostApi {
     ;
   }
 
-  Future<AccountMessage> createAccount(AccountConfigMessage config) async {
+  /// [remember] keeps the config in the native account store, so a process
+  /// started by a push re-creates and registers the account with no Dart.
+  Future<AccountMessage> createAccount(AccountConfigMessage config, bool remember) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.medut.MedutHostApi.createAccount$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[config]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[config, remember]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
@@ -2175,14 +2177,53 @@ class MedutHostApi {
     return pigeonVar_replyValue! as AccountMessage;
   }
 
-  Future<void> accountDestroy(String accountId) async {
+  /// [forget] also drops the account from the native store.
+  Future<void> accountDestroy(String accountId, bool forget) async {
     final pigeonVar_channelName = 'dev.flutter.pigeon.medut.MedutHostApi.accountDestroy$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[accountId]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[accountId, forget]);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: true,
+    )
+    ;
+  }
+
+  /// URIs of the accounts the native store holds.
+  Future<List<String>> rememberedAccounts() async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.medut.MedutHostApi.rememberedAccounts$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(null);
+    final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
+
+    final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
+        pigeonVar_replyList,
+        pigeonVar_channelName,
+        isNullValid: false,
+    )
+    ;
+    return (pigeonVar_replyValue! as List<Object?>).cast<String>();
+  }
+
+  Future<void> forgetAccount(String uri) async {
+    final pigeonVar_channelName = 'dev.flutter.pigeon.medut.MedutHostApi.forgetAccount$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channel = BasicMessageChannel<Object?>(
+      pigeonVar_channelName,
+      pigeonChannelCodec,
+      binaryMessenger: pigeonVar_binaryMessenger,
+    );
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[uri]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(

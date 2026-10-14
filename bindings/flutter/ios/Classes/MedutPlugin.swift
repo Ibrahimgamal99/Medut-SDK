@@ -129,7 +129,9 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
 
     // ── Accounts ─────────────────────────────────────────────────────────
 
-    func createAccount(config: AccountConfigMessage) throws -> AccountMessage {
+    // `remember` / `forget` drive the Kotlin SDK's account store; MedutKit
+    // has no equivalent yet, so they are accepted and ignored here.
+    func createAccount(config: AccountConfigMessage, remember: Bool) throws -> AccountMessage {
         try sdk {
             let account = try Medut.shared.createAccount(try config.sdk())
             accounts[account.id.uuidString] = account
@@ -137,9 +139,13 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
         }
     }
 
-    func accountDestroy(accountId: String) throws {
+    func accountDestroy(accountId: String, forget: Bool) throws {
         accounts.removeValue(forKey: accountId)?.destroy()
     }
+
+    func rememberedAccounts() throws -> [String] { [] }
+
+    func forgetAccount(uri: String) throws {}
 
     func accountRegister(accountId: String) throws { try sdk { try account(accountId).register() } }
     func accountUnregister(accountId: String) throws { try sdk { try account(accountId).unregister() } }

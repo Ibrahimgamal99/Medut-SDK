@@ -493,8 +493,16 @@ abstract class MedutHostApi {
   void releaseCall(String callId);
 
   // Accounts
-  AccountMessage createAccount(AccountConfigMessage config);
-  void accountDestroy(String accountId);
+  /// [remember] keeps the config in the native account store, so a process
+  /// started by a push re-creates and registers the account with no Dart.
+  AccountMessage createAccount(AccountConfigMessage config, bool remember);
+
+  /// [forget] also drops the account from the native store.
+  void accountDestroy(String accountId, bool forget);
+
+  /// URIs of the accounts the native store holds.
+  List<String> rememberedAccounts();
+  void forgetAccount(String uri);
   void accountRegister(String accountId);
   void accountUnregister(String accountId);
   int accountRegistrationState(String accountId);

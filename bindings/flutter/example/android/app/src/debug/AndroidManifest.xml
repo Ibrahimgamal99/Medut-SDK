@@ -4,4 +4,12 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <application>
+        <!-- Stands in for an FCM message (see FakePushReceiver.kt):
+             adb shell am broadcast -n dev.medut.medut/.FakePushReceiver -->
+        <receiver
+            android:name=".FakePushReceiver"
+            android:exported="true" />
+    </application>
 </manifest>

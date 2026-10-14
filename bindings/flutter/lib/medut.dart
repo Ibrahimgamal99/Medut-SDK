@@ -338,9 +338,10 @@ class Account {
   Future<void> publishPresence(PresenceStatus status) =>
       _run('publishPresence', (a) => a.accountPublishPresence(id, status.raw));
 
-  /// Unregister and free the account, ending its calls.
-  Future<void> destroy() async {
-    await _run('destroy', (a) => a.accountDestroy(id));
+  /// Unregister and free the account, ending its calls.  [forget] also
+  /// drops it from the native account store (see [Medut.createAccount]).
+  Future<void> destroy({bool forget = false}) async {
+    await _run('destroy', (a) => a.accountDestroy(id, forget));
     _sdk._accounts.remove(id);
     await _ctrl.close();
   }
@@ -476,12 +477,27 @@ class Medut {
   }
 
   /// Create a SIP account.  Registration starts with [Account.register].
+  ///
+  /// With [remember], the native SDK keeps the config (encrypted, on the
+  /// device) and re-creates and registers the account whenever the stack
+  /// starts without Dart: at app launch from `Application.onCreate`, or
+  /// from a push.  After such a start this instance finds it in [accounts]
+  /// with [reattached] set.  [Account.destroy] with `forget` or
+  /// [forgetAccount] removes it again.
   Future<Account> createAccount(String uri, String password,
-      {AccountConfig config = const AccountConfig()}) async {
-    final m = await _run(
-        'createAccount', (a) => a.createAccount(config._toMessage(uri, password)));
+      {AccountConfig config = const AccountConfig(), bool remember = false}) async {
+    final m = await _run('createAccount',
+        (a) => a.createAccount(config._toMessage(uri, password), remember));
     return _trackAccount(m);
   }
+
+  /// URIs the native account store holds (see [createAccount]).
+  Future<List<String>> rememberedAccounts() =>
+      _run('rememberedAccounts', (a) => a.rememberedAccounts());
+
+  /// Drop an account from the native store without touching a live one.
+  Future<void> forgetAccount(String uri) =>
+      _run('forgetAccount', (a) => a.forgetAccount(uri));
 
   // ── Audio processing and devices ────────────────────────────────────────
 

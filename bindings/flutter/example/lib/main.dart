@@ -108,9 +108,26 @@ class _PhonePageState extends State<PhonePage>
   bool _speaker = false;
   bool _appAudio = false;
 
-  /// Android: register calls with Telecom (system call UI, incoming calls
-  /// ring with no UI up).  Read once, when the SDK first starts.
-  bool _telecom = false;
+  /// Stack settings.  On Android the native side (MedutApplication) has
+  /// already started the stack with its own copy of these by the time Dart
+  /// runs, so [Medut.start] attaches and this config is not used there.
+  static const _sdkConfig = MedutConfig(
+    logLevel: 3,
+    // Experimental: gather on cellular next to Wi-Fi so a handover can
+    // reuse candidates that already exist. Off here — on the Android
+    // device it was tried on, the network-pinned socket never received
+    // replies (see docs/guides/network_handover.md).
+    iceMultipath: false,
+    // SIP capture for debugging; relative, so it lands in the app's cache
+    // dir (adb: run-as dev.medut.medut cat cache/medut.pcap).
+    pcapPath: 'medut.pcap',
+    traceSip: true,
+    statsIntervalMs: 2000,
+    traceSdpDiff: true,
+    mosAlertThreshold: 3.5,
+    lossAlertThreshold: 5.0,
+    jitterAlertThreshold: 40.0,
+  );
   MediaStats? _stats;
 
   /// When the call was answered, and a 1 Hz tick to redraw the elapsed time.
@@ -129,7 +146,37 @@ class _PhonePageState extends State<PhonePage>
   @override
   void initState() {
     super.initState();
-    _restoreProfile();
+    _restoreProfile().then((_) => _attach());
+  }
+
+  /// Start the stack, or attach to the one native code already started, and
+  /// adopt an account it is already running (one remembered on a previous
+  /// Register, re-created at launch or by a push with no Dart involved).
+  Future<Medut?> _attach() async {
+    if (_sdk == null) {
+      // The built-in incoming-call notification needs this on API 33+.
+      await Permission.notification.request();
+    }
+    final Medut sdk;
+    try {
+      sdk = _sdk ??= await Medut.start(telecom: true, config: _sdkConfig);
+    } on MedutException catch (e) {
+      _snack('start: ${e.message ?? e.code}');
+      return null;
+    }
+    _sub ??= sdk.events.listen(_onEvent);
+    if (_account == null && sdk.accounts.isNotEmpty) {
+      final account = sdk.accounts.first;
+      _logLine('attached to the native stack (reattached=${sdk.reattached}): '
+          '${account.aor} is ${account.regState.name}');
+      if (mounted) {
+        setState(() {
+          _account = account;
+          _regState = account.regState;
+        });
+      }
+    }
+    return sdk;
   }
 
   // ── persistence ────────────────────────────────────────────────────────
@@ -201,6 +248,7 @@ class _PhonePageState extends State<PhonePage>
   /// Drop the stored profile, leaving the form as it is on screen.
   Future<void> _forgetProfile() async {
     await _store.clear();
+    if (_user.text.isNotEmpty) await _sdk?.forgetAccount(_user.text);
     if (mounted) _snack('Saved account cleared');
   }
 
@@ -303,33 +351,7 @@ class _PhonePageState extends State<PhonePage>
       _logLine('microphone permission: $mic (calls will be one-way)');
     }
 
-    if (_telecom && _sdk == null) {
-      // The built-in incoming-call notification needs this on API 33+.
-      await Permission.notification.request();
-    }
-
-    try {
-      _sdk ??= await Medut.start(
-        telecom: _telecom,
-        config: const MedutConfig(
-          logLevel: 3,
-          // Experimental: gather on cellular next to Wi-Fi so a handover can
-          // reuse candidates that already exist. Off here — on the Android
-          // device it was tried on, the network-pinned socket never received
-          // replies (see docs/guides/network_handover.md).
-          iceMultipath: false,
-          traceSip: true,
-          statsIntervalMs: 2000,
-          traceSdpDiff: true,
-          mosAlertThreshold: 3.5,
-          lossAlertThreshold: 5.0,
-          jitterAlertThreshold: 40.0,
-        ),
-      );
-    } on MedutException catch (e) {
-      _snack(e.message ?? e.code);
-      return;
-    }
+    if (await _attach() == null) return;
 
     final needsUrl =
         _transport == Transport.ws || _transport == Transport.wss;
@@ -343,12 +365,15 @@ class _PhonePageState extends State<PhonePage>
     // forever (a mistyped domain never resolves, so it never gives up) and
     // counts as a second SIP server for as long as it lives, which switches
     // off the SDK's WebSocket connection pinning for the account that works.
-    await _account?.destroy();
+    await _account?.destroy(forget: true);
     _account = null;
 
+    // `remember` hands the config to the native account store too, so the
+    // next launch (or a push) registers it before Dart runs.
     final account = await _sdk!.createAccount(
       _user.text,
       _pass.text,
+      remember: _rememberAccount,
       config: AccountConfig(
         transport: _transport,
         serverUrl: _serverUrl.text.isEmpty ? null : _serverUrl.text,
@@ -382,7 +407,9 @@ class _PhonePageState extends State<PhonePage>
   }
 
   void _unregister() {
-    _account?.destroy();
+    // An explicit unregister must stick across launches: forget the native
+    // copy too, or the next start would register the account again.
+    _account?.destroy(forget: true);
     _account = null;
     setState(() {
       _regState = RegState.unregistered;
@@ -760,19 +787,10 @@ class _PhonePageState extends State<PhonePage>
       ),
       const SizedBox(height: 8),
       SwitchListTile(
-        title: const Text('System call UI (Telecom, Android)'),
-        subtitle: Text(_sdk == null
-            ? 'Calls show in the system call UI and ring with the app '
-                'closed. Applies when the SDK starts, on the first Register.'
-            : 'Fixed for this run: the SDK is already started.'),
-        isThreeLine: true,
-        value: _telecom,
-        onChanged: _sdk == null ? (v) => setState(() => _telecom = v) : null,
-      ),
-      SwitchListTile(
         title: const Text('Remember this account'),
-        subtitle: const Text('Settings are restored on the next launch; the '
-            'SIP and TURN passwords go to the device keystore'),
+        subtitle: const Text('Restored on the next launch, and registered by '
+            'the native stack before the UI is up, so pushes and the system '
+            'call UI work with the app closed'),
         isThreeLine: true,
         value: _rememberAccount,
         onChanged: _setRememberAccount,

@@ -103,7 +103,9 @@ Behaviour worth knowing:
   API 33+.
 - **Push wake-up** is native: start the stack from `Application.onCreate`
   and call `MedutPush.wake()` from your FCM service
-  ([Kotlin README](../kotlin/README.md#push-wake-up-fcm)).
+  ([Kotlin README](../kotlin/README.md#push-wake-up-fcm)). Register with
+  `createAccount(remember: true)` so that start finds the account; the
+  example app's `MedutApplication` shows the whole arrangement.
 
 See [`example/`](example/) for a runnable app and
 [`docs/quickstart/flutter.md`](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md)

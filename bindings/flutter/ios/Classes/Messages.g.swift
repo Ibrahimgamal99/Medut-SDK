@@ -2055,8 +2055,14 @@ protocol MedutHostApi {
   func shutdown() throws
   /// Let the native side release an ended call this side no longer holds.
   func releaseCall(callId: String) throws
-  func createAccount(config: AccountConfigMessage) throws -> AccountMessage
-  func accountDestroy(accountId: String) throws
+  /// [remember] keeps the config in the native account store, so a process
+  /// started by a push re-creates and registers the account with no Dart.
+  func createAccount(config: AccountConfigMessage, remember: Bool) throws -> AccountMessage
+  /// [forget] also drops the account from the native store.
+  func accountDestroy(accountId: String, forget: Bool) throws
+  /// URIs of the accounts the native store holds.
+  func rememberedAccounts() throws -> [String]
+  func forgetAccount(uri: String) throws
   func accountRegister(accountId: String) throws
   func accountUnregister(accountId: String) throws
   func accountRegistrationState(accountId: String) throws -> Int64
@@ -2185,13 +2191,16 @@ class MedutHostApiSetup {
     } else {
       releaseCallChannel.setMessageHandler(nil)
     }
+    /// [remember] keeps the config in the native account store, so a process
+    /// started by a push re-creates and registers the account with no Dart.
     let createAccountChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.medut.MedutHostApi.createAccount\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       createAccountChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let configArg = args[0] as! AccountConfigMessage
+        let rememberArg = args[1] as! Bool
         do {
-          let result = try api.createAccount(config: configArg)
+          let result = try api.createAccount(config: configArg, remember: rememberArg)
           reply(wrapResult(result))
         } catch {
           reply(wrapError(error))
@@ -2200,13 +2209,15 @@ class MedutHostApiSetup {
     } else {
       createAccountChannel.setMessageHandler(nil)
     }
+    /// [forget] also drops the account from the native store.
     let accountDestroyChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.medut.MedutHostApi.accountDestroy\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {
       accountDestroyChannel.setMessageHandler { message, reply in
         let args = message as! [Any?]
         let accountIdArg = args[0] as! String
+        let forgetArg = args[1] as! Bool
         do {
-          try api.accountDestroy(accountId: accountIdArg)
+          try api.accountDestroy(accountId: accountIdArg, forget: forgetArg)
           reply(wrapResult(nil))
         } catch {
           reply(wrapError(error))
@@ -2214,6 +2225,35 @@ class MedutHostApiSetup {
       }
     } else {
       accountDestroyChannel.setMessageHandler(nil)
+    }
+    /// URIs of the accounts the native store holds.
+    let rememberedAccountsChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.medut.MedutHostApi.rememberedAccounts\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      rememberedAccountsChannel.setMessageHandler { _, reply in
+        do {
+          let result = try api.rememberedAccounts()
+          reply(wrapResult(result))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      rememberedAccountsChannel.setMessageHandler(nil)
+    }
+    let forgetAccountChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.medut.MedutHostApi.forgetAccount\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      forgetAccountChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let uriArg = args[0] as! String
+        do {
+          try api.forgetAccount(uri: uriArg)
+          reply(wrapResult(nil))
+        } catch {
+          reply(wrapError(error))
+        }
+      }
+    } else {
+      forgetAccountChannel.setMessageHandler(nil)
     }
     let accountRegisterChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.medut.MedutHostApi.accountRegister\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
     if let api = api {

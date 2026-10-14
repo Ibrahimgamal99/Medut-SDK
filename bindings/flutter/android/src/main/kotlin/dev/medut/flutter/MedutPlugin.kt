@@ -165,14 +165,27 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
 
     // ── Accounts ─────────────────────────────────────────────────────────
 
-    override fun createAccount(config: AccountConfigMessage): AccountMessage = sdk {
-        val account = Medut.createAccount(config.toSdk())
+    override fun createAccount(config: AccountConfigMessage, remember: Boolean): AccountMessage = sdk {
+        val cfg = config.toSdk()
+        val account = Medut.createAccount(cfg)
         accounts[account.id.toString()] = account
+        if (remember) MedutAndroid.accountStore.save(cfg)
         account.toMessage()
     }
 
-    override fun accountDestroy(accountId: String) = sdk {
-        accounts.remove(accountId)?.destroy()
+    override fun accountDestroy(accountId: String, forget: Boolean) = sdk {
+        accounts.remove(accountId)?.let { account ->
+            if (forget) MedutAndroid.accountStore.remove(account.aor)
+            account.destroy()
+        }
+        Unit
+    }
+
+    override fun rememberedAccounts(): List<String> =
+        sdk { MedutAndroid.accountStore.list().map { it.uri } }
+
+    override fun forgetAccount(uri: String) = sdk {
+        MedutAndroid.accountStore.remove(uri)
         Unit
     }
 

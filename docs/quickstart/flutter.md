@@ -143,14 +143,25 @@ an active session.
 ### Push wake-up
 
 Push handling is native: there is no Dart isolate to wait for when the
-process is started by a push. On Android, start the stack from
-`Application.onCreate`, give the account its RFC 8599 push parameters
-(`AccountConfig.pushProvider` / `pushToken` / `pushParam`,
-`account.setPushToken()` on refresh), and call `MedutPush.wake(this)` from
-your `FirebaseMessagingService` — see the
-[Kotlin README](../../bindings/kotlin/README.md#push-wake-up-fcm). With
-Telecom on, the system rings; when Flutter comes up, `Medut.start()` attaches
-and finds the call in `sdk.calls`. On iOS, add PushKit + CallKit on the
+process is started by a push. On Android:
+
+1. Register with `createAccount(uri, password, remember: true)`. The Kotlin
+   SDK keeps the config in an encrypted store on the device.
+2. Start the stack from `Application.onCreate` with
+   `MedutAndroid.start(this, config, AndroidOptions(telecom = TelecomOptions()))`.
+   It re-creates and registers the remembered accounts before any UI exists.
+3. Give the account its RFC 8599 push parameters
+   (`AccountConfig.pushProvider` / `pushToken` / `pushParam`,
+   `account.setPushToken()` on refresh) and call `MedutPush.wake(this)` from
+   your `FirebaseMessagingService` — see the
+   [Kotlin README](../../bindings/kotlin/README.md#push-wake-up-fcm).
+
+With Telecom on, the system rings; when Flutter comes up, `Medut.start()`
+attaches (`sdk.reattached`) and finds the account in `sdk.accounts` and the
+call in `sdk.calls`. The example app does all three
+(`example/android/.../MedutApplication.kt`), and its debug build has a
+`FakePushReceiver` that stands in for FCM:
+`adb shell am broadcast -n dev.medut.medut/.FakePushReceiver`. On iOS, add PushKit + CallKit on the
 native side; Apple kills background sockets, and push is the sanctioned
 wake-up.
 
