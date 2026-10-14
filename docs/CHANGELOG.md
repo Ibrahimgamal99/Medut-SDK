@@ -73,6 +73,11 @@ All notable changes to Medut are documented here.
   `TelecomOptions.callActivity`; public `EXTRA_CALL_ID` / `ACTION_ANSWER` /
   `ACTION_DECLINE`.
 - `AccountConfig.headers` / `registerHeaders`, saved by the account stores.
+- **`endedLocally` on the call-state event** (Kotlin
+  `MedutEvent.CallStateChanged`, Swift `CallStateEvent`, Flutter
+  `CallStateEvent`): true when this side ended the call, including a Decline
+  from the system call UI, a Bluetooth headset or a watch. An incoming call
+  that ends unanswered with it set was declined, not missed.
 - `MedutAndroid.setStartOnBoot()`: opt-in registration after a reboot.
 
 - **Kotlin SDK:** Telecom integration through a self-managed
