@@ -81,6 +81,11 @@ public struct CallStateEvent: Sendable {
     public let state: CallState
     public let error: MedutError?
     public let reason: String?
+    /// On a terminal state: this side ended the call (`hangup` / `reject`),
+    /// from the app or from the system: a Decline on the CallKit screen, a
+    /// Bluetooth headset or a watch.  An incoming call that ends unanswered
+    /// with this set was declined, not missed.  False on non-terminal states.
+    public let endedLocally: Bool
 }
 
 public struct DTMFEvent: Sendable {
@@ -256,7 +261,8 @@ extension Medut {
             #endif
             return .callState(CallStateEvent(account: call.account ?? account(for: s.account),
                                              call: call, state: state, error: error,
-                                             reason: reason))
+                                             reason: reason,
+                                             endedLocally: state.isTerminal && call.endRequestedLocally))
 
         case MEDUT_EV_CALL_DTMF:
             let d = e.u.dtmf
