@@ -47,7 +47,7 @@ Swift SDK, which owns the stack.
     fi
   CMD
 
-  s.frameworks = 'AVFoundation', 'AudioToolbox', 'CoreAudio', 'Network'
+  s.frameworks = 'AVFoundation', 'AudioToolbox', 'CoreAudio', 'Network', 'CallKit'
 
   # -framework Medut on both sides, not just vendored_frameworks: this pod
   # builds as a static library (Flutter's default), which links nothing

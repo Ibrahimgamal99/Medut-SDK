@@ -21,16 +21,16 @@ MedutKit on iOS), which own the stack for the process lifetime.  Breaking:
   now).  An ended `Call` stays usable for as long as it is held.
 - **App-owned audio** lives in the native SDKs; `appOwnedAudioActive()` and
   `appOwnedAudioFormat()` are async.
-- **Telecom (Android).** `Medut.start(telecom: true)` registers every call
-  with the system through the Kotlin SDK's self-managed ConnectionService:
-  system call UI, Bluetooth / Auto / Wear, and incoming calls that ring with
-  no Flutter engine up.
+- **Telecom and CallKit.** `Medut.start(telecom: true)` registers every
+  call with the system: the Kotlin SDK's self-managed ConnectionService on
+  Android, MedutKit's CallKit provider on iOS. System call UI, no fight with
+  cellular calls, and incoming calls that ring with no Flutter engine up.
 - **Built-in Kotlin.** The Android plugin no longer applies the Kotlin
   Gradle Plugin itself. Minimum Flutter 3.44 / Dart 3.12.
-- **Remembered accounts (Android).** `createAccount(remember: true)` hands
-  the config to the Kotlin SDK's encrypted account store; a process started
-  from `Application.onCreate` or a push registers it before any Dart runs,
-  and `Medut.start()` then attaches and finds it in `accounts`.
+- **Remembered accounts.** `createAccount(remember: true)` hands the config
+  to the native account store (Keystore-encrypted file on Android, Keychain
+  on iOS); a process started at launch or by a push registers it before any
+  Dart runs, and `Medut.start()` then attaches and finds it in `accounts`.
   `Account.destroy(forget: true)`, `forgetAccount()` and
   `rememberedAccounts()` manage the store.
 

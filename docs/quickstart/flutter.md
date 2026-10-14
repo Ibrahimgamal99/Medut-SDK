@@ -105,24 +105,25 @@ if (sdk.reattached) {
 `sdk.detach()` stops listening and leaves the stack running.
 `sdk.shutdown()` stops the stack itself.
 
-### Telecom (Android)
+### Telecom and CallKit
 
 ```dart
 final sdk = await Medut.start(telecom: true);
 ```
 
-The Kotlin SDK then registers every call with Telecom through its own
-self-managed ConnectionService (API 26+): calls show in the system call UI
-and on Bluetooth, Android Auto and Wear; a cellular call and a SIP call never
-fight for audio; and an incoming call rings with the built-in call
-notification when no Flutter engine is up, whose full-screen intent opens the
-app. Nothing else in the Dart API changes. Request the notification
-permission on API 33+ (for example `Permission.notification.request()`).
+Every call is then registered with the system call framework: on Android the
+Kotlin SDK's self-managed ConnectionService (API 26+), on iOS MedutKit's
+CallKit provider. Calls show in the system call UI (and on Bluetooth, Auto,
+Wear, the lock screen); a cellular call and a SIP call never fight for
+audio; and an incoming call rings with no Flutter engine up. On Android that
+is the built-in call notification, whose full-screen intent opens the app;
+on iOS it is the native CallKit screen. Nothing else in the Dart API
+changes. On Android request the notification permission on API 33+.
 
-With `Medut.start(telecom: true)` the native side forwards Telecom's audio
-activation itself, so `notifyCallKitAudioActive` is not needed.
+With `Medut.start(telecom: true)` the native side forwards the framework's
+audio activation itself, so `notifyCallKitAudioActive` is not needed.
 
-### CallKit, or your own Telecom integration
+### Your own CallKit or Telecom integration
 
 When a platform call framework owns call audio, tell the SDK so it does not
 activate audio itself:
@@ -161,7 +162,15 @@ attaches (`sdk.reattached`) and finds the account in `sdk.accounts` and the
 call in `sdk.calls`. The example app does all three
 (`example/android/.../MedutApplication.kt`), and its debug build has a
 `FakePushReceiver` that stands in for FCM:
-`adb shell am broadcast -n dev.medut.medut/.FakePushReceiver`. On iOS, add PushKit + CallKit on the
+`adb shell am broadcast -n dev.medut.medut/.FakePushReceiver`.
+
+On iOS the same three steps are `createAccount(remember: true)`,
+`Medut.shared.start(config, options:)` with `StartOptions.callKit` in
+`didFinishLaunching`, and `MedutPush.wake(payload:completion:)` from the
+`PKPushRegistryDelegate`, with `voip` in `UIBackgroundModes` — see the
+[Swift README](../../bindings/swift/README.md#push-wake-up-pushkit) and the
+example's `AppDelegate.swift`. `wake` reports the call to CallKit from the
+push payload before the INVITE arrives, as iOS requires. On iOS, add PushKit + CallKit on the
 native side; Apple kills background sockets, and push is the sanctioned
 wake-up.
 
