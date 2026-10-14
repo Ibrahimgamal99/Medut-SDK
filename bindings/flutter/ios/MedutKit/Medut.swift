@@ -193,7 +193,7 @@ public final class Medut: @unchecked Sendable {
 
     /// Create an account.  It does not register until `register()`.
     public func createAccount(_ config: AccountConfig) throws -> Account {
-        try gate.read(nil, "medut_account_create") {
+        let account: Account = try gate.read(nil, "medut_account_create") {
             var out: OpaquePointer?
             try config.withCConfig { c in
                 try check(medut_account_create(c, &out), "medut_account_create")
@@ -203,6 +203,18 @@ public final class Medut: @unchecked Sendable {
             }
             return track(account: handle)
         }
+        do {
+            for (name, value) in config.headers.sorted(by: { $0.key < $1.key }) {
+                try account.addHeader(name: name, value: value)
+            }
+            for (name, value) in config.registerHeaders.sorted(by: { $0.key < $1.key }) {
+                try account.addRegisterHeader(name: name, value: value)
+            }
+        } catch {
+            account.destroy()
+            throw error
+        }
+        return account
     }
 
     /// The live account with this AOR ("sip:user@host"), if any.

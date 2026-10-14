@@ -36,8 +36,9 @@ public struct AccountConfig: Sendable {
     public var verifyTLS = true
 
     /// RFC 8599 push parameters for the REGISTER Contact.  For APNs the
-    /// token is the hex-encoded VoIP push token and `pushParam` the bundle
-    /// ID.  `Account.setPushToken(_:)` updates the token later.
+    /// token is the hex-encoded VoIP push token and `pushParam`
+    /// "<Team ID>.<bundle ID>.voip" (docs/guides/push.md).
+    /// `Account.setPushToken(_:)` updates the token later.
     public var pushProvider: PushProvider = .none
     public var pushToken: String?
     public var pushParam: String?
@@ -45,6 +46,13 @@ public struct AccountConfig: Sendable {
     /// Codec preference by name; empty inherits the stack-wide list.
     public var audioCodecs: [String] = []
     public var dtmfMode: DTMFMode = .rfc4733
+
+    /// Headers on every request this account sends (`Account.addHeader`),
+    /// added by `createAccount`, so a saved account keeps them.
+    public var headers: [String: String] = [:]
+    /// Headers on REGISTER only (`Account.addRegisterHeader`), e.g. a
+    /// vendor's push token header.
+    public var registerHeaders: [String: String] = [:]
 
     public init(uri: String, password: String) {
         self.uri = uri

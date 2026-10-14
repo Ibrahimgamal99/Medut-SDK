@@ -140,11 +140,21 @@ object Medut {
 
     /** Create an account.  It does not register until [Account.register]. */
     @JvmStatic
-    fun createAccount(config: AccountConfig): Account = gate.read(null, "medut_account_create") {
-        val out = LongArray(1)
-        check(Native.accountCreate(config, out), "medut_account_create")
-        if (out[0] == 0L) throw MedutException(MedutError.fromRaw(-2)!!, "medut_account_create")
-        registry.trackAccount(out[0], gate.currentGeneration)
+    fun createAccount(config: AccountConfig): Account {
+        val account = gate.read(null, "medut_account_create") {
+            val out = LongArray(1)
+            check(Native.accountCreate(config, out), "medut_account_create")
+            if (out[0] == 0L) throw MedutException(MedutError.fromRaw(-2)!!, "medut_account_create")
+            registry.trackAccount(out[0], gate.currentGeneration)
+        }
+        try {
+            config.headers.forEach { (name, value) -> account.addHeader(name, value) }
+            config.registerHeaders.forEach { (name, value) -> account.addRegisterHeader(name, value) }
+        } catch (t: Throwable) {
+            account.destroy()
+            throw t
+        }
+        return account
     }
 
     /** The live account with this AOR ("sip:user@host"), if any. */

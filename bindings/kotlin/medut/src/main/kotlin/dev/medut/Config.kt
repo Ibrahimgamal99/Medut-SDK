@@ -197,12 +197,18 @@ data class AccountConfig(
     val iceTransportPolicy: IceTransportPolicy = IceTransportPolicy.ALL,
     val verifyTls: Boolean = true,
     /** RFC 8599 push parameters for the REGISTER Contact.  For FCM the token
-     *  is the registration token and [pushParam] the package name.
-     *  [Account.setPushToken] updates the token later. */
+     *  is the registration token and [pushParam] the Firebase project ID
+     *  (docs/guides/push.md).  [Account.setPushToken] updates the token later. */
     val pushProvider: PushProvider = PushProvider.NONE,
     val pushToken: String? = null,
     val pushParam: String? = null,
     /** Codec preference by name; empty inherits the stack-wide list. */
     val audioCodecs: List<String> = emptyList(),
     val dtmfMode: DtmfMode = DtmfMode.RFC4733,
+    /** Headers on every request this account sends ([Account.addHeader]),
+     *  added by [Medut.createAccount], so a saved account keeps them. */
+    val headers: Map<String, String> = emptyMap(),
+    /** Headers on REGISTER only ([Account.addRegisterHeader]), e.g. a
+     *  vendor's push token header. */
+    val registerHeaders: Map<String, String> = emptyMap(),
 )

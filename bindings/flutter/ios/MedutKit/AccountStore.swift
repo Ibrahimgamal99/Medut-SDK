@@ -197,6 +197,7 @@ extension AccountConfig: Codable {
         case authUser, displayName, mediaEncryption, iceEnabled, rtcpMux
         case stunServer, turnServer, turnUser, turnPass, iceServers, iceTransportPolicy
         case verifyTLS, pushProvider, pushToken, pushParam, audioCodecs, dtmfMode
+        case headers, registerHeaders
     }
 
     public init(from decoder: Decoder) throws {
@@ -227,6 +228,8 @@ extension AccountConfig: Codable {
         pushParam = try c.decodeIfPresent(String.self, forKey: .pushParam)
         audioCodecs = try c.decodeIfPresent([String].self, forKey: .audioCodecs) ?? []
         dtmfMode = try c.decodeIfPresent(DTMFMode.self, forKey: .dtmfMode) ?? dtmfMode
+        headers = try c.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
+        registerHeaders = try c.decodeIfPresent([String: String].self, forKey: .registerHeaders) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -255,5 +258,7 @@ extension AccountConfig: Codable {
         try c.encodeIfPresent(pushParam, forKey: .pushParam)
         try c.encode(audioCodecs, forKey: .audioCodecs)
         try c.encode(dtmfMode, forKey: .dtmfMode)
+        try c.encode(headers, forKey: .headers)
+        try c.encode(registerHeaders, forKey: .registerHeaders)
     }
 }

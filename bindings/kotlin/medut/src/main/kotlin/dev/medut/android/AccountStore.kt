@@ -217,6 +217,8 @@ class AccountStore(context: Context) {
         putOpt("pushParam", c.pushParam)
         put("audioCodecs", JSONArray(c.audioCodecs))
         put("dtmfMode", c.dtmfMode.value)
+        put("headers", JSONObject(c.headers))
+        put("registerHeaders", JSONObject(c.registerHeaders))
     }
 
     private fun fromJson(j: JSONObject): AccountConfig {
@@ -254,7 +256,17 @@ class AccountStore(context: Context) {
             pushParam = j.optStringOrNull("pushParam"),
             audioCodecs = codecs,
             dtmfMode = DtmfMode.of(j.optInt("dtmfMode", d.dtmfMode.value)),
+            headers = j.optJSONObject("headers").toStringMap(),
+            registerHeaders = j.optJSONObject("registerHeaders").toStringMap(),
         )
+    }
+
+    /** In the order saved: header order can matter to a server. */
+    private fun JSONObject?.toStringMap(): Map<String, String> {
+        if (this == null) return emptyMap()
+        val map = LinkedHashMap<String, String>()
+        for (key in keys()) map[key] = getString(key)
+        return map
     }
 
     private fun JSONObject.optStringOrNull(name: String): String? =
