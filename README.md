@@ -47,7 +47,7 @@ The same flow in C++ and Dart is in [Quick start](#quick-start) below.
 | **Every transport, including WebSocket** | UDP, TCP, TLS, WS and WSS in the same build. RFC 7118 over one connection, so a client behind a reverse proxy or a browser-facing gateway needs no separate stack. |
 | **Carrier-grade media out of the box** | ICE/STUN/TURN, DTLS-SRTP and SDES, RTCP with MOS scoring, adaptive jitter buffer, AEC/NS/AGC — not add-ons you assemble yourself. |
 | **Survives real networks** | Wi-Fi ↔ 5G handover with media verification, media-stall and RTP-timeout detection, OPTIONS keepalive, DNS SRV failover, adaptive Opus bitrate, and a `RECONNECTING` state that models recovery instead of dropping you to `FAILED`. |
-| **One flat C ABI** | 80 functions in one header, opaque handles, append-only structs, no callbacks into internal types. Easy to bind from anything — the Python, C++ and Dart bindings are all thin. |
+| **One flat C ABI** | 80 functions in one header, opaque handles, append-only structs, no callbacks into internal types. Easy to bind from anything — every binding (C++, Python, Kotlin, Swift, Flutter) is thin. |
 | **Thread-safe by construction** | Every public call is safe from any thread; events arrive on a dedicated dispatch thread and you may re-enter the API from inside a handler. |
 | **Self-contained binaries** | TLS, zlib and audio deps are statically linked. No system OpenSSL, no runtime package hunt, no version skew between dev and production. |
 | **Debuggable in the field** | SIP trace, SDP diff, pcap capture, per-call stats and quality alerts are part of the API, so a customer-site failure is a log you can read rather than a repro you have to build. |
@@ -117,7 +117,9 @@ dependencies are baked in, so nothing extra is needed at runtime.
 | C | `include/medut.h` | the entire API surface |
 | C++ | `bindings/cpp/medut.hpp` | header-only RAII wrapper |
 | Python | `bindings/python/` | cffi + event decorators |
-| Flutter / Dart | `bindings/flutter/` | `dart:ffi` + ffigen, event streams |
+| Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API, AAR |
+| Swift (iOS) | `bindings/swift/` | Swift package, async event stream |
+| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs |
 
 ---
 
@@ -207,13 +209,13 @@ dependencies:
 ```dart
 final sdk = await Medut.start(config: const MedutConfig(statsIntervalMs: 5000));
 
-final account = sdk.createAccount('alice@pbx.example.com', 'secret',
+final account = await sdk.createAccount('alice@pbx.example.com', 'secret',
     config: const AccountConfig(
       serverUrl: 'wss://pbx.example.com:8089/ws',
       mediaEnc: MediaEncryption.dtlsSrtp,
       audioCodecs: ['opus', 'ulaw'],
     ));
-account.register();
+await account.register();
 
 account.events.listen((ev) {
   if (ev is IncomingCallEvent) ev.call.answer();
@@ -222,7 +224,9 @@ account.events.listen((ev) {
 
 Platform setup (permissions, `Info.plist`, xcframework):
 [bindings/flutter/README.md](bindings/flutter/README.md) ·
-[docs/quickstart/flutter.md](docs/quickstart/flutter.md).
+[docs/quickstart/flutter.md](docs/quickstart/flutter.md).  Native apps use the
+SDKs directly: [Kotlin](bindings/kotlin/README.md) ·
+[Swift](bindings/swift/README.md).
 
 ---
 
@@ -277,7 +281,8 @@ SIP trace events — see [docs/guides/debugging.md](docs/guides/debugging.md).
 Everything lives in [`docs/`](docs/index.md):
 
 **Quick starts** — [C/C++](docs/quickstart/c.md) ·
-[Python](docs/quickstart/python.md) · [Flutter](docs/quickstart/flutter.md)
+[Python](docs/quickstart/python.md) · [Kotlin](bindings/kotlin/README.md) ·
+[Swift](bindings/swift/README.md) · [Flutter](docs/quickstart/flutter.md)
 
 **Guides** — [Complete SDK usage, all languages](docs/guides/complete_example.md) ·
 [NAT traversal](docs/guides/nat_traversal.md) ·

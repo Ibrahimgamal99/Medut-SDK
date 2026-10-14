@@ -53,9 +53,8 @@ medut_shutdown()           ← stop all threads, free everything
 
 The stack belongs to the **process**, not to the runtime that started it. A host
 that can lose and rebuild its own runtime while the process survives comes back
-to a stack that is still up and still registered — the motivating case is an
-Android headless Flutter engine destroying the Dart isolate between push
-wakeups, and any re-loaded plugin or scripting VM behaves the same way.
+to a stack that is still up and still registered — a re-loaded plugin or
+scripting VM, or a second SDK layer in the same app that started second.
 
 Re-initializing is not the recovery; re-pointing is:
 
@@ -83,10 +82,10 @@ Going the other way, a consumer that knows it is about to disappear should call
 `medut_set_event_handler(NULL, NULL, false)` so nothing is delivered into a
 runtime being torn down. The stack stays up, registered and push-reachable.
 
-Flutter does all of this for you: `Medut.start()` reattaches when the stack is
-already running and sets [`reattached`](../quickstart/flutter.md), adopting the
-live accounts and calls; `detach()` is the park-and-leave-running counterpart to
-`shutdown()`.
+The Kotlin and Swift SDKs do this for you when their `start` finds the stack
+already running (their `reattached` is then true). The Flutter plugin sits on
+top of them, so its `Medut.start()` attaches to a stack native code started at
+launch or from a push — see [Flutter](../quickstart/flutter.md).
 
 ---
 

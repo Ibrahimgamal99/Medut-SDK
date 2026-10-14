@@ -302,7 +302,7 @@ running and `false` when it stops (from the device's start and stop, never the
 audio callback). With it the SDK keeps its own NS and AGC off, as it does on its
 own mobile drivers — stacked on the platform's they only cost speech. Without
 it the SDK assumes a raw microphone. The shipped engines (`AppOwnedAudioEngine`
-on Android, `MedutExternalAudio` on iOS) report it; on an iPhone with NS, AGC
+in the Kotlin SDK, `MedutAudioEngine` in MedutKit) report it; on an iPhone with NS, AGC
 and AEC all on, the TX chain line then reads
 `ns=off (app-owned voice path) agc=off (app-owned voice path) aec=off (app-owned voice path)`.
 
@@ -389,13 +389,17 @@ is in place, so audio works the moment CallKit activates the session.
 cfg.platform_audio_activate = false;   /* CXProvider owns activation */
 ```
 
+```swift
+// MedutKit: .callKit sets platform_audio_activate = false and keeps the SDK
+// from toggling activation around calls.
+var options = StartOptions()
+options.audioSession = .callKit
+try Medut.shared.start(MedutConfig(), options: options)
+```
+
 ```dart
-// Flutter: pair it with manageAudioSession: false so the plugin does not
-// toggle activation around calls either.
-final sdk = await Medut.start(
-  config: const MedutConfig(platformAudioActivate: false),
-  manageAudioSession: false,
-);
+// Flutter: the same through the plugin.
+final sdk = await Medut.start(audioSession: AudioSessionMode.callFramework);
 ```
 
 Deactivation is symmetric — a CallKit app lets `didDeactivateAudioSession` do

@@ -43,7 +43,9 @@ Each platform build script produces both the static archive (`medut.a` / `bare.l
 |---|---|---|
 | C / C++ | Header-only RAII wrapper | `bindings/cpp/medut.hpp` |
 | Python | cffi | `bindings/python/` |
-| Flutter / Dart | dart:ffi + ffigen | `bindings/flutter/` |
+| Kotlin (Android) | JNI | `bindings/kotlin/` |
+| Swift (iOS) | Swift package over the C module | `bindings/swift/` |
+| Flutter | Pigeon over the Kotlin and Swift SDKs | `bindings/flutter/` |
 
 ---
 
