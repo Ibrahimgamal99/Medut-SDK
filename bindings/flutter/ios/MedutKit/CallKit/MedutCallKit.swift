@@ -45,6 +45,14 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     /// CallKit call was ended as unanswered.  Main queue.
     public var onPushCallTimedOut: (() -> Void)?
 
+    /// Decide on an incoming call before CallKit hears of it: return a SIP
+    /// status to reject it with (486 for "two calls already up", 603 for a
+    /// blocked number or Do Not Disturb), or nil to ring.  A refused call
+    /// never reaches the system UI; a push placeholder it would have taken
+    /// over ends quietly (declined elsewhere).  Called on the SDK's event
+    /// thread, before the incoming-call event is delivered; keep it quick.
+    public var incomingCallFilter: ((Call) -> UInt16?)?
+
     private let lock = NSLock()
     private var provider: CXProvider?
     private let controller = CXCallController()
@@ -58,6 +66,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     private var pendingRejects: [UUID: UInt16] = [:]
     private var endedByAction: Set<UUID> = []
     private var placeholders: [Placeholder] = []
+    private var filtered: Set<UUID> = []
     private var sessionActive = false
 
     /// A CallKit call reported from a push before its INVITE arrived.
@@ -101,6 +110,10 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
         }
         // A stack that was already running (reattached) may be ringing.
         for call in Medut.shared.calls where !call.isOutgoing && call.state == .ringing {
+            if let code = incomingCallFilter?(call) {
+                try? call.rejectNow(statusCode: code, reason: nil)
+                continue
+            }
             reportIncoming(call)
         }
     }
@@ -116,6 +129,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
                 pendingRejects.removeAll()
                 endedByAction.removeAll()
                 placeholders.removeAll()
+                filtered.removeAll()
             }
             return (self.provider, Array(calls.keys), placeholders)
         }
@@ -152,6 +166,11 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     /// its CallKit identity, so every subscriber sees the final id.  Takes
     /// only this object's lock.
     func bindIncoming(_ call: Call) {
+        guard isEnabled else { return }
+        if let code = incomingCallFilter?(call) {
+            refuse(call, code: code)
+            return
+        }
         let bound: Placeholder? = lock.locked {
             guard provider != nil, !placeholders.isEmpty else { return nil }
             let ph = placeholders.removeFirst()
@@ -175,8 +194,28 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
         }
     }
 
+    /// The filter turned `call` away: reject it, and end quietly the push
+    /// placeholder that would have become it, so nothing rings.
+    private func refuse(_ call: Call, code: UInt16) {
+        let ph: Placeholder? = lock.locked {
+            _ = filtered.insert(call.id)
+            // The one bindIncoming would have given this INVITE.
+            guard !placeholders.isEmpty else { return nil }
+            return placeholders.removeFirst()
+        }
+        ph?.expiry?.cancel()
+        DispatchQueue.main.async { [self] in
+            try? call.rejectNow(statusCode: code, reason: nil)
+            // A declined placeholder is already over in CallKit.
+            if let ph = ph, !ph.endRequested, let provider = lock.locked({ self.provider }) {
+                provider.reportCall(with: ph.uuid, endedAt: Date(), reason: .declinedElsewhere)
+            }
+        }
+    }
+
     private func reportIncoming(_ call: Call) {
         let (provider, alreadyManaged): (CXProvider?, Bool) = lock.locked {
+            if filtered.remove(call.id) != nil { return (nil, true) }
             if calls[call.id] === call { return (self.provider, true) }
             calls[call.id] = call
             return (self.provider, false)
@@ -366,6 +405,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
                 pendingRejects.removeAll()
                 endedByAction.removeAll()
                 placeholders.removeAll()
+                filtered.removeAll()
             }
             return Array(calls.values)
         }

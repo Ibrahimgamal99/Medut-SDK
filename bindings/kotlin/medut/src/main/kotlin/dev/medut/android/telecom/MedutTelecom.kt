@@ -96,6 +96,18 @@ object MedutTelecom {
     var onShowPushIncomingCallUi: ((PushPayload) -> Unit)? = null
 
     /**
+     * Decide on an incoming call before Telecom hears of it: return a SIP
+     * status to reject it with (486 for "two calls already up", 603 for a
+     * blocked number or Do Not Disturb), or null to ring.  A refused call
+     * never reaches the system, so nothing flashes; a push ring it would have
+     * taken over ends quietly (rejected).  Main thread, before the call is
+     * handed to Telecom; other listeners still get the IncomingCall event.
+     */
+    @JvmStatic
+    @Volatile
+    var incomingCallFilter: ((Call) -> Int?)? = null
+
+    /**
      * Telecom refused to create the connection for an outgoing call (another
      * call has the line).  The SIP call has been hung up by the time this
      * runs.  Main thread.
@@ -260,6 +272,10 @@ internal class TelecomBridge(
     private fun onIncoming(call: Call) {
         val id = call.id.toString()
         if (connections.containsKey(call) || pending.containsKey(id)) return
+        MedutTelecom.incomingCallFilter?.invoke(call)?.let { code ->
+            refuse(call, code)
+            return
+        }
         if (claimForRing(call)) return
         if (!tm.isIncomingCallPermitted(handle)) {
             runCatching { call.reject(486, "Busy Here") }
@@ -326,6 +342,22 @@ internal class TelecomBridge(
                     payload.callId != ring.payload.callId) continue
                 end(ring, DisconnectCause.MISSED)
             }
+        }
+    }
+
+    /** The filter turned [call] away: reject it, and end the push ring it
+     *  would have taken over, if any, as rejected.  Main thread. */
+    private fun refuse(call: Call, code: Int) {
+        runCatching { call.reject(code) }.onFailure { Log.w(TAG, "filter reject: $it") }
+        val ring = rings.values.firstOrNull {
+            (it.state == PushRing.State.RINGING || it.state == PushRing.State.DECLINED) &&
+                MedutPush.matches(it.payload, call)
+        } ?: return
+        if (ring.state == PushRing.State.DECLINED) {
+            rings.remove(ring.key)
+            ring.state = PushRing.State.ENDED
+        } else {
+            end(ring, DisconnectCause.REJECTED)
         }
     }
 
