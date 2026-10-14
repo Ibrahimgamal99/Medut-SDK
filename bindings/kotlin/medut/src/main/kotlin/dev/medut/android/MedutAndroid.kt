@@ -6,6 +6,8 @@ import android.os.Looper
 import android.util.Log
 import dev.medut.Medut
 import dev.medut.MedutConfig
+import dev.medut.MedutEvent
+import dev.medut.MedutSubscription
 import dev.medut.android.telecom.MedutTelecom
 import dev.medut.android.telecom.TelecomOptions
 
@@ -35,6 +37,13 @@ data class AndroidOptions(
      *  ConnectionService ([dev.medut.android.telecom.MedutTelecom]).  Forces
      *  [audioMode] to TELECOM.  Needs API 26; ignored below. */
     val telecom: TelecomOptions? = null,
+    /** On a fresh start, re-create and register every account in
+     *  [MedutAndroid.accountStore], so a process started by a push is
+     *  registered before any UI exists. */
+    val restoreAccounts: Boolean = true,
+    /** Write the stack's log events to logcat (tag "Medut"), so a process
+     *  running with no UI attached still leaves a trace. */
+    val logToLogcat: Boolean = true,
 )
 
 /**
@@ -49,13 +58,23 @@ data class AndroidOptions(
 object MedutAndroid {
     private const val TAG = "MedutAndroid"
 
+    private const val LOG_TAG = "Medut"
+
     @Volatile private var platform: AndroidPlatform? = null
+    @Volatile private var accounts: AccountStore? = null
+    @Volatile private var logSubscription: MedutSubscription? = null
 
     /** Call-audio routes (earpiece, speaker, Bluetooth, wired).  Available
      *  after [start]. */
     @JvmStatic
     val audioRoutes: AudioRoutes
         get() = platform?.routes ?: throw IllegalStateException("MedutAndroid.start() first")
+
+    /** Accounts kept across process restarts.  Available after [start]; an
+     *  app that needs it earlier can construct its own [AccountStore]. */
+    @JvmStatic
+    val accountStore: AccountStore
+        get() = accounts ?: throw IllegalStateException("MedutAndroid.start() first")
 
     @JvmStatic
     @JvmOverloads
@@ -66,10 +85,14 @@ object MedutAndroid {
             val main = Handler(Looper.getMainLooper())
             Medut.defaultExecutor = java.util.concurrent.Executor { main.post(it) }
         }
+        val tmpDir = config.tmpDir ?: app.cacheDir.absolutePath
         val effective = config.copy(
-            tmpDir = config.tmpDir ?: app.cacheDir.absolutePath,
+            tmpDir = tmpDir,
             netMonitorIntervalSeconds =
                 if (options.monitorNetwork) 0 else config.netMonitorIntervalSeconds,
+            // A relative capture path lands in the state directory, where the
+            // app can write without any permission.
+            pcapPath = config.pcapPath?.let { if (it.startsWith("/")) it else "$tmpDir/$it" },
         )
         val effectiveOptions = when {
             options.telecom == null -> options
@@ -82,6 +105,21 @@ object MedutAndroid {
 
         val p = AndroidPlatform(app, effectiveOptions)
         Medut.platform = p
+        if (options.logToLogcat && logSubscription == null) {
+            logSubscription = Medut.addListener({ it.run() }) { event ->
+                when (event) {
+                    is MedutEvent.Log -> Log.i(LOG_TAG, event.message.trimEnd())
+                    is MedutEvent.Registration ->
+                        Log.i(LOG_TAG, "registration ${event.account?.aor}: ${event.state}" +
+                            (event.errorText?.let { " ($it)" } ?: ""))
+                    is MedutEvent.IncomingCall -> Log.i(LOG_TAG, "incoming call from ${event.fromUri}")
+                    is MedutEvent.CallStateChanged ->
+                        Log.i(LOG_TAG, "call ${event.call.remoteUri}: ${event.state}" +
+                            (event.reason?.let { " ($it)" } ?: ""))
+                    else -> {}
+                }
+            }
+        }
         try {
             Medut.start(effective)
         } catch (t: Throwable) {
@@ -91,6 +129,9 @@ object MedutAndroid {
         }
         platform = p
         p.started(reattached = Medut.reattached, iceMultipath = effective.iceMultipath)
+
+        val store = accounts ?: AccountStore(app).also { accounts = it }
+        if (options.restoreAccounts && !Medut.reattached) store.restore()
     }
 
     /** True when the SDK's Telecom integration is on for this stack. */

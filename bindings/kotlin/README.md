@@ -156,6 +156,30 @@ incoming call, or null after the timeout. Send the push as a high-priority
 data message so Android starts the process. `MedutPush.reachAccounts()` is
 the same recovery without the wait, for a foreground return.
 
+## Accounts across restarts
+
+A push starts the process with no UI, and the stack must register before
+the INVITE arrives, so the account configs have to be on the native side.
+`MedutAndroid.accountStore` keeps them in a Keystore-encrypted file:
+
+```kotlin
+val account = Medut.createAccount(cfg)
+MedutAndroid.accountStore.save(cfg)      // survives the process
+account.register()
+
+MedutAndroid.accountStore.remove(cfg.uri) // on logout
+```
+
+`MedutAndroid.start` re-creates and registers every saved account on a fresh
+start (`AndroidOptions.restoreAccounts`, on by default), so
+`Application.onCreate` is all a cold start needs. A Flutter app gets the same
+with `createAccount(remember: true)`. The stack's own `MedutConfig` is not
+stored: pass it in `onCreate`, it is app policy rather than user data.
+
+With `AndroidOptions.logToLogcat` (default) the stack's log and call events
+go to logcat under the tag `Medut`, so a process running with no UI attached
+still leaves a trace.
+
 ## Media tap
 
 ```kotlin
