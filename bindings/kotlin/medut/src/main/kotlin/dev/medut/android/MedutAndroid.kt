@@ -1,6 +1,8 @@
 package dev.medut.android
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -173,6 +175,22 @@ object MedutAndroid {
     @JvmStatic
     fun setCallAudioActive(active: Boolean) {
         platform?.externalAudioActive(active)
+    }
+
+    /**
+     * Register the accounts after a reboot ([MedutBootReceiver]), instead of
+     * waiting for the first push or launch.  The choice is kept by the
+     * system across reboots and updates; the app must start the stack from
+     * `Application.onCreate` for it to do anything.
+     */
+    @JvmStatic
+    fun setStartOnBoot(context: Context, enabled: Boolean) {
+        val app = context.applicationContext
+        app.packageManager.setComponentEnabledSetting(
+            ComponentName(app, MedutBootReceiver::class.java),
+            if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP)
     }
 
     /** Stop the stack and release the platform hooks. */

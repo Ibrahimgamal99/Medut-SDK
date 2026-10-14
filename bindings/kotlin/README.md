@@ -169,6 +169,11 @@ Send the push as a high-priority data message so Android starts the process.
 foreground return. The payload, the server side and an OpenSIPS
 configuration are in [docs/guides/push.md](../../docs/guides/push.md).
 
+After a reboot nothing registers until the first push or launch.
+`MedutAndroid.setStartOnBoot(context, true)` turns on the SDK's boot
+receiver, which refreshes the saved accounts' registrations once
+`Application.onCreate` has started the stack.
+
 ## Accounts across restarts
 
 A push starts the process with no UI, and the stack must register before

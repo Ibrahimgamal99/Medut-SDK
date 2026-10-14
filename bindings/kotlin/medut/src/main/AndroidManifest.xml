@@ -18,6 +18,8 @@
          runtime permission on API 33+: request it before the first call. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Only used once the app opts in: MedutAndroid.setStartOnBoot(). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application>
         <service
@@ -31,6 +33,15 @@
         <receiver
             android:name="dev.medut.android.telecom.MedutCallActionReceiver"
             android:exported="false" />
+        <!-- Off until MedutAndroid.setStartOnBoot(context, true). -->
+        <receiver
+            android:name="dev.medut.android.MedutBootReceiver"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <!-- Answer from the incoming-call notification: an activity, since
              Android 12 lets no receiver start one from a notification. -->
         <activity
