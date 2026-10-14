@@ -38,6 +38,9 @@ internal class MedutConnection private constructor(
      *  the same across [bind]. */
     val key: String = ring?.key ?: call!!.id.toString()
 
+    /** The last CallAudioState Telecom reported; main thread. */
+    var lastAudioState: CallAudioState? = null
+
     private var everActive = false
     private var ended = false
     private var answerWanted = false

@@ -463,8 +463,16 @@ internal class TelecomBridge(
     }
 
     fun audioStateChanged(connection: MedutConnection, state: CallAudioState) {
+        val previous = connection.lastAudioState
+        connection.lastAudioState = state
         audioState = state
-        runCatching { connection.call?.setMuted(state.isMuted) }
+        // Telecom reports its mute flag with every route change, and for a
+        // call the app muted itself (Call.setMuted) that flag is still
+        // false: only a change of it is Telecom muting (a Bluetooth headset,
+        // a watch).
+        if (previous != null && previous.isMuted != state.isMuted) {
+            runCatching { connection.call?.setMuted(state.isMuted) }
+        }
         platform.routes.notifyChanged()
     }
 
