@@ -93,7 +93,19 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
 
     // ── Lifecycle (from Medut.start / shutdown) ──────────────────────────
 
-    func enable(_ options: CallKitOptions) {
+    /// Change the CallKit settings of a running integration, e.g. the
+    /// ringtone or the number of call groups.  Takes effect for the next
+    /// call the system shows.  Before `Medut.shared.start`, pass them in
+    /// `StartOptions.callKit` instead.
+    public func update(options: CallKitOptions) {
+        let provider: CXProvider? = lock.locked {
+            self.options = options
+            return self.provider
+        }
+        provider?.configuration = MedutCallKit.configuration(for: options)
+    }
+
+    private static func configuration(for options: CallKitOptions) -> CXProviderConfiguration {
         let configuration = CXProviderConfiguration(
             localizedName: options.localizedName
                 ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
@@ -108,8 +120,11 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
             configuration.iconTemplateImageData = UIImage(named: name)?.pngData()
         }
         configuration.ringtoneSound = options.ringtoneSound
+        return configuration
+    }
 
-        let provider = CXProvider(configuration: configuration)
+    func enable(_ options: CallKitOptions) {
+        let provider = CXProvider(configuration: MedutCallKit.configuration(for: options))
         provider.setDelegate(self, queue: nil)
         lock.locked {
             self.options = options
