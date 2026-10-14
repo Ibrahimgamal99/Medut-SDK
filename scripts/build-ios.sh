@@ -7,9 +7,9 @@
 #   dist/ios/device/medut.a       static archive (for non-Swift consumers)
 #   dist/ios/simulator/medut.a    fat static archive (arm64 + x86_64)
 #   dist/ios/include/               public headers
-# Also refreshes the copy the Swift package (and through it the Flutter
-# plugin) vendors, bindings/swift/Frameworks/Medut.xcframework — no second
-# command to run.
+# Also refreshes the copy the Flutter plugin vendors (and the Swift package
+# reaches through a symlink), bindings/flutter/ios/Frameworks/Medut.xcframework
+# — no second command to run.
 #
 # A dynamic framework rather than a static lib: one copy of the core however
 # many targets link it, and SwiftPM and CocoaPods both embed it automatically.
@@ -279,15 +279,15 @@ echo "Done. Output: ${DIST}/Medut.xcframework"
 plutil -p "${DIST}/Medut.xcframework/Info.plist" | grep -E "(Identifier|Library)" || true
 
 # ---------------------------------------------------------------------------
-# Stage into the Swift package, where MedutKit and the Flutter plugin (through
-# a symlink) vendor it.
+# Stage into the Flutter plugin, where the pod vendors it and the Swift
+# package reaches it through a symlink.
 # ---------------------------------------------------------------------------
-SWIFT_FRAMEWORKS="${ROOT}/bindings/swift/Frameworks"
-mkdir -p "${SWIFT_FRAMEWORKS}"
-rm -rf "${SWIFT_FRAMEWORKS}/Medut.xcframework"
-cp -R "${DIST}/Medut.xcframework" "${SWIFT_FRAMEWORKS}/Medut.xcframework"
+PLUGIN_FRAMEWORKS="${ROOT}/bindings/flutter/ios/Frameworks"
+mkdir -p "${PLUGIN_FRAMEWORKS}"
+rm -rf "${PLUGIN_FRAMEWORKS}/Medut.xcframework"
+cp -R "${DIST}/Medut.xcframework" "${PLUGIN_FRAMEWORKS}/Medut.xcframework"
 
 echo ""
-echo "Swift package xcframework refreshed (commit it alongside the C change —"
+echo "Plugin xcframework refreshed (commit it alongside the C change —"
 echo "apps pin a git SHA, so an uncommitted rebuild never reaches consumers):"
-du -sh "${SWIFT_FRAMEWORKS}/Medut.xcframework"
+du -sh "${PLUGIN_FRAMEWORKS}/Medut.xcframework"

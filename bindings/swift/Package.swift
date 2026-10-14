@@ -4,8 +4,10 @@
 //
 // The native core ships as Medut.xcframework (header + module map), built on
 // macOS by scripts/build-ios.sh or fetched from CI by scripts/fetch-prebuilt.sh
-// into Frameworks/ next to this file, where it is committed.  The Flutter
-// plugin vendors the same copy.
+// into bindings/flutter/ios/Frameworks, where it is committed.  Sources/ and
+// Frameworks/ here are symlinks into bindings/flutter/ios: the Flutter plugin's
+// pod compiles the same files, and CocoaPods cannot see through a symlink,
+// so the real directories live on its side.
 
 import PackageDescription
 

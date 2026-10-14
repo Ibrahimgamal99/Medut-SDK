@@ -2,10 +2,12 @@
 # Medut Flutter plugin — iOS.
 #
 # A Pigeon host (Classes/) over MedutKit, the Swift SDK. MedutKit, its
-# app-owned audio engine and the prebuilt Medut.xcframework live in
-# bindings/swift and are compiled in from source through the symlinks next to
-# this file (MedutKit, MedutAudioEngine, Frameworks), so a git dependency on
-# the plugin needs no extra Podfile entry.
+# app-owned audio engine and the prebuilt Medut.xcframework live next to this
+# file (MedutKit/, MedutAudioEngine/, Frameworks/) and are compiled in from
+# source, so a git dependency on the plugin needs no extra Podfile entry. The
+# Swift package in bindings/swift reaches the same directories through
+# symlinks: CocoaPods never sees files behind a symlinked directory, so the
+# real ones have to be on this side.
 #
 Pod::Spec.new do |s|
   s.name             = 'medut'
@@ -23,8 +25,6 @@ Swift SDK, which owns the stack.
 
   s.platform         = :ios, '13.0'
   s.swift_version    = '5.9'
-  # Paths through the symlinks are spelled out: CocoaPods' ** glob does not
-  # descend into symlinked directories.
   s.source_files     = 'Classes/**/*.swift',
                        'MedutKit/**/*.swift',
                        'MedutAudioEngine/**/*.{h,m}'
@@ -42,7 +42,7 @@ Swift SDK, which owns the stack.
       echo "error: Medut.xcframework is missing." >&2
       echo "Build it with scripts/build-ios.sh (macOS) or fetch the CI build" >&2
       echo "with scripts/fetch-prebuilt.sh; both put it in" >&2
-      echo "bindings/swift/Frameworks/Medut.xcframework." >&2
+      echo "bindings/flutter/ios/Frameworks/Medut.xcframework." >&2
       exit 1
     fi
   CMD

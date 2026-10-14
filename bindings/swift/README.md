@@ -14,10 +14,14 @@ The native core is a binary target. On macOS:
 scripts/build-ios.sh
 ```
 
-This stages `Frameworks/Medut.xcframework` (with the header and module map
-Swift needs) next to `Package.swift`, where it is committed;
-`scripts/fetch-prebuilt.sh` fetches the CI build instead. Then add the package by local path in
-Xcode, or run the tests on a simulator:
+This stages `Medut.xcframework` (with the header and module map Swift needs)
+in `bindings/flutter/ios/Frameworks`, where it is committed;
+`scripts/fetch-prebuilt.sh` fetches the CI build instead, and the
+`ios-xcframework` workflow can commit one for you. `Sources/` and
+`Frameworks/` here are symlinks into `bindings/flutter/ios`: the Flutter
+plugin's pod compiles the same files, and CocoaPods cannot see through a
+symlink, so the real directories live on its side. Then add the package by
+local path in Xcode, or run the tests on a simulator:
 
 ```sh
 cd bindings/swift

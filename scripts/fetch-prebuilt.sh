@@ -34,7 +34,7 @@ RUN_ID=""
 WAIT=0
 EXPLICIT=0
 
-IOS_DEST="${ROOT}/bindings/swift/Frameworks/Medut.xcframework"
+IOS_DEST="${ROOT}/bindings/flutter/ios/Frameworks/Medut.xcframework"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -158,5 +158,5 @@ done < <(find "${IOS_DEST}" -name Medut -type f)
 
 echo ""
 echo "Synced from run ${RUN_ID} (${SHA:0:12}). Review and commit:"
-echo "  git add bindings/swift/Frameworks"
+echo "  git add bindings/flutter/ios/Frameworks"
 echo "(Android jniLibs are not fetched — build them with scripts/build-android.sh)"

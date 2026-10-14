@@ -9,7 +9,7 @@ name: iOS xcframework
 #   gh workflow run ios-xcframework.yml                 # artifact only
 #   gh workflow run ios-xcframework.yml -f commit=true  # and commit it back
 # Then `scripts/fetch-prebuilt.sh` pulls the artifact into
-# bindings/swift/Frameworks, or `git pull` brings the committed one.
+# bindings/flutter/ios/Frameworks, or `git pull` brings the committed one.
 #
 # Android is built locally with scripts/build-android.sh (no macOS needed),
 # so there is no Android job here.
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: "Commit the built xcframework to bindings/swift/Frameworks on this branch"
+        description: "Commit the built xcframework to bindings/flutter/ios/Frameworks on this branch"
         type: boolean
         default: false
 
@@ -40,7 +40,7 @@ jobs:
 
       # Fetches third_party at the pinned revisions, builds the core for the
       # three slices, verifies the exported symbols, and stages the result in
-      # bindings/swift/Frameworks (which the pod reaches through a symlink).
+      # bindings/flutter/ios/Frameworks (which the Swift package reaches through a symlink).
       - name: Build xcframework
         run: bash scripts/build-ios.sh
 
@@ -99,7 +99,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f bindings/swift/Frameworks/Medut.xcframework
+          git add -f bindings/flutter/ios/Frameworks/Medut.xcframework
           if git diff --cached --quiet; then
             echo "xcframework unchanged; nothing to commit"
             exit 0

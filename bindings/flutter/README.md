@@ -53,10 +53,12 @@ dependencies:
 <array><string>audio</string><string>voip</string></array>
 ```
 
-The pod compiles MedutKit from `bindings/swift` and vendors
-`bindings/swift/Frameworks/Medut.xcframework`. Produce that framework with
-`scripts/build-ios.sh` on macOS, or fetch it with `scripts/fetch-prebuilt.sh`.
-If it is absent, `pod install` fails with a clear message.
+The pod compiles MedutKit (the Swift SDK, whose sources live under
+`bindings/flutter/ios`) and vendors
+`bindings/flutter/ios/Frameworks/Medut.xcframework`. Produce that framework
+with `scripts/build-ios.sh` on macOS, fetch it with
+`scripts/fetch-prebuilt.sh`, or run the `ios-xcframework` workflow with
+`commit=true`. If it is absent, `pod install` fails with a clear message.
 
 ## Use
 

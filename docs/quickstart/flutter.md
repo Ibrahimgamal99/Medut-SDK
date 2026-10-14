@@ -26,9 +26,10 @@ dependencies:
 ```
 
 You need `path:` because the plugin lives in a subdirectory. The Android
-build compiles the Kotlin SDK from `bindings/kotlin`, and the iOS pod reaches
-MedutKit in `bindings/swift` through symlinks. A git dependency (or a full
-checkout) has both.
+build compiles the Kotlin SDK from `bindings/kotlin`, and the iOS pod
+compiles MedutKit from the sources under `bindings/flutter/ios` (the Swift
+package in `bindings/swift` points at the same files). A git dependency (or
+a full checkout) has both.
 
 **Pin a full SHA before you release.** Without `ref:` the dependency floats
 on the default branch, native libraries included. After moving between refs,
@@ -53,7 +54,7 @@ run `flutter clean` before `flutter run`: Gradle caches native build output.
 <array><string>audio</string><string>voip</string></array>
 ```
 
-`Medut.xcframework` must exist at `bindings/swift/Frameworks/`. Build it on a
+`Medut.xcframework` must exist at `bindings/flutter/ios/Frameworks/`. Build it on a
 Mac with `scripts/build-ios.sh`, or fetch the CI build with
 `scripts/fetch-prebuilt.sh`. If it is missing, `pod install` fails with a
 clear error.
@@ -363,7 +364,7 @@ cd bindings/flutter && dart run pigeon --input pigeons/messages.dart
 # SDK packages (bindings/kotlin/medut/src/main/jniLibs):
 ANDROID_NDK=$HOME/Android/Sdk/ndk/<ver> ./scripts/build-android.sh
 
-# iOS core (macOS + Xcode): builds the xcframework into bindings/swift/Frameworks:
+# iOS core (macOS + Xcode): builds the xcframework into bindings/flutter/ios/Frameworks:
 ./scripts/build-ios.sh
 ```
 
