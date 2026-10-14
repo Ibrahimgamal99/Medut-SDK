@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download the prebuilt iOS xcframework from a build-mobile CI run into the
+# Download the prebuilt iOS xcframework from an ios-xcframework CI run into the
 # Swift package, where MedutKit and (through a symlink) the Flutter plugin
 # vendor it.
 #
@@ -9,7 +9,7 @@
 #   scripts/fetch-prebuilt.sh --branch dev    latest successful run on a branch
 #
 # iOS only. Android has no CI job any more (see .github/workflows/
-# build-mobile.yml) — build its jniLibs locally with scripts/build-android.sh.
+# ios-xcframework.yml) — build its jniLibs locally with scripts/build-android.sh.
 #
 # Why this exists: the bindings ship *prebuilt* binaries, so a consumer adding
 # them as a git dependency gets whatever is committed — not whatever CI last
@@ -28,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-WORKFLOW="build-mobile.yml"
+WORKFLOW="ios-xcframework.yml"
 BRANCH="main"
 RUN_ID=""
 WAIT=0

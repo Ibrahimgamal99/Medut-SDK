@@ -1,0 +1,108 @@
+name: iOS xcframework
+
+# Builds Medut.xcframework (device arm64 + simulator arm64/x86_64), compiles
+# MedutKit against it, builds the Flutter example app with the pod, and
+# publishes the framework: always as a run artifact, and on request as a
+# commit to the branch that was built.
+#
+# Start it from the Actions tab or with
+#   gh workflow run ios-xcframework.yml                 # artifact only
+#   gh workflow run ios-xcframework.yml -f commit=true  # and commit it back
+# Then `scripts/fetch-prebuilt.sh` pulls the artifact into
+# bindings/swift/Frameworks, or `git pull` brings the committed one.
+#
+# Android is built locally with scripts/build-android.sh (no macOS needed),
+# so there is no Android job here.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit the built xcframework to bindings/swift/Frameworks on this branch"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-xcframework-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  xcframework:
+    runs-on: macos-14
+    name: Medut.xcframework · MedutKit · example app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      # Fetches third_party at the pinned revisions, builds the core for the
+      # three slices, verifies the exported symbols, and stages the result in
+      # bindings/swift/Frameworks (which the pod reaches through a symlink).
+      - name: Build xcframework
+        run: bash scripts/build-ios.sh
+
+      # The Swift SDK on its own, before CocoaPods gets involved: catches an
+      # API mismatch in MedutKit with a readable compiler error.
+      - name: Compile MedutKit (iOS Simulator)
+        working-directory: bindings/swift
+        run: |
+          xcodebuild build -quiet \
+            -scheme MedutKit \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/MedutKit-dd" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # `pod install` vendors the framework just built; no signing on CI.
+      - name: Build example app (no codesign)
+        working-directory: bindings/flutter/example
+        run: |
+          flutter pub get
+          flutter build ios --debug --no-codesign
+
+      # Raw framework contents, the layout scripts/fetch-prebuilt.sh expects.
+      - name: Upload xcframework (contents)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework
+          path: dist/ios/Medut.xcframework/
+          if-no-files-found: error
+
+      # The same framework as one zip made by ditto, which keeps symlinks and
+      # the exec bit that the raw upload loses: unzip and drop it into Xcode.
+      - name: Zip xcframework
+        run: |
+          cd dist/ios
+          ditto -c -k --sequesterRsrc --keepParent Medut.xcframework Medut.xcframework.zip
+          shasum -a 256 Medut.xcframework.zip | tee Medut.xcframework.zip.sha256
+
+      - name: Upload xcframework (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Medut.xcframework.zip
+          path: |
+            dist/ios/Medut.xcframework.zip
+            dist/ios/Medut.xcframework.zip.sha256
+          if-no-files-found: error
+
+      # Opt-in: put the framework where the Swift package and the pod read it
+      # from, so a consumer pinning this branch gets a core that matches it.
+      - name: Commit xcframework to the branch
+        if: ${{ inputs.commit }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bindings/swift/Frameworks/Medut.xcframework
+          if git diff --cached --quiet; then
+            echo "xcframework unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "ios: refresh Medut.xcframework (CI build of ${GITHUB_SHA::12})"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
