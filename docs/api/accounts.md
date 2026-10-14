@@ -40,7 +40,7 @@ medut_account_destroy(acct);
 
 ## Push notifications
 
-The SDK supports two modes for delivering a push token to the SIP server so it can wake the device when an INVITE arrives.
+The SDK supports two modes for delivering a push token to the SIP server so it can wake the device when an INVITE arrives. The whole flow — app, server and push payload — is in the [push notifications guide](../guides/push.md).
 
 ### Mode 1 — RFC 8599 Contact URI params (self-hosted servers)
 
@@ -53,27 +53,37 @@ medut_account_config_t cfg = {
     .transport      = MEDUT_TRANSPORT_TLS,
     .push_provider  = MEDUT_PUSH_PROVIDER_APNS,  // or APNS_SANDBOX / FCM
     .push_token     = "<device-token-hex>",
-    .push_param     = "com.example.MyApp",          // bundle ID (APNs) or package name (FCM)
+    .push_param     = "ABCDE12345.com.example.MyApp.voip", // APNs: TeamID.bundle.voip; FCM: project ID
 };
 ```
 
 The SDK embeds the params **inside** the Contact angle brackets on every REGISTER:
 
 ```
-Contact: <sip:alice@10.0.5.2;pn-provider=apns;pn-prid=TOKEN;pn-param=com.example.MyApp>
+Contact: <sip:alice@10.0.5.2;pn-provider=apns;pn-prid=TOKEN;pn-param=ABCDE12345.com.example.MyApp.voip>
 ```
 
-The server (Kamailio `push_notification` module, drachtio, etc.) reads these params from its registrar table and uses them to wake the device via APNs or FCM.
+The server (OpenSIPS `registrar` with `pn_enable`, Kamailio, a push proxy, etc.) reads these params from its registrar table and uses them to wake the device via APNs or FCM. `pn-param` is passed through as given; RFC 8599 has the Firebase project ID for FCM and `<Team ID>.<bundle ID>.voip` for APNs VoIP pushes, and a server with a single app may ignore it.
+
+#### Refresh the binding when a push arrives
+
+```c
+medut_account_refresh_registration(acct);
+```
+
+RFC 8599 servers hold the INVITE until the device *refreshes* its binding (s4.1.3). This re-sends the REGISTER from the client that holds the binding — same Call-ID, same Contact — which is what such a server waits for. `medut_account_register()` on a registered account starts a new client; over UDP, TCP and TLS that un-REGISTERs the old binding first, unless it carries the same push params, and an OpenSIPS registrar then sees a binding removed and another added and forwards nothing. An account that is not registered just registers.
 
 #### Update the token at runtime
 
-PushKit tokens rotate. Update without re-creating the account:
+FCM and PushKit tokens rotate. Update without re-creating the account:
 
 ```c
 medut_account_set_push_token(acct, new_token);
 ```
 
-The SDK re-registers immediately (unless a transaction is in flight or a retry backoff is pending — in those cases the new token is applied on the next natural re-registration). Pass `NULL` to clear push params.
+A registered account sends a REGISTER with the new `pn-prid` at once, and over UDP, TCP and TLS the binding with the old token is removed (`expires=0`), so the server stops pushing to a dead token. A token changed while a REGISTER is in flight goes out in another REGISTER once that one is answered; a pending retry carries it. An account the app has not registered keeps it for its first REGISTER, and an account without a `push_provider` keeps it and sends nothing. A token too long for the Contact is refused with `MEDUT_ERR_INVAL` and the old one stays. Pass `NULL` to clear push params.
+
+The token is not persisted here: an app that re-creates its accounts at launch (as a push-started process does) must save the new token with them. The Kotlin and Swift SDKs' account stores do (`MedutPush.onNewToken`, `MedutPush.updatePushToken`).
 
 > **APNs environment note:** use `MEDUT_PUSH_PROVIDER_APNS_SANDBOX` for debug/TestFlight builds (PushKit sandbox APNs endpoint) and `MEDUT_PUSH_PROVIDER_APNS` for App Store / production builds. Mismatching the environment causes silent delivery failures at the APNs level — pushes appear to succeed but never arrive.
 

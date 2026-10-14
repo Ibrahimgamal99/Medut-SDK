@@ -6,6 +6,26 @@ All notable changes to Medut are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **RFC 8599 push params now reach the wire.** `pn-provider` / `pn-prid` /
+  `pn-param` were built from the account config but never put in the
+  REGISTER Contact, so no server had a token to push to (baresip job 11).
+- **`medut_account_set_push_token()`** applies the new token: a REGISTER with
+  it goes out at once, or once an in-flight one is answered, and over UDP,
+  TCP and TLS the old token's binding is removed. A token too long for the
+  Contact is refused and the old one stays. An account the app has not
+  registered is no longer registered by it.
+- **A push binding survives a re-created registration client** (handover,
+  retry): the old client no longer un-REGISTERs a binding its successor
+  carries on, which an RFC 8599 server saw as the device leaving (libre
+  hunk R).
+- **Push wake-up refreshes the registration** instead of sending an OPTIONS
+  probe (Kotlin, Swift). RFC 8599 servers release a held INVITE only on the
+  binding refresh.
+- **A refreshed push token is saved** with the remembered accounts (Kotlin,
+  Swift, Flutter), so a process a later push starts registers with it.
+
 ### Changed
 
 - **Mobile architecture.** The Kotlin (`bindings/kotlin`) and Swift
@@ -21,6 +41,19 @@ All notable changes to Medut are documented here.
   to the file.
 
 ### Added
+
+- **`medut_account_refresh_registration()`** (Kotlin
+  `Account.refreshRegistration()`): re-sends the REGISTER from the client
+  holding the binding (same Call-ID and Contact), as a push wake-up needs.
+- **Push payload contract** (`docs/guides/push.md`): `type` (call / cancel),
+  `call_id`, `caller_uri`, `caller_name`, `aor`, with configurable names.
+  Kotlin: `MedutPush.wake(context, data)` rings through Telecom as soon as a
+  call push arrives and binds the INVITE to the ring by Call-ID (an Answer
+  tapped before it is carried out, a Decline rejects it); a cancel push or
+  no INVITE in time ends the ring as missed. `MedutPush.onNewToken`,
+  `PushPayload.parse`, `MedutTelecom.onShowPushIncomingCallUi`,
+  `AccountStore.updatePushToken`.
+- **Push guide** with the server contract and an OpenSIPS configuration.
 
 - **Kotlin SDK:** Telecom integration through a self-managed
   ConnectionService (system call UI, Telecom-owned audio and routes, a

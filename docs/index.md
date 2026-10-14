@@ -124,6 +124,7 @@ across the PBX hostnames a deployment uses.
 - [NAT traversal (ICE / STUN / TURN)](guides/nat_traversal.md)
 - [Network handover (Wi-Fi ↔ 4G/5G)](guides/network_handover.md)
 - [Degraded links (bad signal, slow uplink, dead paths)](guides/degraded_links.md)
+- [Push notifications (FCM / APNs, RFC 8599, OpenSIPS)](guides/push.md)
 - [TLS and WSS setup](guides/tls_wss.md)
 - [Multiple accounts](guides/multi_account.md)
 - [WebRTC browser interop](guides/webrtc_browser.md)

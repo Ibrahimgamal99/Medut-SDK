@@ -297,6 +297,7 @@ Everything lives in [`docs/`](docs/index.md):
 [NAT traversal](docs/guides/nat_traversal.md) ·
 [Network handover](docs/guides/network_handover.md) ·
 [Degraded links](docs/guides/degraded_links.md) ·
+[Push notifications](docs/guides/push.md) ·
 [TLS and WSS](docs/guides/tls_wss.md) ·
 [Multiple accounts](docs/guides/multi_account.md) ·
 [WebRTC browser interop](docs/guides/webrtc_browser.md) ·
