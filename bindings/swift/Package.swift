@@ -35,6 +35,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Network"),
+                .linkedFramework("CallKit", .when(platforms: [.iOS])),
             ]
         ),
         .testTarget(

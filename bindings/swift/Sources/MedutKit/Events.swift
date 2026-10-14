@@ -221,6 +221,11 @@ extension Medut {
             let name = cString(i.display_name)
             let call = track(call: handle, account: acct, state: .ringing, isOutgoing: false,
                              remoteURI: from, remoteDisplayName: name)
+            #if os(iOS)
+            // A push may have reported this call to CallKit already; the
+            // call takes that identity before anyone hears about it.
+            MedutCallKit.shared.bindIncoming(call)
+            #endif
             return .incomingCall(IncomingCallEvent(account: acct, call: call, fromURI: from,
                                                    displayName: name))
 

@@ -21,8 +21,18 @@ public struct MediaFrame {
 /// Operations on an ended call throw `.callEnded`, except `hangup()`, which
 /// is a no-op then.
 public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStringConvertible {
-    /// Stable identity for this call, e.g. the CallKit call UUID.
-    public let id = UUID()
+    /// Stable identity for this call: the CallKit call UUID under the SDK's
+    /// CallKit integration.  A call announced by a push takes over the id
+    /// CallKit already knows, before any event about it is delivered.
+    public private(set) var id = UUID()
+
+    /// This side asked to end the call (`hangup` / `reject`), so a terminal
+    /// state is local, not the far end's doing.
+    public private(set) var endRequestedLocally = false
+
+    func adopt(id newID: UUID) {
+        lock.locked { id = newID }
+    }
     public let account: Account?
     public let isOutgoing: Bool
     /// The far end: the dialled URI for an outgoing call, the From URI for an
@@ -99,36 +109,98 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
 
     /// Answer an incoming call.
     ///
-    /// With CallKit, call this from `provider(_:didActivate:)`, so media
-    /// opens against an active audio session.
+    /// Under the SDK's CallKit integration this goes through CallKit, which
+    /// activates the audio session, and the SIP answer follows once it is
+    /// active.  With your own CallKit, call this from
+    /// `provider(_:didActivate:)` for the same reason.
     public func answer() throws {
         #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestAnswer(self)
+            return
+        }
         if Medut.shared.options.audioSession == .automatic {
             MedutAudioSession.shared.callStarting()
         }
         #endif
-        try perform("medut_call_answer") { medut_call_answer($0) }
+        try answerNow()
     }
 
     /// End the call (BYE, or CANCEL while it is still being set up).
     /// A no-op on a call that already ended.
     public func hangup() throws {
         if isEnded { return }
-        try perform("medut_call_hangup") { medut_call_hangup($0) }
+        lock.locked { endRequestedLocally = true }
+        #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestEnd(self, rejectCode: nil)
+            return
+        }
+        #endif
+        try hangupNow()
     }
 
     /// End with a SIP status: for an unanswered incoming call this is the
     /// final response, e.g. 486 Busy Here or 603 Decline.
     public func reject(statusCode: UInt16 = 486, reason: String? = nil) throws {
-        try perform("medut_call_reject") { medut_call_reject($0, statusCode, reason) }
+        lock.locked { endRequestedLocally = true }
+        #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestEnd(self, rejectCode: statusCode)
+            return
+        }
+        #endif
+        try rejectNow(statusCode: statusCode, reason: reason)
     }
 
     public func hold() throws {
-        try perform("medut_call_hold") { medut_call_hold($0) }
+        #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestHeld(self, onHold: true)
+            return
+        }
+        #endif
+        try holdNow()
     }
 
     public func resume() throws {
+        #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestHeld(self, onHold: false)
+            return
+        }
+        #endif
+        try resumeNow()
+    }
+
+    // The SIP side of each action, for CallKit to call once the system has
+    // agreed to it.
+
+    func answerNow() throws {
+        try perform("medut_call_answer") { medut_call_answer($0) }
+    }
+
+    func hangupNow() throws {
+        if isEnded { return }
+        lock.locked { endRequestedLocally = true }
+        try perform("medut_call_hangup") { medut_call_hangup($0) }
+    }
+
+    func rejectNow(statusCode: UInt16, reason: String?) throws {
+        lock.locked { endRequestedLocally = true }
+        try perform("medut_call_reject") { medut_call_reject($0, statusCode, reason) }
+    }
+
+    func holdNow() throws {
+        try perform("medut_call_hold") { medut_call_hold($0) }
+    }
+
+    func resumeNow() throws {
         try perform("medut_call_resume") { medut_call_resume($0) }
+    }
+
+    func setMutedNow(_ muted: Bool) throws {
+        try perform("medut_audio_mute") { medut_audio_mute($0, muted) }
     }
 
     /// True while the call is on hold, either side.
@@ -199,7 +271,13 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
 
     /// Mute the microphone for this call.
     public func setMuted(_ muted: Bool) throws {
-        try perform("medut_audio_mute") { medut_audio_mute($0, muted) }
+        #if os(iOS)
+        if MedutCallKit.shared.manages(self) {
+            MedutCallKit.shared.requestMuted(self, muted: muted)
+            return
+        }
+        #endif
+        try setMutedNow(muted)
     }
 
     public var isMuted: Bool {

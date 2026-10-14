@@ -22,6 +22,18 @@ public struct StartOptions: Sendable {
     /// fallback for platforms without a connectivity callback.
     public var monitorNetwork = true
     public var audioSession: AudioSessionPolicy = .automatic
+    #if os(iOS)
+    /// Report every call to CallKit through the SDK's own provider
+    /// (`MedutCallKit`).  Forces `audioSession` to `.callKit`.
+    public var callKit: CallKitOptions?
+    #endif
+    /// On a fresh start, re-create and register every account in
+    /// `Medut.shared.accountStore`, so a process started by a push is
+    /// registered before any UI exists.
+    public var restoreAccounts = true
+    /// Write the stack's log and call events to the unified log (subsystem
+    /// `dev.medut`), so a process running with no UI still leaves a trace.
+    public var logToSystemLog = true
 
     public init() {}
 }
@@ -39,6 +51,8 @@ public final class Medut: @unchecked Sendable {
 
     public let audio = MedutAudio()
     public let network = MedutNetwork()
+    /// Accounts kept across process restarts (see `AccountStore`).
+    public let accountStore = AccountStore()
 
     let gate = StackGate()
     /// Serialises start and shutdown against each other.
@@ -76,6 +90,10 @@ public final class Medut: @unchecked Sendable {
                       options: StartOptions = StartOptions()) throws {
         try lifecycle.locked {
             var config = config
+            var options = options
+            #if os(iOS)
+            if options.callKit != nil { options.audioSession = .callKit }
+            #endif
             if options.monitorNetwork { config.netMonitorIntervalSeconds = 0 }
             if options.audioSession == .callKit { config.platformAudioActivate = false }
             // Before init: events start flowing during medut_init() and the
@@ -117,6 +135,12 @@ public final class Medut: @unchecked Sendable {
                 lock.locked { networkMonitor = monitor }
             }
             #endif
+
+            if options.logToSystemLog { SystemLog.attach() }
+            #if os(iOS)
+            if let callKit = options.callKit { MedutCallKit.shared.enable(callKit) }
+            #endif
+            if options.restoreAccounts && !reattached { accountStore.restore() }
         }
     }
 
@@ -125,6 +149,9 @@ public final class Medut: @unchecked Sendable {
     /// stop working; their methods throw `.notRunning`.
     public func shutdown() {
         lifecycle.locked {
+            #if os(iOS)
+            MedutCallKit.shared.disable()
+            #endif
             #if canImport(Network)
             let monitor: NetworkMonitor? = lock.locked {
                 defer { networkMonitor = nil }

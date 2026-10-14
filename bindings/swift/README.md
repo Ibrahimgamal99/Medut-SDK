@@ -99,11 +99,84 @@ for await event in Medut.shared.events() { ... }
   yourself.
 - **App-owned audio.** `MedutAudioSession.shared.useAppOwnedAudio(true)`
   hands the microphone and speaker to `MedutAudioEngine`, a VoiceProcessingIO
-  unit that starts only once the session is active. Under CallKit, forward
-  `provider(_:didActivate:)` / `didDeactivate` to `callKitDidActivate()` /
-  `callKitDidDeactivate()`.
+  unit that starts only once the session is active. With your own CallKit,
+  forward `provider(_:didActivate:)` / `didDeactivate` to
+  `callKitDidActivate()` / `callKitDidDeactivate()`; the SDK's own CallKit
+  integration does that itself.
+- **Logging.** With `StartOptions.logToSystemLog` (default) the stack's log
+  and call events go to the unified log, subsystem `dev.medut`, so a process
+  woken by a push with no UI attached still shows up in Console.
+
+## CallKit
+
+```swift
+var options = StartOptions()
+options.callKit = CallKitOptions()          // name, icon, ringtone optional
+try Medut.shared.start(MedutConfig(), options: options)
+```
+
+Every call is then also a CallKit call: it shows in the native call UI and
+on the lock screen, a cellular call and a SIP call never fight for audio,
+and CallKit owns the audio session (`AudioSessionPolicy.callKit` is set for
+you). Nothing else changes: `account.call()` places a call and
+`call.answer()` answers one, and the SDK routes them through CallKit's
+actions so the system UI stays in step; the SIP answer goes out once CallKit
+has activated the audio session. Answering, holding, muting and ending from
+the system side drive the SIP call the same way.
+`MedutCallKit.shared.onOutgoingCallRefused` reports an outgoing call CallKit
+would not start (another call has the line).
+
+## Push wake-up (PushKit)
+
+The SDK carries no PushKit dependency. Give the server the RFC 8599 push
+parameters through `AccountConfig(pushProvider: .apns, pushToken: hex,
+pushParam: bundleID)`, keep the token fresh with `MedutPush.updatePushToken`,
+and handle the push in your `PKPushRegistryDelegate`:
+
+```swift
+func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials,
+                  for type: PKPushType) {
+    MedutPush.updatePushToken(credentials.token)
+}
+
+func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload,
+                  for type: PKPushType, completion: @escaping () -> Void) {
+    // didFinishLaunching started the stack with CallKit and restored the accounts.
+    MedutPush.wake(payload: payload.dictionaryPayload, completion: completion)
+}
+```
+
+`wake` reports the call to CallKit at once (iOS ends the app otherwise),
+using the caller from the payload (`caller_name` / `caller_uri`, configurable
+through `MedutPush.payloadKeys`), makes every account reachable again, and
+waits for the INVITE, which then takes over that CallKit call: the caller
+shown is updated from the SIP From header and an Answer the user already
+tapped is carried out. No INVITE within the wait ends the call as
+unanswered. `MedutPush.reachAccounts()` is the same recovery without the
+wait, for a foreground return.
+
+## Accounts across restarts
+
+A push starts the process with no UI, and the stack must register before
+the INVITE arrives, so the account configs have to be on the native side.
+`Medut.shared.accountStore` keeps them in the Keychain (accessible after the
+first unlock):
+
+```swift
+let account = try Medut.shared.createAccount(cfg)
+Medut.shared.accountStore.save(cfg)        // survives the process
+try account.register()
+
+Medut.shared.accountStore.remove(cfg.uri)   // on logout
+```
+
+`Medut.shared.start` re-creates and registers every saved account on a
+fresh start (`StartOptions.restoreAccounts`, on by default), so
+`didFinishLaunching` is all a cold start needs. A Flutter app gets the same
+with `createAccount(remember: true)`. The stack's own `MedutConfig` is not
+stored: pass it at launch, it is app policy rather than user data.
 
 The Flutter plugin (`bindings/flutter`) is a Pigeon layer over this package:
-its pod compiles MedutKit from here and vendors the same xcframework.
-
-Not yet in this package: CallKit/PushKit integration.
+its pod compiles MedutKit from here and vendors the same xcframework. CallKit
+reaches Dart as `Medut.start(telecom: true)`; push handling and the media tap
+are native-only, since they have no UI and no Dart isolate to wait for.

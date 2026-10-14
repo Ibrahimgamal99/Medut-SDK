@@ -120,11 +120,12 @@ public final class Account: @unchecked Sendable, Hashable, Identifiable, CustomS
     /// returned call.
     public func call(_ uri: String) throws -> Call {
         #if os(iOS)
+        if MedutCallKit.shared.isEnabled { try MedutCallKit.shared.checkOutgoingPermitted() }
         if Medut.shared.options.audioSession == .automatic {
             MedutAudioSession.shared.callStarting()
         }
         #endif
-        return try withHandle("medut_call_invite") { h in
+        let call = try withHandle("medut_call_invite") { h -> Call in
             var out: OpaquePointer?
             try check(medut_call_invite(h, uri, &out), "medut_call_invite")
             guard let ch = out else {
@@ -133,6 +134,10 @@ public final class Account: @unchecked Sendable, Hashable, Identifiable, CustomS
             return Medut.shared.track(call: ch, account: self, state: .calling, isOutgoing: true,
                                       remoteURI: uri, remoteDisplayName: nil)
         }
+        #if os(iOS)
+        if MedutCallKit.shared.isEnabled { MedutCallKit.shared.reportOutgoing(call) }
+        #endif
+        return call
     }
 
     // ── Messaging and presence ───────────────────────────────────────────
