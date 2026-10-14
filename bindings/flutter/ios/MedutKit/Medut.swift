@@ -224,7 +224,8 @@ public final class Medut: @unchecked Sendable {
 
     // ── Packet capture ───────────────────────────────────────────────────
 
-    /// Capture SIP and RTP to a Wireshark-readable pcap file.
+    /// Capture SIP to a Wireshark-readable pcap file.  RTP, STUN and DTLS
+    /// are not captured; for those, capture on the network.
     public func startPcap(path: String) throws {
         try gate.read(nil, "medut_pcap_start") {
             try check(medut_pcap_start(path), "medut_pcap_start")

@@ -408,7 +408,8 @@ class Medut {
   /// [AudioSessionMode.callFramework]; the SDK forwards Telecom's audio
   /// activation itself, so [notifyCallKitAudioActive] is not needed.  Request
   /// the notification permission on API 33+ for the built-in incoming-call
-  /// notification.  Ignored on iOS.
+  /// notification.  On iOS it is the SDK's CallKit integration, which does
+  /// the same through the system call UI.
   static Future<Medut> start({
     MedutConfig config = const MedutConfig(),
     AudioSessionMode audioSession = AudioSessionMode.automatic,
@@ -618,7 +619,8 @@ class Medut {
       _run('networkLocalAddr', (a) => a.networkLocalAddress());
   Future<bool> networkIsUp() => _run('networkIsUp', (a) => a.networkIsUp());
 
-  /// Capture SIP + RTP to a Wireshark-readable pcap file.
+  /// Capture SIP to a Wireshark-readable pcap file.  RTP, STUN and DTLS are
+  /// not captured; for those, capture on the network.
   Future<void> pcapStart(String path) => _run('pcapStart', (a) => a.startPcap(path));
   Future<void> pcapStop() => _run('pcapStop', (a) => a.stopPcap());
 

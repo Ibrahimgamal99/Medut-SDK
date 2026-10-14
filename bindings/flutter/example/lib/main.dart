@@ -151,7 +151,8 @@ class _PhonePageState extends State<PhonePage>
 
   /// Start the stack, or attach to the one native code already started, and
   /// adopt an account it is already running (one remembered on a previous
-  /// Register, re-created at launch or by a push with no Dart involved).
+  /// Register, re-created at launch or by a push with no Dart involved) and
+  /// a call it already has up (a push-started call that is ringing).
   Future<Medut?> _attach() async {
     if (_sdk == null) {
       // The built-in incoming-call notification needs this on API 33+.
@@ -174,6 +175,23 @@ class _PhonePageState extends State<PhonePage>
           _account = account;
           _regState = account.regState;
         });
+      }
+    }
+    if (_call == null) {
+      // Ringing or up before this engine attached, e.g. answered from the
+      // notification that a push-started call showed.
+      final live = sdk.calls.where((c) => !c.state.isTerminal);
+      if (live.isNotEmpty && mounted) {
+        final call = live.first;
+        _logLine('adopted ${call.isOutgoing ? 'outgoing' : 'incoming'} call '
+            '${call.remoteUri} (${call.state.name})');
+        setState(() {
+          _call = call;
+          _callState = call.state;
+          _callPeer = call.remoteDisplayName ?? call.remoteUri;
+        });
+        if (call.state == CallState.established) _startCallTimer();
+        _tabs.animateTo(1);
       }
     }
     return sdk;
@@ -270,7 +288,9 @@ class _PhonePageState extends State<PhonePage>
   void dispose() {
     _callTicker?.cancel();
     _sub?.cancel();
-    _sdk?.shutdown();
+    // The stack is native and outlives this screen (calls, registration,
+    // the next push): let go of it rather than tear it down.
+    _sdk?.detach();
     _tabs.dispose();
     super.dispose();
   }

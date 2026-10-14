@@ -656,7 +656,8 @@ data class StartOptionsMessage (
   val appOwnedAudio: Boolean,
   /**
    * Android: register every call with Telecom through the SDK's own
-   * self-managed ConnectionService (implies audioMode 1).  Ignored on iOS.
+   * self-managed ConnectionService (implies audioMode 1).  iOS: the SDK's
+   * CallKit integration.
    */
   val telecom: Boolean
 )

@@ -161,7 +161,8 @@ object Medut {
     @JvmStatic
     fun account(aor: String): Account? = registry.accounts().firstOrNull { it.aor == aor }
 
-    /** Capture SIP and RTP to a Wireshark-readable pcap file. */
+    /** Capture SIP to a Wireshark-readable pcap file.  RTP, STUN and DTLS
+     *  are not captured; for those, capture on the network. */
     @JvmStatic
     fun startPcap(path: String) = gate.read(null, "medut_pcap_start") {
         check(Native.pcapStart(path), "medut_pcap_start")
