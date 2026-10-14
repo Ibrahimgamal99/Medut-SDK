@@ -53,6 +53,16 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     /// thread, before the incoming-call event is delivered; keep it quick.
     public var incomingCallFilter: ((Call) -> UInt16?)?
 
+    /// CallKit muted or unmuted a call: the system call UI, AirPods, a
+    /// watch, or the app's own `call.setMuted`, which goes through CallKit
+    /// too.  The call's mute state already follows.  Main queue.
+    public var onCallMutedChanged: ((Call, Bool) -> Void)?
+
+    /// CallKit held or resumed a call: the system call UI, a cellular call
+    /// that holds ours, or the app's own `call.hold()` / `resume()`.  The SIP
+    /// hold already follows.  Main queue.
+    public var onCallHeldChanged: ((Call, Bool) -> Void)?
+
     private let lock = NSLock()
     private var provider: CXProvider?
     private let controller = CXCallController()
@@ -471,6 +481,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
         do {
             try action.isOnHold ? call.holdNow() : call.resumeNow()
             action.fulfill()
+            onCallHeldChanged?(call, action.isOnHold)
         } catch {
             action.fail()
         }
@@ -483,6 +494,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
         }
         try? call.setMutedNow(action.isMuted)
         action.fulfill()
+        onCallMutedChanged?(call, action.isMuted)
     }
 
     public func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {

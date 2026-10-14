@@ -108,6 +108,17 @@ object MedutTelecom {
     var incomingCallFilter: ((Call) -> Int?)? = null
 
     /**
+     * Telecom changed a call's audio: the route moved (a Bluetooth headset
+     * connected, the system call UI picked the speaker) or Telecom muted it
+     * (a headset button, a watch).  [muted] is the call's mute state after
+     * the change, [route] the active route.  Main thread; for redrawing a
+     * call screen.
+     */
+    @JvmStatic
+    @Volatile
+    var onCallAudioStateChanged: ((call: Call, muted: Boolean, route: AudioRoute?) -> Unit)? = null
+
+    /**
      * Telecom refused to create the connection for an outgoing call (another
      * call has the line).  The SIP call has been hung up by the time this
      * runs.  Main thread.
@@ -506,6 +517,11 @@ internal class TelecomBridge(
             runCatching { connection.call?.setMuted(state.isMuted) }
         }
         platform.routes.notifyChanged()
+        val call = connection.call ?: return
+        MedutTelecom.onCallAudioStateChanged?.let { listener ->
+            val muted = runCatching { call.isMuted }.getOrDefault(state.isMuted)
+            listener(call, muted, platform.routes.list().firstOrNull { it.isActive })
+        }
     }
 
     /** Telecom has set the audio mode for an active connection: the moment
