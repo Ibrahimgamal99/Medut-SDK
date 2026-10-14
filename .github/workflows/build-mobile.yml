@@ -5,9 +5,9 @@ name: Build mobile libraries
 #
 # iOS only: Android is built locally with scripts/build-android.sh, so no
 # Android job here. That means nothing on CI proves the freshly built jniLibs
-# still line up with the Dart/Kotlin plugin (FFI symbol names, the plugin class,
-# the JNI bridge); after a native change, run scripts/build-android.sh and then
-# `flutter build apk --debug` in bindings/flutter/example locally to cover it.
+# still line up with the Kotlin SDK's JNI layer; after a native change, run
+# scripts/build-android.sh and then `flutter build apk --debug` in
+# bindings/flutter/example locally to cover it.
 on:
   workflow_dispatch:
 
@@ -38,43 +38,24 @@ jobs:
           channel: stable
           cache: true
 
-      # build-ios.sh stages the xcframework into bindings/flutter/ios/Frameworks,
-      # which is what medut.podspec vendors — so `pod install` resolves here
-      # and its prepare_command guard passes. No signing identity on CI.
+      # build-ios.sh stages the xcframework into bindings/swift/Frameworks,
+      # which medut.podspec vendors through its Frameworks symlink — so
+      # `pod install` resolves here and its prepare_command guard passes. No
+      # signing identity on CI.
       - name: Build example app (no codesign)
         working-directory: bindings/flutter/example
         run: |
           flutter pub get
           flutter build ios --debug --no-codesign
 
-  # ── Dart binding: analyzer + tests against a real native build ───────────
-  # The native library is built first so test/medut_smoke_test.dart actually
-  # runs. It self-skips when dist/linux/x86_64/medut.so is missing, so
-  # without this the job passed while executing nothing.
+  # ── Flutter plugin: analyzer + Dart tests ────────────────────────────────
+  # The Dart side talks to the native SDKs over Pigeon; its tests fake the
+  # native side at the Pigeon channels, so no native build is needed here.
   dart:
     runs-on: ubuntu-22.04
-    name: Dart · analyze + tests
+    name: Flutter · analyze + tests
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install native build deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build gcc g++ pkg-config libssl-dev libpulse-dev
-
-      # AEC off: the webrtc_aec module needs libwebrtc-audio-processing-1, which
-      # has no ubuntu-22.04 package and would mean building it from source here.
-      # Nothing under test/ exercises AEC.
-      - name: Build native library
-        run: bash scripts/build-linux.sh
-        env:
-          MEDUT_WITH_WEBRTC_AEC: 'OFF'
-
-      # Guards against silently going back to a vacuous test run. The smoke
-      # test resolves this same path relative to bindings/flutter.
-      - name: Assert the tests have a library to load
-        run: test -f dist/linux/x86_64/medut.so
 
       - uses: subosito/flutter-action@v2
         with:
@@ -87,6 +68,6 @@ jobs:
           flutter pub get
           dart analyze lib
 
-      - name: Tests (e2e_asterisk_test self-skips without a SIP server)
+      - name: Tests
         working-directory: bindings/flutter
         run: flutter test

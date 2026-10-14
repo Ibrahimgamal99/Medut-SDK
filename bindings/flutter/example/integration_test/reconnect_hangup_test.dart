@@ -81,7 +81,7 @@ void main() {
       }
     });
 
-    final account = sdk.createAccount('sip:$_uri', _pass,
+    final account = await sdk.createAccount('sip:$_uri', _pass,
         config: AccountConfig(
           transport: Transport.wss,
           serverUrl: _ws.isEmpty ? null : _ws,
@@ -90,11 +90,11 @@ void main() {
           verifyTls: false,
           audioCodecs: const ['opus'],
         ));
-    account.register();
+    await account.register();
     await Future<void>.delayed(const Duration(seconds: 6));
 
     p('=== phase 1: dial $_callee ===');
-    final call = account.call(_callee);
+    final call = await account.call(_callee);
     for (var i = 0; i < _preSec * 10; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       if (last == CallState.established) break;
@@ -131,7 +131,7 @@ void main() {
 
     p('=== phase 3: LOCAL hangup ===');
     final before = last;
-    call.hangup();
+    await call.hangup();
     var arrivedMs = -1;
     for (var i = 0; i < 150; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));

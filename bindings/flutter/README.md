@@ -1,19 +1,29 @@
 # Medut
 
-SIP softphone SDK for Flutter — a self-contained native stack (baresip/libre)
-driven over `dart:ffi`, with no dependency on any particular host app.
+SIP softphone SDK for Flutter on Android and iOS: a thin Pigeon layer over
+the native Medut SDKs, which own a self-contained SIP stack (baresip/libre)
+for the whole process lifetime.
 
-Drop it into any Flutter app: registration over UDP/TCP/TLS/WS/WSS, calls,
-hold/transfer/DTMF, SIP MESSAGE, presence, push (RFC 8599), network handover,
-and RTCP/MOS media statistics. Everything app-specific — AOR, credentials,
-server URL, codecs, `User-Agent` — is configuration you pass in; the package
-ships no UI and imposes no call flow.
+Drop it into any Flutter app. It covers:
+- registration over UDP/TCP/TLS/WS/WSS,
+- calls, hold, transfer and DTMF,
+- SIP MESSAGE and presence,
+- push (RFC 8599),
+- network handover,
+- RTCP/MOS media statistics.
+
+Everything app-specific is configuration you pass in: AOR, credentials,
+server URL, codecs, `User-Agent`. The package ships no UI and imposes no call
+flow.
 
 | | |
 |---|---|
-| **Android** | arm64-v8a · armeabi-v7a · x86_64 · `minSdk` 24. Prebuilt `libmedut.so` ships in the package; Kotlin shim handles cache dir, audio focus, speakerphone, network callbacks, and an app-owned audio device (`AudioRecord`/`AudioTrack` on `VOICE_COMMUNICATION`). |
-| **iOS** | 13.0+, device + simulator. Vendors `Medut.xcframework`; Swift shim handles `AVAudioSession`, speaker routing, `NWPathMonitor`. Capture uses VoiceProcessingIO (hardware AEC), also for the optional app-owned audio device. |
-| **Linux / macOS / Windows** | Works as a plain FFI binding — the app bundles the native library itself, or passes `Medut(libPath: ...)`. |
+| **Android** | `minSdk` 24; arm64-v8a, armeabi-v7a and x86_64. Built on the Kotlin SDK (`bindings/kotlin`), which handles audio mode and focus, call-audio routes, network callbacks, and an optional app-owned audio device. |
+| **iOS** | 13.0+, device and simulator. Built on MedutKit (`bindings/swift`), which handles `AVAudioSession`, routes, `NWPathMonitor`, and the optional VoiceProcessingIO app-owned device. |
+
+Because native code owns the stack, it can start the stack at launch or from
+a push, and receive and answer calls with no Flutter engine running.
+`Medut.start()` attaches to that running stack (`sdk.reattached`).
 
 ## Install
 
@@ -23,26 +33,30 @@ dependencies:
     git:
       url: https://github.com/Ibrahimgamal99/Medut-SDK.git
       path: bindings/flutter
+      ref: <full-40-char-sha>
 ```
 
-**Android** needs nothing further — the plugin carries the native libraries and
-declares `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` and
-`ACCESS_NETWORK_STATE`. Your app must still *request* the microphone permission
-at runtime (e.g. `permission_handler`) before the first call.
+**Android:**
+- The SDK declares `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` and
+  `ACCESS_NETWORK_STATE`.
+- Your app must still request the microphone permission at runtime (for
+  example with `permission_handler`).
+- The plugin compiles a small JNI layer. AGP installs the NDK and CMake it
+  needs automatically.
 
-**iOS** needs, in your app's `Info.plist`:
+**iOS** needs these entries in your app's `Info.plist`:
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
 <string>Microphone access is required for voice calls.</string>
 <key>UIBackgroundModes</key>
-<array><string>audio</string></array>
+<array><string>audio</string><string>voip</string></array>
 ```
 
-The vendored `bindings/flutter/ios/Frameworks/Medut.xcframework` is produced by
-`scripts/build-ios.sh` on macOS or by the `build-mobile` CI workflow; `pod install`
-fails with a clear message when it is absent. For production VoIP, add PushKit +
-CallKit in your app and pair them with `account.setPushToken()`.
+The pod compiles MedutKit from `bindings/swift` and vendors
+`bindings/swift/Frameworks/Medut.xcframework`. Produce that framework with
+`scripts/build-ios.sh` on macOS, or fetch it with `scripts/fetch-prebuilt.sh`.
+If it is absent, `pod install` fails with a clear message.
 
 ## Use
 
@@ -52,12 +66,11 @@ import 'package:medut/medut.dart';
 final sdk = await Medut.start(
   config: const MedutConfig(
     statsIntervalMs: 5000,      // MediaStatsEvent every 5 s
-    mosAlertThreshold: 3.5,     // QualityAlertEvent when MOS drops
     userAgent: 'MyApp/2.1',     // your app's SIP User-Agent
   ),
 );
 
-final account = sdk.createAccount(
+final account = await sdk.createAccount(
   'alice@pbx.example.com',
   'secret',
   config: const AccountConfig(
@@ -66,31 +79,40 @@ final account = sdk.createAccount(
     audioCodecs: ['opus', 'ulaw', 'alaw'],
   ),
 );
-account.register();
+await account.register();
 
 account.events.listen((ev) {
   if (ev is RegStateEvent && ev.state == RegState.registered) {
     account.call('bob@pbx.example.com');
   } else if (ev is IncomingCallEvent) {
-    ev.call.answer();          // or ev.call.reject(486)
+    ev.call.answer();          // or ev.call.reject(statusCode: 486)
   }
 });
 ```
 
-`Medut.start()` is what makes the package portable across apps: it asks the
-platform shim for the app's own cache directory (baresip's `tmp_dir`), switches
-network monitoring to OS callbacks, and manages the audio session around calls.
-The native stack is a **process-wide singleton** — a second `Medut` in a
-process that already has one throws unless you `shutdown()` first, and
-`Medut.start()` reattaches (`sdk.reattached`) when a background isolate wakes
-up against a live stack.
+Behaviour worth knowing:
+- **Async actions.** Every action is a `Future`, and failures throw
+  `MedutException` (`code`: `CALL_ENDED`, `NOT_RUNNING`, `AUTHENTICATION`,
+  ...).
+- **Cached state.** `call.state` and `account.regState` follow the events.
+- **Config defaults.** `MedutConfig` fields left `null` keep the C library's
+  defaults.
 
 See [`example/`](example/) for a runnable app and
 [`docs/quickstart/flutter.md`](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md)
-for the full API walkthrough (transfer, presence, recording, handover, stats).
+for the full walkthrough: CallKit/Telecom, transfer, presence, recording,
+handover and stats.
+
+## Development
+
+The Dart, Kotlin and Swift glue is generated from `pigeons/messages.dart`:
+
+```sh
+dart run pigeon --input pigeons/messages.dart
+flutter test
+```
 
 ## License
 
-BSD 3-Clause — see [LICENSE](LICENSE). The native libraries bundled in this
-package statically link baresip, libre and Opus (BSD-3-Clause) plus Mbed TLS
-(Apache-2.0).
+BSD 3-Clause — see [LICENSE](LICENSE). The native libraries statically link
+baresip, libre and Opus (BSD-3-Clause) plus OpenSSL (Apache-2.0).

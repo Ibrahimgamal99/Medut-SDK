@@ -14,6 +14,12 @@ plugins {
 group = 'dev.medut.flutter'
 version = '1.0.0'
 
+// The Kotlin SDK (bindings/kotlin) is compiled into this module from source:
+// its Kotlin, its JNI layer, and the prebuilt libmedut.so it packages. A
+// release would depend on its published AAR instead.
+def medutSdk = file('../../kotlin/medut')
+def medutInclude = file('../../../include')
+
 android {
     namespace = 'dev.medut.flutter'
     // AGP 9 requires compileSdk >= 35; harmless on older AGP.
@@ -21,6 +27,31 @@ android {
 
     defaultConfig {
         minSdk = 24
+        consumerProguardFiles "${medutSdk}/consumer-rules.pro"
+        // The ABIs the prebuilt core ships (scripts/build-android.sh).
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DMEDUT_JNILIBS=${medutSdk}/src/main/jniLibs",
+                          "-DMEDUT_INCLUDE=${medutInclude}"
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += "${medutSdk}/src/main/kotlin"
+            jniLibs.srcDirs = ["${medutSdk}/src/main/jniLibs"]
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "${medutSdk}/src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 
     compileOptions {
@@ -32,8 +63,6 @@ android {
         jvmTarget = '17'
     }
 
-    // Prebuilt libmedut.so per ABI lives in src/main/jniLibs/<abi>/
-    // (populated by scripts/build-android.sh).
     packagingOptions {
         jniLibs {
             useLegacyPackaging = false
@@ -43,4 +72,6 @@ android {
 
 dependencies {
     compileOnly 'androidx.annotation:annotation:1.7.1'
+    // Pigeon's generated Kotlin delivers Dart-bound calls as coroutines.
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
 }

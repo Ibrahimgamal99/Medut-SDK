@@ -22,7 +22,7 @@ OUTPUT="${2:-${SCRIPT_DIR}/medut/_medut_clean.h}"
 # member after cfg.aec_mode lands at the wrong offset.  The total size can
 # still match by padding coincidence, which is why the struct_size check in
 # medut_init() does not catch it.  The define selects the uint8_t typedef
-# that preserves the layout, the same way bindings/flutter/ffigen.yaml does.
+# that preserves the layout.
 gcc -E \
     -DMEDUT_NO_PACKED_ENUM=1 \
     -D'__extension__=' \

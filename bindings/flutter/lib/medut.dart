@@ -1,4 +1,10 @@
-/// Medut — Dart/Flutter FFI wrapper.
+/// Medut — Flutter plugin over the native Medut SDKs.
+///
+/// The stack lives in native code (the Kotlin SDK on Android, MedutKit on
+/// iOS), which owns it for the whole process lifetime: calls can be received
+/// and answered with no Flutter engine running.  This library talks to it
+/// over Pigeon; when the app already started the stack natively,
+/// [Medut.start] attaches to it.
 ///
 /// Quick start:
 ///
@@ -8,7 +14,7 @@
 /// final sdk = await Medut.start(
 ///   config: const MedutConfig(statsIntervalMs: 5000),
 /// );
-/// final account = sdk.createAccount(
+/// final account = await sdk.createAccount(
 ///   'alice@pbx.example.com', 'secret',
 ///   config: const AccountConfig(
 ///     serverUrl: 'wss://pbx.example.com:8089/ws',   // WS/WSS need a URL
@@ -16,7 +22,7 @@
 ///     audioCodecs: ['opus', 'ulaw', 'alaw'],
 ///   ),
 /// );
-/// account.register();
+/// await account.register();
 ///
 /// account.events.listen((ev) {
 ///   if (ev is RegStateEvent && ev.state == RegState.registered) {
@@ -29,1886 +35,708 @@
 library medut;
 
 import 'dart:async';
-import 'dart:ffi';
-import 'package:ffi/ffi.dart';
 
-import 'src/config.dart';
+import 'package:flutter/services.dart';
+
 import 'src/enums.dart';
-import 'src/ffi_bindings.dart';
-import 'src/platform_channel.dart';
-import 'src/sdk.dart' as internal;
+import 'src/messages.g.dart';
 
-export 'src/config.dart' show MedutConfig, AccountConfig, OpusConfig, IceServer;
 export 'src/enums.dart';
-export 'src/platform_channel.dart'
-    show AudioRoute, AudioRouteKind, MedutPlatform;
 
-// ── Event types ─────────────────────────────────────────────────────────────
+part 'src/config.dart';
+part 'src/types.dart';
 
-abstract class MedutEvent {}
-
-class RegStateEvent extends MedutEvent {
-  final RegState state;
-  final MedutError error;
-  final String? errorStr;
-  final int retryAttempt;
-  final int retryDelayMs;
-  RegStateEvent(this.state, this.error, this.errorStr,
-      {this.retryAttempt = 0, this.retryDelayMs = 0});
-}
-
-class IncomingCallEvent extends MedutEvent {
-  final Call call;
-  final String fromUri;
-  final String? displayName;
-  IncomingCallEvent(this.call, this.fromUri, this.displayName);
-}
-
-class CallStateEvent extends MedutEvent {
-  final Call call;
-  final CallState state;
-  final MedutError error;
-  final String? reason;
-  CallStateEvent(this.call, this.state, this.error, this.reason);
-}
-
-class CallDtmfEvent extends MedutEvent {
-  final Call call;
-  final String digit;
-  CallDtmfEvent(this.call, this.digit);
-}
-
-/// Static and slow-moving facts about a call, as opposed to the per-tick
-/// media numbers in [Call.stats].
-class CallInfo {
-  final String peerUri;
-  final String peerDisplayName;
-  final String localUri;
-  final String contactUri;
-  final String callId;
-
-  /// Diversion / History-Info URI when the call was forwarded to us; empty
-  /// otherwise. This is not Referred-By: a call that reached us by transfer
-  /// carries no diverter.
-  final String diverterUri;
-  final bool isOutgoing;
-
-  /// True when the PEER has put us on hold. Local hold — the hold this app
-  /// asked for — is [Call.isHeld]; the two are independent.
-  final bool isRemoteHold;
-  final int sipStatus;
-  final Duration duration;
-  final Duration setupDuration;
-  final int lineNumber;
-  final Transport transport;
-  final CallState state;
-
-  static String _str(Array<Char> a, int max) {
-    final b = StringBuffer();
-    for (var i = 0; i < max && a[i] != 0; i++) {
-      b.writeCharCode(a[i]);
-    }
-    return b.toString();
-  }
-
-  CallInfo._(medut_call_info_t r)
-      : peerUri = _str(r.peer_uri, 256),
-        peerDisplayName = _str(r.peer_display_name, 128),
-        localUri = _str(r.local_uri, 256),
-        contactUri = _str(r.contact_uri, 256),
-        callId = _str(r.call_id, 128),
-        diverterUri = _str(r.diverter_uri, 256),
-        isOutgoing = r.is_outgoing,
-        isRemoteHold = r.is_remote_hold,
-        sipStatus = r.sip_status,
-        duration = Duration(milliseconds: r.duration_ms),
-        setupDuration = Duration(milliseconds: r.setup_duration_ms),
-        lineNumber = r.line_number,
-        transport = Transport.fromRaw(r.transport),
-        state = CallState.fromRaw(r.state);
-}
-
-class AudioDevice {
-  final String name;
-  final String description;
-  final bool isDefault;
-  AudioDevice(this.name, this.description, this.isDefault);
-}
-
-/// A failure inside the app-owned audio engine.
+/// A failed SDK call.
 ///
-/// These have no other reporting path: once the app owns the device, the SDK
-/// is not holding it and cannot see it fail. Left unhandled they surface as a
-/// call that connects with silence in one or both directions.
-///
-/// Codes: `mic-permission` (RECORD_AUDIO not granted), `unsupported-rate` (the
-/// device will not open the negotiated rate), `device-open`, `capture-dead`,
-/// `playback-dead`, `unavailable` (the native library did not load).
-class AppOwnedAudioError {
+/// [code] is the SDK's error code name — `NOT_RUNNING`, `CALL_ENDED`,
+/// `ACCOUNT_DESTROYED`, `AUTHENTICATION`, `TIMEOUT`, `INVALID_ARGUMENT`, ...
+/// — and [rawValue] the C return value (a negative `MEDUT_ERR_*`, or a
+/// positive errno).
+class MedutException implements Exception {
   final String code;
-  final String message;
+  final int rawValue;
+  final String operation;
+  final String? message;
 
-  const AppOwnedAudioError(this.code, this.message);
+  const MedutException(this.code, this.rawValue, this.operation, this.message);
 
-  @override
-  String toString() => 'AppOwnedAudioError($code): $message';
-}
-
-/// What the current call negotiated, for sizing the app's own audio device.
-/// PCM across the app-owned boundary is always S16LE interleaved.
-/// See [Medut.appOwnedAudioFormat].
-class ExternalAudioFormat {
-  final int sampleRate;
-  final int channels;
-  final int ptimeMs;
-
-  const ExternalAudioFormat(this.sampleRate, this.channels, this.ptimeMs);
-
-  /// Total samples (frames x channels) in one ptime — the natural buffer size
-  /// for the app's capture and playback loops.
-  int get samplesPerFrame => sampleRate * channels * ptimeMs ~/ 1000;
+  /// The C error as a [MedutError], when it is one.
+  MedutError? get error => rawValue < 0
+      ? MedutError.values.where((e) => e.raw == rawValue).firstOrNull
+      : null;
 
   @override
-  bool operator ==(Object other) =>
-      other is ExternalAudioFormat &&
-      other.sampleRate == sampleRate &&
-      other.channels == channels &&
-      other.ptimeMs == ptimeMs;
-
-  @override
-  int get hashCode => Object.hash(sampleRate, channels, ptimeMs);
-
-  @override
-  String toString() => '${sampleRate}Hz ${channels}ch ${ptimeMs}ms';
+  String toString() => 'MedutException($code, $rawValue): $operation: '
+      '${message ?? ''}';
 }
 
-/// Periodic per-call media statistics (see `medut_ev_media_stats_t`).
-class MediaStats {
-  final Call call;
-  // Packet counters
-  final int packetsSent;
-  final int packetsReceived;
-  final int packetsLost;
-  final int packetsLostRx;
-  final int bytesSent;
-  final int bytesReceived;
-  final int txErrors;
-  final int rxErrors;
-  // Loss
-  final double lossPct;
-  final double lossPctRx;
-  // Delay / jitter
-  final double jitterMs;
-  final double txJitterMs;
-  final double rttMs;
-  // Jitter buffer
-  final int jitterBufferMs;
-  final int jitterBufferLoad;
-  final int latePackets;
-  final int discardedPackets;
-  final int jitterBufferTargetMs;
-  final bool jitterBufferAdaptive;
-  // PLC
-  final int plcFrames;
-  final double plcRatio;
-  // Bandwidth
-  final int bandwidthTx;
-  final int bandwidthRx;
-  final int avgBandwidthTx;
-  final int avgBandwidthRx;
-  // MOS
-  final double mosLq;
-  final double mosCq;
-  final double mosLqRx;
-  final double mosCqRx;
-  final int mosMethod;
-  // Codec
-  final String codec;
-  final int codecClockRate;
-  final int codecSampleRate;
-  final int codecChannels;
-  final int payloadType;
-  // Audio level
-  final double audioLevelDbov;
-  final double micLevelDbov;
-  // Stream identity
-  final int ssrcTx;
-  final int ssrcRx;
-  final String remoteAddr;
-  // Session history
-  final double mosLqMin;
-  final double mosLqAvg;
-  final int statsTick;
-  final int callDurationMs;
+/// Who activates call audio (the audio session on iOS, audio mode and focus
+/// on Android).
+enum AudioSessionMode {
+  /// The SDK does, around each call.  For apps without CallKit / Telecom.
+  automatic,
 
-  /// True on the last stats event before call teardown.
-  final bool isFinal;
+  /// The platform call framework does: CallKit on iOS, Telecom on Android.
+  /// Report its activations with [Medut.notifyCallKitAudioActive].  On iOS,
+  /// answer from `provider(_:didActivate:)`, not from `CXAnswerCallAction`.
+  callFramework,
 
-  // ICE — the media path as the agent sees it.  [IceState.newState] and
-  // zeroes on a call without ICE.  On an ICE call [remoteAddr] above is the
-  // same address as [iceRemoteAddr].
-  final IceState iceState;
-  final IceCandType iceLocalType;
-  final IceCandType iceRemoteType;
-
-  /// STUN round trip on the selected pair, ms.
-  final double iceRttMs;
-
-  /// ICE restarts so far; 1 is the initial session.
-  final int iceGeneration;
-  final String iceLocalAddr;
-  final String iceRemoteAddr;
-
-  /// Whether our encoder is sending Opus in-band FEC.  Switched from the
-  /// peer's receiver reports: on at 4% loss (2% in two reports running), off
-  /// after 10 s under 1%.  False
-  /// for G.711, or a peer that did not ask for FEC.
-  final bool fecActive;
-
-  /// Expected loss % the FEC is sized for (5–25); 0 when off.
-  final int fecLevelPct;
-
-  /// Opus FEC we receive: how each frame the jitter buffer reported lost was
-  /// filled in, cumulative for the call — rebuilt from the redundant copy the
-  /// next packet carried ([fecRecovered]), or concealed by the decoder alone
-  /// ([plcConcealed]).  [plcFrames] counts the gaps; these two say what became
-  /// of them.  0 for a codec other than Opus.
-  final int fecRecovered;
-  final int plcConcealed;
-
-  MediaStats({
-    required this.call,
-    required this.packetsSent,
-    required this.packetsReceived,
-    required this.packetsLost,
-    required this.packetsLostRx,
-    required this.bytesSent,
-    required this.bytesReceived,
-    required this.txErrors,
-    required this.rxErrors,
-    required this.lossPct,
-    required this.lossPctRx,
-    required this.jitterMs,
-    required this.txJitterMs,
-    required this.rttMs,
-    required this.jitterBufferMs,
-    required this.jitterBufferLoad,
-    required this.latePackets,
-    required this.discardedPackets,
-    required this.jitterBufferTargetMs,
-    required this.jitterBufferAdaptive,
-    required this.plcFrames,
-    required this.plcRatio,
-    required this.bandwidthTx,
-    required this.bandwidthRx,
-    required this.avgBandwidthTx,
-    required this.avgBandwidthRx,
-    required this.mosLq,
-    required this.mosCq,
-    required this.mosLqRx,
-    required this.mosCqRx,
-    required this.mosMethod,
-    required this.codec,
-    required this.codecClockRate,
-    required this.codecSampleRate,
-    required this.codecChannels,
-    required this.payloadType,
-    required this.audioLevelDbov,
-    required this.micLevelDbov,
-    required this.ssrcTx,
-    required this.ssrcRx,
-    required this.remoteAddr,
-    required this.mosLqMin,
-    required this.mosLqAvg,
-    required this.statsTick,
-    required this.callDurationMs,
-    required this.isFinal,
-    required this.iceState,
-    required this.iceLocalType,
-    required this.iceRemoteType,
-    required this.iceRttMs,
-    required this.iceGeneration,
-    required this.iceLocalAddr,
-    required this.iceRemoteAddr,
-    required this.fecActive,
-    required this.fecLevelPct,
-    required this.fecRecovered,
-    required this.plcConcealed,
-  });
-}
-
-class MediaStatsEvent extends MedutEvent {
-  final MediaStats stats;
-  MediaStatsEvent(this.stats);
-
-  Call get call => stats.call;
-}
-
-/// A call-quality threshold was crossed (or recovered).
-/// Thresholds are set in [MedutConfig] (`mosAlertThreshold`, ...).
-class QualityAlertEvent extends MedutEvent {
-  final Call call;
-  final QualityIssue issue;
-  final double value;
-  final double threshold;
-
-  /// True when the metric returned to the good side of the threshold.
-  final bool recovering;
-  QualityAlertEvent(
-      this.call, this.issue, this.value, this.threshold, this.recovering);
-}
-
-/// Incoming REFER — the peer asks us to transfer this call.
-///
-/// Answer with [Call.transferAccept] or [Call.transferReject] — exactly one.
-/// The SDK has already sent the provisional replies and the transferor is now
-/// waiting for the final NOTIFY that only one of those two produces; ignoring
-/// the event leaves it waiting out its subscription.
-class TransferRequestEvent extends MedutEvent {
-  final Call call;
-  final String referToUri;
-
-  /// True = attended transfer (REFER carries Replaces).
-  final bool hasReplaces;
-
-  /// True when the SDK already followed the transfer itself. Always false
-  /// today — placing a call is the app's decision — but check it before
-  /// calling [Call.transferAccept] so a future auto-follow policy cannot make
-  /// you place a second call on top of the SDK's.
-  final bool autoFollowed;
-  TransferRequestEvent(this.call, this.referToUri, this.hasReplaces,
-      {this.autoFollowed = false});
-}
-
-/// An outgoing REFER was refused — the transfer did not happen.
-///
-/// [call] is still established.  A failed transfer is not a call failure: the
-/// far end simply would not take the call, and the user is still on the line
-/// (usually on hold, if the app parked them for a warm transfer).  Resume them
-/// and report [reason]; do not hang up.
-///
-/// There is no matching success event.  A REFER that is accepted moves the call
-/// to the transfer target and closes our leg, which arrives as a
-/// [CallStateEvent] with [CallState.ended].
-class TransferFailedEvent extends MedutEvent {
-  final Call call;
-
-  /// Status line or cause text from the stack; empty when none was supplied.
-  final String reason;
-  TransferFailedEvent(this.call, this.reason);
-}
-
-/// Non-fatal registrar warning.
-class RegistrarWarningEvent extends MedutEvent {
-  final String message;
-  RegistrarWarningEvent(this.message);
-}
-
-/// Result of an SDP offer/answer negotiation (enable with
-/// [MedutConfig.traceSdpDiff]).
-class SdpNegotiationEvent extends MedutEvent {
-  final Call call;
-  final String? localSdp;
-  final String? remoteSdp;
-  final String? negotiatedCodec;
-  final String? negotiatedCrypto;
-  SdpNegotiationEvent(this.call, this.localSdp, this.remoteSdp,
-      this.negotiatedCodec, this.negotiatedCrypto);
-}
-
-/// Message-waiting indication (voicemail).
-class MwiEvent extends MedutEvent {
-  final bool messagesWaiting;
-  final int newVoice;
-  final int oldVoice;
-  final int newUrgent;
-  final int oldUrgent;
-  final String? rawBody;
-  MwiEvent(this.messagesWaiting, this.newVoice, this.oldVoice, this.newUrgent,
-      this.oldUrgent, this.rawBody);
-}
-
-class LogEvent extends MedutEvent {
-  final String message;
-  LogEvent(this.message);
-}
-
-class MessageEvent extends MedutEvent {
-  final String fromUri;
-  final String body;
-  final String contentType;
-  MessageEvent(this.fromUri, this.body, this.contentType);
-}
-
-class PresenceStateEvent extends MedutEvent {
-  final String targetUri;
-  final PresenceStatus status;
-  PresenceStateEvent(this.targetUri, this.status);
-}
-
-/// Progress of a network handover (Wi-Fi <-> 4G/5G, VPN, dock/undock).
-///
-/// Delivered on [Medut.events]. Most stages are not account-scoped, so
-/// they do NOT appear on [Account.events].
-class NetworkEvent extends MedutEvent {
-  final NetworkStage stage;
-  final Call? call;
-  final String localAddr;
-  final int attempt;
-  final int maxAttempts;
-  final int elapsedMs;
-
-  /// True when the call uses ICE — media recovery is best-effort there.
-  final bool ice;
-  final MedutError error;
-
-  NetworkEvent({
-    required this.stage,
-    required this.call,
-    required this.localAddr,
-    required this.attempt,
-    required this.maxAttempts,
-    required this.elapsedMs,
-    required this.ice,
-    required this.error,
-  });
-}
-
-/// The ICE liveness of a call's media path changed.  See [IceState].
-class IceStateEvent extends MedutEvent {
-  final Call? call;
-  final IceState state;
-  final IceState prev;
-
-  /// ICE restarts so far; 1 is the initial session.
-  final int generation;
-  final IceCandType localType;
-  final IceCandType remoteType;
-
-  /// The selected candidate pair as `ip:port`; empty until one is selected.
-  final String localAddr;
-  final String remoteAddr;
-
-  /// STUN round trip on the selected pair, ms.
-  final double rttMs;
-  final MedutError error;
-
-  IceStateEvent({
-    required this.call,
-    required this.state,
-    required this.prev,
-    required this.generation,
-    required this.localType,
-    required this.remoteType,
-    required this.localAddr,
-    required this.remoteAddr,
-    required this.rttMs,
-    required this.error,
-  });
-}
-
-class SipTraceEvent extends MedutEvent {
-  final MediaDirection direction;
-  final String transport;
-  final String remoteAddr;
-  final String rawMessage;
-  final int timestampUs;
-  SipTraceEvent(this.direction, this.transport, this.remoteAddr,
-      this.rawMessage, this.timestampUs);
-}
-
-/// An event type this binding does not know how to decode (newer native
-/// library). Carries the raw type id so nothing is silently dropped.
-class UnknownEvent extends MedutEvent {
-  final int rawType;
-  UnknownEvent(this.rawType);
+  /// The app does.
+  manual,
 }
 
 // ── Call ─────────────────────────────────────────────────────────────────────
 
+/// A call, incoming or outgoing.  The native call lives in the SDK; this is
+/// a handle to it by [id].
+///
+/// Safe to keep after the call ends: the native side holds an ended call
+/// until this object is garbage-collected (or a cap of recent ended calls
+/// evicts it, after which methods throw [MedutException] `CALL_ENDED`).
 class Call {
-  final Pointer<medut_call> _handle;
+  /// The native call's stable id (UUID).
+  final String id;
 
-  /// The account this call belongs to; null when the SDK could not
-  /// resolve it (e.g. events after account destruction).
+  /// The account this call belongs to; null when it could not be resolved.
   final Account? account;
+  final bool isOutgoing;
 
-  CallState state = CallState.calling;
+  /// The far end: the dialled URI for an outgoing call, the From URI for an
+  /// incoming one.
+  final String remoteUri;
+  final String? remoteDisplayName;
+  final Medut _sdk;
 
-  Call._(this._handle, this.account);
+  /// The state from the latest call-state event.
+  CallState state;
 
-  /// Accept an incoming call.
-  ///
-  /// Awaits the voice audio session before answering — media starts the moment
-  /// the 200 OK is out, and on Android the platform must already be in
-  /// `MODE_IN_COMMUNICATION` when the audio devices open or the call comes up
-  /// with audio flowing one way only. The wait is a single platform-channel
-  /// hop; awaiting the result is optional (`call.answer()` on its own is fine).
-  Future<void> answer() async {
-    await Medut.instance?._audioSession(true);
-    internal.nativeBindings.medut_call_answer(_handle);
+  static final Finalizer<void Function()> _release = Finalizer((f) => f());
+
+  Call._(CallMessage m, this.account, this._sdk)
+      : id = m.id,
+        isOutgoing = m.isOutgoing,
+        remoteUri = m.remoteUri,
+        remoteDisplayName = m.remoteDisplayName,
+        state = CallState.fromRaw(m.state) {
+    final api = _sdk._api;
+    final callId = id;
+    _release.attach(this, () => api.releaseCall(callId).ignore());
   }
 
-  void hangup() => internal.nativeBindings.medut_call_hangup(_handle);
+  Future<T> _run<T>(String op, Future<T> Function(MedutHostApi api) f) =>
+      _sdk._run(op, f);
 
-  /// Terminate with an explicit SIP status code — for an unanswered
-  /// incoming call this sends the final response (486 "Busy Here",
-  /// 603 "Decline", ...).
-  void reject({int statusCode = 486, String reason = 'Busy Here'}) {
-    final p = reason.toNativeUtf8().cast<Char>();
-    try {
-      internal.nativeBindings.medut_call_reject(_handle, statusCode, p);
-    } finally {
-      calloc.free(p);
-    }
-  }
-  void hold() => internal.nativeBindings.medut_call_hold(_handle);
-  void resume() => internal.nativeBindings.medut_call_resume(_handle);
+  /// Accept an incoming call.  With [AudioSessionMode.callFramework] on iOS,
+  /// call this once CallKit has activated the audio session.
+  Future<void> answer() => _run('answer', (a) => a.callAnswer(id));
 
-  /// True while the call is on local hold.
-  bool get isHeld => internal.nativeBindings.medut_call_is_held(_handle);
+  /// End the call; a no-op on a call that already ended.
+  Future<void> hangup() => _run('hangup', (a) => a.callHangup(id));
 
-  /// Current ICE liveness of this call's media path (see [IceState]);
-  /// [IceState.newState] for a call without ICE.
-  IceState get iceState => IceState.fromRaw(
-      internal.nativeBindings.medut_call_ice_state(_handle));
+  /// Terminate with an explicit SIP status code — for an unanswered incoming
+  /// call this sends the final response (486 "Busy Here", 603 "Decline", ...).
+  Future<void> reject({int statusCode = 486, String? reason = 'Busy Here'}) =>
+      _run('reject', (a) => a.callReject(id, statusCode, reason));
 
-  void mute({bool on = true}) =>
-      internal.nativeBindings.medut_audio_mute(_handle, on);
-  bool get isMuted => internal.nativeBindings.medut_audio_is_muted(_handle);
-  void muteRx({bool on = true}) =>
-      internal.nativeBindings.medut_audio_mute_rx(_handle, on);
+  Future<void> hold() => _run('hold', (a) => a.callHold(id));
+  Future<void> resume() => _run('resume', (a) => a.callResume(id));
+
+  /// True while the call is on hold, either side.
+  Future<bool> get isHeld => _run('isHeld', (a) => a.callIsHeld(id));
+
+  /// Current ICE liveness of this call's media path.
+  Future<IceState> get iceState => _run(
+      'iceState', (a) async => IceState.fromRaw(await a.callIceState(id)));
+
+  Future<void> mute({bool on = true}) =>
+      _run('mute', (a) => a.callSetMuted(id, on));
+  Future<bool> get isMuted => _run('isMuted', (a) => a.callIsMuted(id));
+  Future<void> muteRx({bool on = true}) =>
+      _run('muteRx', (a) => a.callSetReceiveMuted(id, on));
 
   /// digit: '0'-'9', '*', '#', 'A'-'D'.
-  void sendDtmf(String digit) {
-    internal.nativeBindings
-        .medut_call_send_dtmf(_handle, digit.codeUnitAt(0));
-  }
+  Future<void> sendDtmf(String digit) =>
+      _run('sendDtmf', (a) => a.callSendDtmf(id, digit));
 
   /// Blind transfer (REFER).
-  void transfer(String uri) {
-    final p = uri.toNativeUtf8().cast<Char>();
-    try {
-      internal.nativeBindings.medut_call_transfer(_handle, p);
-    } finally {
-      calloc.free(p);
-    }
-  }
+  Future<void> transfer(String uri) =>
+      _run('transfer', (a) => a.callTransfer(id, uri));
 
   /// Follow an incoming REFER (see [TransferRequestEvent]); returns the new
   /// call placed to the transfer target, or null if it could not be placed.
-  ///
-  /// Do not implement a transfer by hanging up and dialling: that breaks the
-  /// REFER subscription and the transferor never learns it worked. This keeps
-  /// the two calls linked so the SDK reports the outcome for you.
-  ///
   /// This call stays up; end it once the new one connects.
-  Call? transferAccept() {
-    final out = calloc<Pointer<medut_call>>();
+  Future<Call?> transferAccept() async {
     try {
-      final rc = internal.nativeBindings
-          .medut_call_transfer_accept(_handle, out);
-      if (rc != 0 || out.value == nullptr) return null;
-      return Medut.instance?._trackCall(out.value, account);
-    } finally {
-      calloc.free(out);
+      final m = await _run('transferAccept', (a) => a.callAcceptTransfer(id));
+      return _sdk._trackCall(m);
+    } on MedutException {
+      return null;
     }
   }
 
-  /// Refuse an incoming REFER, leaving this call up. Returns false if the
+  /// Refuse an incoming REFER, leaving this call up.  Returns false if the
   /// refusal could not be sent (no transfer was pending).
-  ///
-  /// [scode] is the SIP status the transferor is told, 400-699; 603 Decline is
-  /// the usual "the user said no", 486 for busy.
-  bool transferReject({int scode = 603, String reason = 'Declined'}) {
-    final p = reason.toNativeUtf8().cast<Char>();
+  Future<bool> transferReject({int scode = 603, String? reason = 'Declined'}) async {
     try {
-      return internal.nativeBindings
-          .medut_call_transfer_reject(_handle, scode, p) == 0;
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  /// Metadata about this call: peer, URIs, direction, duration. Null if it
-  /// could not be read.
-  ///
-  /// Complements [stats], which is the per-tick media numbers. Safe to call at
-  /// any point in the call's life, including after it has ended.
-  CallInfo? info() {
-    final p = calloc<medut_call_info_t>();
-    try {
-      if (internal.nativeBindings.medut_call_get_info(_handle, p) != 0) {
-        return null;
-      }
-      return CallInfo._(p.ref);
-    } finally {
-      calloc.free(p);
+      await _run('transferReject', (a) => a.callRejectTransfer(id, scode, reason));
+      return true;
+    } on MedutException {
+      return false;
     }
   }
 
   /// Attended transfer: bridge this call to [other] (REFER w/ Replaces).
-  /// `this` is the call being transferred away; [other] is the established
-  /// consultation call.
-  void attendedTransfer(Call other) {
-    internal.nativeBindings
-        .medut_call_attended_transfer(_handle, other._handle);
-  }
+  Future<void> attendedTransfer(Call other) =>
+      _run('attendedTransfer', (a) => a.callAttendedTransfer(id, other.id));
 
   /// Add a custom SIP header to subsequent requests in this dialog.
-  void addHeader(String name, String value) {
-    final np = name.toNativeUtf8().cast<Char>();
-    final vp = value.toNativeUtf8().cast<Char>();
+  Future<void> addHeader(String name, String value) =>
+      _run('addHeader', (a) => a.callAddHeader(id, name, value));
+
+  /// Metadata about this call: peer, URIs, direction, duration.  Null if it
+  /// could not be read.  After the call ends only state and duration are
+  /// still filled in.
+  Future<CallInfo?> info() async {
     try {
-      internal.nativeBindings.medut_call_add_header(_handle, np, vp);
-    } finally {
-      calloc.free(np);
-      calloc.free(vp);
+      return CallInfo._fromMessage(await _run('info', (a) => a.callInfo(id)));
+    } on MedutException {
+      return null;
     }
   }
 
-  /// Synchronously fetch current media stats for this call.
-  MediaStats? getStats() {
-    final out = calloc<medut_ev_media_stats_t>();
+  /// Current media stats for this call, or null if they could not be read.
+  Future<MediaStats?> getStats() async {
     try {
-      final err =
-          internal.nativeBindings.medut_call_get_stats(_handle, out);
-      if (err != 0) return null;
-      return _decodeStats(out.ref, this);
-    } finally {
-      calloc.free(out);
+      return MediaStats._fromMessage(
+          this, await _run('getStats', (a) => a.callStats(id)));
+    } on MedutException {
+      return null;
     }
   }
 
   /// Record both call directions mixed into one WAV file (PCM S16LE).
-  int recordStart(String path) {
-    final p = path.toNativeUtf8().cast<Char>();
-    try {
-      return internal.nativeBindings.medut_call_record_start(_handle, p);
-    } finally {
-      calloc.free(p);
-    }
-  }
+  Future<void> recordStart(String path) =>
+      _run('recordStart', (a) => a.callStartRecording(id, path));
+  Future<void> recordStop() => _run('recordStop', (a) => a.callStopRecording(id));
 
-  int recordStop() =>
-      internal.nativeBindings.medut_call_record_stop(_handle);
-
-  /// Change DSCP/TOS on the RTP socket (46 = EF voice, 0 = best effort).
-  void setDscpRtp(int dscp) {
-    internal.nativeBindings.medut_call_set_dscp_rtp(_handle, dscp);
-  }
+  /// DSCP/TOS on the RTP socket (46 = EF voice, 0 = best effort).
+  Future<void> setDscpRtp(int dscp) =>
+      _run('setDscpRtp', (a) => a.callSetDscp(id, dscp));
 
   /// End this call after [seconds] with no inbound RTP; 0 = never.
-  ///
-  /// Per-call override of `MedutConfig.rtpTimeoutSeconds`.  Only sendrecv
-  /// streams are checked, so a held call is never torn down by it.
-  int setRtpTimeout(int seconds) => internal.nativeBindings
-      .medut_call_set_rtp_timeout(_handle, seconds);
+  Future<void> setRtpTimeout(int seconds) =>
+      _run('setRtpTimeout', (a) => a.callSetRtpTimeout(id, seconds));
 
-  /// Set the audio encoder bitrate in bps; 0 restores the negotiated rate.
-  ///
-  /// Applied through the codec's encoder-update path — no re-INVITE and no
-  /// audio gap — so it does nothing for a fixed-rate codec such as G.711.
-  /// With `MedutConfig.adaptiveBitrate` on, the controller overrides this on
-  /// its next decision.
-  int setBitrate(int bitrateBps) =>
-      internal.nativeBindings.medut_call_set_bitrate(_handle, bitrateBps);
+  /// Encoder bitrate in bps; 0 restores the negotiated rate.
+  Future<void> setBitrate(int bitrateBps) =>
+      _run('setBitrate', (a) => a.callSetBitrate(id, bitrateBps));
 
-  Pointer<medut_call> get handle => _handle;
+  @override
+  String toString() => 'Call($remoteUri, $state)';
 }
 
 // ── Account ──────────────────────────────────────────────────────────────────
 
+/// A SIP account.  The native account lives in the SDK; this is a handle to
+/// it by [id].
 class Account {
-  final Pointer<medut_account> _handle;
+  /// The native account's stable id (UUID).
+  final String id;
+
+  /// This account's AOR, e.g. `sip:alice@pbx.example.com`.
+  final String aor;
   final Medut _sdk;
   final StreamController<MedutEvent> _ctrl =
       StreamController<MedutEvent>.broadcast();
 
-  Account._(this._handle, this._sdk);
+  /// Registration state from the latest registration event (or from the
+  /// native stack when this account was adopted).
+  RegState regState;
+
+  Account._(AccountMessage m, this._sdk)
+      : id = m.id,
+        aor = m.aor,
+        regState = RegState.fromRaw(m.registrationState);
 
   /// Account-scoped events (registration, this account's calls, ...).
   Stream<MedutEvent> get events => _ctrl.stream;
-
-  /// This account's AOR, e.g. `sip:alice@pbx.example.com`. Read from the
-  /// native stack, so it identifies accounts adopted by [Medut.reattached]
-  /// too — the isolate that created them is gone, but the AOR is not.
-  String get aor {
-    final buf = calloc<Uint8>(320);
-    try {
-      if (internal.nativeBindings
-              .medut_account_get_aor(_handle, buf.cast<Char>(), 320) !=
-          0) {
-        return '';
-      }
-      return buf.cast<Utf8>().toDartString();
-    } finally {
-      calloc.free(buf);
-    }
-  }
-
-  /// Current registration state as the native stack sees it. Use after
-  /// reattaching, where no [RegStateEvent] has arrived in this isolate yet.
-  RegState get regState => RegState.fromRaw(
-      internal.nativeBindings.medut_account_get_reg_state(_handle));
 
   void _add(MedutEvent ev) {
     if (!_ctrl.isClosed) _ctrl.add(ev);
   }
 
-  void register() =>
-      internal.nativeBindings.medut_account_register(_handle);
+  Future<T> _run<T>(String op, Future<T> Function(MedutHostApi api) f) =>
+      _sdk._run(op, f);
 
-  void unregister() =>
-      internal.nativeBindings.medut_account_unregister(_handle);
+  Future<void> register() => _run('register', (a) => a.accountRegister(id));
+  Future<void> unregister() => _run('unregister', (a) => a.accountUnregister(id));
 
-  /// Start an outgoing call.
-  Call call(String uri) {
-    final uriPtr = uri.toNativeUtf8().cast<Char>();
-    final out = calloc<Pointer<medut_call>>();
-    // Claim the voice audio session before the INVITE: the native side opens
-    // the audio devices when media starts, and on Android their routing is
-    // fixed at that moment (see Medut._audioSession).
-    unawaited(_sdk._audioSession(true));
-    try {
-      final err = internal.nativeBindings
-          .medut_call_invite(_handle, uriPtr, out);
-      if (err != 0 || out.value == nullptr) {
-        if (_sdk._calls.isEmpty) unawaited(_sdk._audioSession(false));
-        throw StateError(
-            'medut_call_invite failed: ${_sdk.strerror(err)} ($err)');
-      }
-      return _sdk._trackCall(out.value, this);
-    } finally {
-      calloc.free(out);
-      calloc.free(uriPtr);
-    }
+  /// Read the registration state from the native stack now.
+  Future<RegState> refreshRegState() async {
+    regState = RegState.fromRaw(
+        await _run('regState', (a) => a.accountRegistrationState(id)));
+    return regState;
   }
 
-  // ── Registration retry / reconnection ──────────────────────────────────
+  /// Start an outgoing call.
+  Future<Call> call(String uri) async =>
+      _sdk._trackCall(await _run('call', (a) => a.accountCall(id, uri)));
 
-  /// Override the retry/backoff policy for this account.
-  /// [maxAttempts] 0 = retry forever.
-  int setRetryPolicy({
+  /// Override the retry/backoff policy; [maxAttempts] 0 = retry forever.
+  Future<void> setRetryPolicy({
     required int initialMs,
     required int maxMs,
     required double backoff,
     int maxAttempts = 0,
   }) =>
-      internal.nativeBindings.medut_account_set_retry_policy(
-          _handle, initialMs, maxMs, backoff, maxAttempts);
+      _run('setRetryPolicy',
+          (a) => a.accountSetRetryPolicy(id, initialMs, maxMs, backoff, maxAttempts));
 
-  /// Cancel a pending retry timer.  An account that was
-  /// [RegState.reconnecting] reports [RegState.failed] — the SDK is no longer
-  /// recovering it — and stays there until [register].
-  int cancelRetry() =>
-      internal.nativeBindings.medut_account_cancel_retry(_handle);
+  /// Cancel a pending retry.  A reconnecting account reports
+  /// [RegState.failed] and stays there until [register].
+  Future<void> cancelRetry() => _run('cancelRetry', (a) => a.accountCancelRetry(id));
 
-  /// Skip the current backoff delay and re-register immediately.
-  int retryNow() =>
-      internal.nativeBindings.medut_account_retry_now(_handle);
+  /// Skip the backoff delay and re-register now.
+  Future<void> retryNow() => _run('retryNow', (a) => a.accountRetryNow(id));
 
-  /// Replace this account's STUN/TURN list and transport policy.
-  ///
-  /// Takes effect on the next gather — a new call, or the re-gather of an
-  /// ICE restart on a live call — which is how short-lived TURN credentials
-  /// are refreshed without re-creating the account.  An empty list clears the
-  /// per-account list so the global one applies again.
-  int setIceServers(List<IceServer> servers,
-      {IceTransportPolicy policy = IceTransportPolicy.all}) {
-    final scope = NativeScope();
-    try {
-      return internal.nativeBindings.medut_account_set_ice_servers(
-          _handle, scope.iceServers(servers), servers.length, policy.raw);
-    } finally {
-      scope.free();
-    }
-  }
+  /// Send a reachability probe (SIP OPTIONS) now, e.g. on a push wake before
+  /// placing a call.
+  Future<void> keepaliveNow() =>
+      _run('keepaliveNow', (a) => a.accountKeepaliveNow(id));
 
-  /// Send a reachability probe (SIP OPTIONS) for this account now.
-  ///
-  /// Worth calling when the app returns to the foreground or wakes on a push:
-  /// it answers "is my registration still reachable?" before the user tries to
-  /// place a call.  Nothing is reported on success — except when it recovers a
-  /// path we had reported as gone, which comes back as `RegState.registered`.
-  /// On failure the account goes to `RegState.reconnecting` and, with
-  /// `MedutConfig.keepaliveReregister`, re-registers.
-  int keepaliveNow() =>
-      internal.nativeBindings.medut_account_keepalive_now(_handle);
+  /// Update the RFC 8599 push token; null clears the push params.
+  Future<void> setPushToken(String? token) =>
+      _run('setPushToken', (a) => a.accountSetPushToken(id, token));
 
-  // ── Push ────────────────────────────────────────────────────────────────
-
-  /// Update the RFC 8599 push token at runtime; null clears push params.
-  int setPushToken(String? token) {
-    final p = token == null
-        ? Pointer<Char>.fromAddress(0)
-        : token.toNativeUtf8().cast<Char>();
-    try {
-      return internal.nativeBindings
-          .medut_account_set_push_token(_handle, p);
-    } finally {
-      if (p.address != 0) calloc.free(p);
-    }
-  }
-
-  // ── Custom headers ─────────────────────────────────────────────────────
+  /// Replace this account's STUN/TURN list; an empty list falls back to the
+  /// global one.  Reaches the next gather (a new call or an ICE restart).
+  Future<void> setIceServers(List<IceServer> servers,
+          {IceTransportPolicy policy = IceTransportPolicy.all}) =>
+      _run(
+          'setIceServers',
+          (a) => a.accountSetIceServers(
+              id, servers.map((s) => s._toMessage()).toList(), policy.raw));
 
   /// Header on all outgoing requests for this account.
-  void addHeader(String name, String value) =>
-      _withHeader(name, value, internal.nativeBindings.medut_account_add_header);
+  Future<void> addHeader(String name, String value) =>
+      _run('addHeader', (a) => a.accountAddHeader(id, name, value));
 
   /// Header on REGISTER only (not leaked to call peers).
-  void addRegisterHeader(String name, String value) => _withHeader(
-      name, value, internal.nativeBindings.medut_account_add_register_header);
+  Future<void> addRegisterHeader(String name, String value) =>
+      _run('addRegisterHeader', (a) => a.accountAddRegisterHeader(id, name, value));
 
-  void _withHeader(String name, String value,
-      int Function(Pointer<medut_account>, Pointer<Char>, Pointer<Char>) f) {
-    final np = name.toNativeUtf8().cast<Char>();
-    final vp = value.toNativeUtf8().cast<Char>();
-    try {
-      f(_handle, np, vp);
-    } finally {
-      calloc.free(np);
-      calloc.free(vp);
-    }
+  Future<void> sendMessage(String to, String body,
+          {String contentType = 'text/plain'}) =>
+      _run('sendMessage', (a) => a.accountSendMessage(id, to, body, contentType));
+
+  Future<void> subscribePresence(String targetUri) =>
+      _run('subscribePresence', (a) => a.accountSubscribePresence(id, targetUri));
+
+  Future<void> unsubscribePresence(String targetUri) => _run(
+      'unsubscribePresence', (a) => a.accountUnsubscribePresence(id, targetUri));
+
+  Future<void> publishPresence(PresenceStatus status) =>
+      _run('publishPresence', (a) => a.accountPublishPresence(id, status.raw));
+
+  /// Unregister and free the account, ending its calls.
+  Future<void> destroy() async {
+    await _run('destroy', (a) => a.accountDestroy(id));
+    _sdk._accounts.remove(id);
+    await _ctrl.close();
   }
 
-  // ── Messaging / presence ───────────────────────────────────────────────
-
-  void sendMessage(String to, String body,
-      {String contentType = 'text/plain'}) {
-    final tp = to.toNativeUtf8().cast<Char>();
-    final bp = body.toNativeUtf8().cast<Char>();
-    final cp = contentType.toNativeUtf8().cast<Char>();
-    try {
-      internal.nativeBindings.medut_message_send(_handle, tp, bp, cp);
-    } finally {
-      calloc.free(tp);
-      calloc.free(bp);
-      calloc.free(cp);
-    }
-  }
-
-  int subscribePresence(String targetUri) =>
-      _withUri(targetUri,
-          internal.nativeBindings.medut_account_subscribe_presence);
-
-  int unsubscribePresence(String targetUri) =>
-      _withUri(targetUri,
-          internal.nativeBindings.medut_account_unsubscribe_presence);
-
-  int publishPresence(PresenceStatus status) => internal.nativeBindings
-      .medut_account_publish_presence(_handle, status.raw);
-
-  int _withUri(String uri,
-      int Function(Pointer<medut_account>, Pointer<Char>) f) {
-    final p = uri.toNativeUtf8().cast<Char>();
-    try {
-      return f(_handle, p);
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  void destroy() {
-    internal.nativeBindings.medut_account_destroy(_handle);
-    _sdk._accounts.remove(_handle.address);
-    _ctrl.close();
-  }
+  @override
+  String toString() => 'Account($aor)';
 }
 
 // ── SDK ──────────────────────────────────────────────────────────────────────
 
-/// Global event trampoline — must be static/top-level for NativeCallable.
-void _cEventCb(Pointer<medut_event_t> ev, Pointer<Void> ud) {
-  final sdk = Medut._instance;
-  if (sdk == null) {
-    // SDK torn down while events were in flight — still must release.
-    internal.nativeBindings.medut_event_release(ev);
-    return;
-  }
-  sdk._dispatchEvent(ev);
-}
-
 class Medut {
   static Medut? _instance;
 
-  /// The live instance, if [Medut] has been started.
+  /// The live instance, once [start] completed.
   static Medut? get instance => _instance;
 
-  final Map<int, Account> _accounts = {};
-  final Map<int, Call> _calls = {};
-  bool _multipath = false;
+  final MedutHostApi _api;
+  final Map<String, Account> _accounts = {};
+  final Map<String, Call> _calls = {};
   final StreamController<MedutEvent> _ctrl =
       StreamController<MedutEvent>.broadcast();
-  late final NativeCallable<
-          Void Function(Pointer<medut_event_t>, Pointer<Void>)> _nativeCb;
-  final bool _manageAudioSession;
-  bool _audioSessionActive = false;
+  final StreamController<List<AudioRoute>> _routes =
+      StreamController<List<AudioRoute>>.broadcast();
+  final StreamController<AppOwnedAudioError> _appOwnedAudioErrors =
+      StreamController<AppOwnedAudioError>.broadcast();
 
-  /// Whether the app owns the microphone and speaker. Drives whether
-  /// [_audioSession] also starts and stops the native realtime loops.
-  bool _appOwnedAudio = false;
-  StreamController<AppOwnedAudioError>? _appOwnedAudioErrors;
   bool _reattached = false;
+  String _version = '';
+
+  Medut._(this._api);
 
   /// Every event from the stack, including the ones that belong to no
-  /// account (network handover, log). Account-scoped events also continue
-  /// to arrive on [Account.events].
+  /// account (network handover, log).  Account-scoped events also arrive on
+  /// [Account.events].
   Stream<MedutEvent> get events => _ctrl.stream;
 
-  /// True when this instance adopted a stack that was already running in the
-  /// process rather than starting one — see [Medut.start].
-  ///
-  /// What carried over: the accounts (in [accounts], with their registrations
-  /// intact) and any live call (in [calls], with its real [Call.state]).
-  ///
-  /// What did not: the [MedutConfig] passed to [start] was **ignored**.
-  /// Config applies at `medut_init` and the stack is past that; changing it
-  /// requires [shutdown] and a fresh start. Events that fired while no isolate
-  /// was listening are also gone — read state off the adopted objects instead
-  /// of waiting for events that already happened.
+  /// True when the native stack was already running — started by the app at
+  /// launch or from a push — and this instance attached to it.  Its accounts
+  /// and calls are in [accounts] and [calls]; [start]'s config was not used.
   bool get reattached => _reattached;
 
-  /// The accounts this instance knows about — created here, or adopted from a
-  /// previous consumer when [reattached].
+  /// Native library version.
+  String get version => _version;
+
   Iterable<Account> get accounts => _accounts.values;
 
-  /// The calls currently tracked, including any adopted when [reattached].
+  /// Live calls.
   Iterable<Call> get calls => _calls.values;
 
-  /// Start the SDK — the recommended entry point.
+  /// Start the native stack, or attach to the one already running.
   ///
-  /// On Android and iOS this additionally:
-  ///  - fills `tmp_dir` with a writable app directory (required on Android),
-  ///  - forces `netMonitorIntervalSeconds: 0` and instead drives handover
-  ///    from OS connectivity callbacks (ConnectivityManager / NWPathMonitor),
-  ///  - manages the voice audio session around calls (Android: audio focus +
-  ///    MODE_IN_COMMUNICATION; iOS: AVAudioSession activation) —
-  ///    disable with [manageAudioSession] = false when the app owns it
-  ///    (e.g. CallKit's `didActivate audioSession`).
-  ///
-  /// If the native stack is already running in this process but this isolate
-  /// never started it — an Android headless engine woken by a second push, the
-  /// Dart isolate from the first wakeup long gone — this reattaches to the live
-  /// stack instead of failing, and [reattached] is true on the result. See
-  /// [reattached] for what that does and does not carry over; pass
-  /// [reattachIfRunning] = false to get the old hard failure instead.
-  /// How long after a fresh [start] the platform monitor's report of the
-  /// current network is treated as the initial report rather than a change.
-  /// Both platforms deliver it well inside a second; the window only has to
-  /// outlast that, and anything it could swallow is a genuine switch in the
-  /// first moments of a process — which the native monitor's own polling and
-  /// the next REGISTER refresh recover from anyway.
-  static const Duration _initialNetworkReportWindow = Duration(seconds: 2);
-
+  /// [audioSession] says who activates call audio (see [AudioSessionMode]).
+  /// [monitorNetwork] lets the SDK drive network handover from the OS
+  /// connectivity callback.
   static Future<Medut> start({
     MedutConfig config = const MedutConfig(),
-    bool manageAudioSession = true,
-    String? libPath,
-    bool reattachIfRunning = true,
+    AudioSessionMode audioSession = AudioSessionMode.automatic,
+    bool monitorNetwork = true,
   }) async {
-    MedutPlatform.ensureHandler();
-    final cacheDir = await MedutPlatform.getCacheDir();
-    if (cacheDir != null) {
-      config = config.copyWith(
-        tmpDir: config.tmpDir ?? cacheDir,
-        // OS connectivity callbacks replace polling on Android.
-        netMonitorIntervalSeconds: 0,
-      );
+    final existing = _instance;
+    if (existing != null) return existing;
+
+    final sdk = Medut._(MedutHostApi());
+    // Listen first, so no event that fires while the stack starts is lost.
+    MedutEventsApi.setUp(_EventSink(sdk));
+    final StartResultMessage result;
+    try {
+      result = await sdk._run(
+          'start',
+          (a) => a.start(
+              config._toMessage(),
+              StartOptionsMessage(
+                monitorNetwork: monitorNetwork,
+                audioMode: audioSession.index,
+                appOwnedAudio: config.appOwnedAudio,
+              )));
+    } catch (_) {
+      MedutEventsApi.setUp(null);
+      rethrow;
     }
-    final sdk = Medut._(config, manageAudioSession, libPath,
-        reattachIfRunning: reattachIfRunning);
-    // Both platform monitors report the CURRENT network to a freshly registered
-    // callback — Android's registerDefaultNetworkCallback() delivers the default
-    // network immediately, NWPathMonitor fires once after start() — and both
-    // plugins forward that first report as a change. On a FRESH stack it is not
-    // one: the transports were built on this very network moments ago, and the
-    // "handover" it triggers is a transport reset ~1.5s after the first REGISTER
-    // plus a re-REGISTER, exactly when an incoming call's INVITE is arriving
-    // (on-device 2026-09-14, every cold boot: `changeDetected` 3ms after
-    // REGISTERED, `transportReset` at 1.5s, INVITE 1s after that, no media).
-    //
-    // On a REATTACHED stack the same report is worth keeping: the native side
-    // may be holding a cached WSS connection that died while no isolate was
-    // listening, and this report is what finds it. It is cheap when nothing
-    // died — with the address set unchanged, the native side only probes the
-    // existing connection and hands over just if the probe goes unanswered
-    // (medut_network_changed in medut.h). Gated here rather than in the
-    // plugins because this is the only layer that knows which case it is.
-    // A window, not "drop the first callback": Android delivers no initial
-    // report when there is no network at start, and a later real change must
-    // not be the one that gets swallowed.
-    final startedAt = DateTime.now();
-    MedutPlatform.onNetworkChanged = () {
-      if (!sdk.reattached &&
-          DateTime.now().difference(startedAt) < _initialNetworkReportWindow) {
-        return;
-      }
-      sdk.networkChanged();
-    };
-    if (config.iceMultipath) {
-      sdk._multipath = true;
-      MedutPlatform.onInterfaceHandle = (ifname, handle) {
-        if (handle == null) {
-          sdk.networkClearInterfaceHandle(ifname);
-        } else {
-          sdk.networkSetInterfaceHandle(ifname, handle);
-        }
-      };
-      // Held for the SDK's lifetime, not per call: the first ICE generation
-      // of a call is built before any call state is reported, and only a
-      // port that already exists then can be carried into the handover's
-      // restart with its reflexive address. Android keeps the modem
-      // attached while the request is held (some battery and data while
-      // registered); released on dispose/shutdown.
-      unawaited(MedutPlatform.setCellularRequested(true));
+    sdk._reattached = result.reattached;
+    sdk._version = result.version;
+    for (final a in result.accounts) {
+      sdk._trackAccount(a);
     }
-    // Applied after init, not through medut_config_t: the device switch is a
-    // runtime call, and there is no config field for it.
-    if (config.appOwnedAudio) await sdk.useAppOwnedAudio(true);
+    for (final c in result.calls) {
+      sdk._trackCall(c);
+    }
+    _instance = sdk;
     return sdk;
   }
 
-  /// Synchronous constructor for desktop platforms (Linux/Windows/macOS).
-  ///
-  /// On Android use [Medut.start] instead — it provides the required
-  /// `tmp_dir` and wires connectivity callbacks. Constructing this directly
-  /// on Android without [MedutConfig.tmpDir] throws.
-  factory Medut({
-    MedutConfig config = const MedutConfig(),
-    String? libPath,
-    bool reattachIfRunning = true,
-  }) =>
-      Medut._(config, false, libPath,
-          reattachIfRunning: reattachIfRunning);
-
-  Medut._(MedutConfig config, this._manageAudioSession, String? libPath,
-      {bool reattachIfRunning = true}) {
-    if (_instance != null) {
-      throw StateError(
-          'Medut is already running (the native stack is a process-wide '
-          'singleton). Call shutdown() first.');
-    }
-    if (libPath != null) internal.setLibPath(libPath);
-
-    _nativeCb = NativeCallable<
-        Void Function(Pointer<medut_event_t>, Pointer<Void>)>.listener(
-      _cEventCb,
-    );
-
-    // The stack lives in the process; this isolate may not have been the one
-    // that started it. Reattach rather than re-init — medut_init() on a live
-    // stack fails with ERR_ALREADY, and there is nothing to re-initialize:
-    // the registrations, and any call that arrived while no isolate was
-    // listening, are still up.
-    if (reattachIfRunning && internal.nativeBindings.medut_is_initialized()) {
-      _reattach();
-      return;
-    }
-
-    final cfg = calloc<medut_config_t>();
-    final scope = fillNativeConfig(cfg, config, internal.nativeBindings);
-    // Layout guard: medut_config_init (C) wrote its compile-time
-    // sizeof into struct_size. If the ffigen-generated struct disagrees,
-    // field offsets have drifted (e.g. a packed enum widened) and every
-    // config write after the drift lands in the wrong place.
-    if (cfg.ref.struct_size != sizeOf<medut_config_t>()) {
-      final cSize = cfg.ref.struct_size;
-      scope.free();
-      calloc.free(cfg);
-      _nativeCb.close();
-      throw StateError(
-          'medut_config_t layout mismatch: native $cSize bytes vs Dart '
-          '${sizeOf<medut_config_t>()} — regenerate ffi_bindings.dart '
-          '(dart run ffigen) against the native library medut.h.');
-    }
-    // The callback runs asynchronously (NativeCallable.listener), so the
-    // native side must hand over event ownership; we release in _dispatch.
-    cfg.ref.deliver_owned_events = true;
-    cfg.ref.event_cb = _nativeCb.nativeFunction;
-    cfg.ref.event_userdata = nullptr;
-    final err = internal.nativeBindings.medut_init(cfg);
-    scope.free();
-    calloc.free(cfg);
-    if (err != 0) {
-      _nativeCb.close();
-      throw StateError('medut_init failed: ${strerror(err)} ($err)');
-    }
-    _instance = this;
-  }
-
-  /// Take over event delivery from the consumer that started the stack, and
-  /// adopt the accounts and calls it left behind.
-  void _reattach() {
-    final b = internal.nativeBindings;
-
-    // Publish the instance before installing the handler: _cEventCb routes
-    // through Medut.instance, and an event that lands in the gap would be
-    // released and dropped rather than delivered.
-    _instance = this;
-    final err =
-        b.medut_set_event_handler(_nativeCb.nativeFunction, nullptr, true);
-    if (err != 0) {
-      _instance = null;
-      _nativeCb.close();
-      throw StateError(
-          'medut_set_event_handler failed: ${strerror(err)} ($err)');
-    }
-    _reattached = true;
-
-    // Accounts before calls — a call resolves its owner out of _accounts.
-    for (final h in _liveAccountHandles()) {
-      _accounts[h.address] = Account._(h, this);
-    }
-    for (final h in _liveCallHandles()) {
-      final acct = b.medut_call_get_account(h);
-      final call = _trackCall(h, acct == nullptr ? null : _accounts[acct.address]);
-      // A call that arrived while no isolate was listening is already past
-      // CALLING; take the state from the stack, not from the default.
-      call.state = CallState.fromRaw(b.medut_call_get_state(h));
-    }
-  }
-
-  List<Pointer<medut_account>> _liveAccountHandles() {
-    final found = <Pointer<medut_account>>[];
-    // isolateLocal: medut_account_foreach calls back synchronously on this
-    // thread, and returns before the handles can go stale.
-    final cb = NativeCallable<
-            Void Function(Pointer<medut_account>, Pointer<Void>)>.isolateLocal(
-        (Pointer<medut_account> acct, Pointer<Void> _) => found.add(acct));
-    try {
-      internal.nativeBindings
-          .medut_account_foreach(cb.nativeFunction, nullptr);
-    } finally {
-      cb.close();
-    }
-    return found;
-  }
-
-  List<Pointer<medut_call>> _liveCallHandles() {
-    final found = <Pointer<medut_call>>[];
-    final cb = NativeCallable<
-            Void Function(Pointer<medut_call>, Pointer<Void>)>.isolateLocal(
-        (Pointer<medut_call> call, Pointer<Void> _) => found.add(call));
-    try {
-      internal.nativeBindings.medut_call_foreach(cb.nativeFunction, nullptr);
-    } finally {
-      cb.close();
-    }
-    return found;
-  }
-
-  String get version =>
-      internal.nativeBindings.medut_version().cast<Utf8>().toDartString();
-
-  /// Human-readable message for a MEDUT_ERR_* code.
-  String strerror(int err) =>
-      internal.nativeBindings.medut_strerror(err).cast<Utf8>().toDartString();
-
-  /// Create a SIP account. Registration starts when you call
-  /// [Account.register].
-  Account createAccount(String uri, String password,
-      {AccountConfig config = const AccountConfig()}) {
-    final cfg = calloc<medut_account_config_t>();
-    final out = calloc<Pointer<medut_account>>();
-    final scope = fillNativeAccountConfig(cfg, uri, password, config);
-    try {
-      final err =
-          internal.nativeBindings.medut_account_create(cfg, out);
-      if (err != 0) {
-        throw StateError(
-            'medut_account_create failed: ${strerror(err)} ($err)');
-      }
-      final handle = out.value;
-      final account = Account._(handle, this);
-      _accounts[handle.address] = account;
-      return account;
-    } finally {
-      scope.free();
-      calloc.free(out);
-      calloc.free(cfg);
-    }
-  }
-
-  // ── Audio devices & processing ──────────────────────────────────────────
-
-  List<AudioDevice> listInputDevices() =>
-      _listDevices(internal.nativeBindings.medut_audio_list_input_devices);
-  List<AudioDevice> listOutputDevices() =>
-      _listDevices(internal.nativeBindings.medut_audio_list_output_devices);
-
-  List<AudioDevice> _listDevices(
-      int Function(Pointer<medut_audio_device_t>, int) fn) {
-    final buf = calloc<medut_audio_device_t>(32);
-    try {
-      final n = fn(buf, 32);
-      final out = <AudioDevice>[];
-      for (var i = 0; i < n; i++) {
-        final d = buf[i];
-        final name = StringBuffer();
-        final desc = StringBuffer();
-        for (var j = 0; j < 128 && d.name[j] != 0; j++) {
-          name.writeCharCode(d.name[j]);
-        }
-        for (var j = 0; j < 256 && d.description[j] != 0; j++) {
-          desc.writeCharCode(d.description[j]);
-        }
-        out.add(AudioDevice(name.toString(), desc.toString(), d.is_default));
-      }
-      return out;
-    } finally {
-      calloc.free(buf);
-    }
-  }
-
-  /// Select audio input device by name; null = platform default.
-  int setInputDevice(String? name) =>
-      _withOptStr(name, internal.nativeBindings.medut_audio_set_input_device);
-
-  /// Select audio output device by name; null = platform default.
-  int setOutputDevice(String? name) => _withOptStr(
-      name, internal.nativeBindings.medut_audio_set_output_device);
-
-  int _withOptStr(String? s, int Function(Pointer<Char>) f) {
-    if (s == null) return f(nullptr);
-    final p = s.toNativeUtf8().cast<Char>();
-    try {
-      return f(p);
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  /// Echo control on or off: back to the mode [Medut.init] settled on, or
-  /// off. Not a request for the suppressor on an app-owned device — that is
-  /// [setAecMode].
-  void setAec(bool enable) => internal.nativeBindings.medut_set_aec(enable);
-
-  /// Switch echo control between [AecMode.off] and the mode init chose; any
-  /// other switch needs a re-init and returns EINVAL ([AecMode.webrtc] returns
-  /// ENOTSUP on a build without it). While the app owns the audio device
-  /// ([useAppOwnedAudio]), `setAecMode(AecMode.suppressor)` is the one way to
-  /// ask for the SDK's half-duplex suppressor there; it lapses when the SDK's
-  /// own device comes back. Returns 0 or an errno.
-  int setAecMode(AecMode mode) =>
-      internal.nativeBindings.medut_set_aec_mode(mode.raw);
-  void setNs(bool enable) => internal.nativeBindings.medut_set_ns(enable);
-  void setAgc(bool enable) => internal.nativeBindings.medut_set_agc(enable);
-  void setAecSuppressionLevel(double level) =>
-      internal.nativeBindings.medut_set_aec_suppression_level(level);
-  void setMicGainDb(double db) =>
-      internal.nativeBindings.medut_set_mic_gain_db(db);
-  void setSpeakerGainDb(double db) =>
-      internal.nativeBindings.medut_set_speaker_gain_db(db);
-
-  void setJitterBuffer(int minMs, int maxMs) =>
-      internal.nativeBindings.medut_set_jitter_buffer(minMs, maxMs);
-  void setJitterBufferType(JitterBufferType type) =>
-      internal.nativeBindings.medut_set_jitter_buffer_type(type.raw);
-
-  /// Turn link-adaptive bitrate on or off at runtime, with optional bounds in
-  /// bps (0 keeps the configured value).  Disabling leaves every call at its
-  /// current rate; use [Call.setBitrate] with 0 to restore the negotiated one.
-  void setAdaptiveBitrate(bool enabled, {int minBps = 0, int maxBps = 0}) =>
-      internal.nativeBindings
-          .medut_set_adaptive_bitrate(enabled, minBps, maxBps);
-
-  /// Route audio to the loudspeaker (true) or back to the best non-speaker
-  /// route (false — Bluetooth, then wired, then earpiece). Android + iOS;
-  /// no-op on desktop. Sugar over [setAudioRoute].
-  Future<void> setSpeakerphone(bool on) =>
-      MedutPlatform.setSpeakerphone(on);
-
-  // ── App-owned audio device ──────────────────────────────────────────────
-  //
-  // Takes the SDK off the platform capture/playback device so the app owns the
-  // microphone and speaker, while SIP, ICE, SRTP, codecs and the jitter buffer
-  // stay here. Use it when the platform fights the SDK's own drivers — routing
-  // that will not follow Bluetooth, CallKit owning the session, one-way audio.
-  //
-  // The realtime PCM loop belongs in the NATIVE layer — Kotlin over JNI, Swift
-  // calling the C directly — never in Dart: a GC pause on the capture path is
-  // a dropped frame. Dart's job is to flip the mode and read the format;
-  // push/pull are not exposed here on purpose.
-  //
-  // Owning the device means owning echo cancellation too: capture through
-  // VOICE_COMMUNICATION (Android) or VoiceProcessingIO (iOS), because the
-  // cancellers the SDK relied on belong to the drivers being displaced.
-
-  /// Hand the microphone and speaker to the app; `false` gives them back.
-  ///
-  /// Takes effect immediately, including on a call that is already up. Not
-  /// sticky across [shutdown] — call it again after a restart.
-  ///
-  /// Throws [StateError] if the stack is not running. That is worth failing
-  /// loudly on rather than ignoring: an app that misses it starts its own
-  /// capture while the SDK still holds the microphone, and Android gives you
-  /// one-way audio for it.
-  Future<void> useAppOwnedAudio(bool enable) async {
-    final err = internal.nativeBindings.medut_audio_use_external(enable);
-    if (err != 0) {
-      throw StateError(
-          'medut_audio_use_external($enable) failed: '
-          '${strerror(err)} ($err)');
-    }
-    _appOwnedAudio = enable;
-
-    // Only touch the loops when a session is already up — otherwise
-    // [_audioSession] starts them at the right point in the call sequence,
-    // after focus and MODE_IN_COMMUNICATION are in force.
-    if (_audioSessionActive) {
-      if (enable) {
-        await MedutPlatform.startAppOwnedAudio();
-      } else {
-        await MedutPlatform.stopAppOwnedAudio();
-      }
-    }
-  }
-
-  /// iOS + CallKit: forward `provider(_:didActivate:)` /
-  /// `provider(_:didDeactivate:)` so the app-owned audio engine knows when the
-  /// session is usable.
-  ///
-  /// Only needed by hosts that own activation themselves — `CXProvider` apps
-  /// running with `platformAudioActivate: false` and
-  /// `manageAudioSession: false`. Everyone else gets this from the SDK's own
-  /// session handling. No-op on Android and desktop.
-  Future<void> notifyCallKitAudioActive(bool active) =>
-      MedutPlatform.notifyCallKitAudioActive(active);
-
-  /// Diagnostics from the native audio engine — `armed`, `running`,
-  /// `sampleRate`, `channels`, `ptimeMs`, `lastError`. Empty on desktop, where
-  /// the loops are the app's own business.
-  Future<Map<String, Object?>> appOwnedAudioStatus() =>
-      MedutPlatform.appOwnedAudioStatus();
-
-  /// Failures from the native audio engine — missing mic permission, a
-  /// negotiated rate the device will not open, a dead stream. Nothing else
-  /// reports these: the SDK is no longer holding the device, so its own error
-  /// paths cannot see them.
-  Stream<AppOwnedAudioError> get appOwnedAudioErrors {
-    final ctrl = _appOwnedAudioErrors ??=
-        StreamController<AppOwnedAudioError>.broadcast(
-      onCancel: () => MedutPlatform.onAppOwnedAudioError = null,
-    );
-    MedutPlatform.ensureHandler();
-    MedutPlatform.onAppOwnedAudioError =
-        (code, message) => ctrl.add(AppOwnedAudioError(code, message));
-    return ctrl.stream;
-  }
-
-  /// True while a call is actually capturing or playing through the app-owned
-  /// device — false between calls, even with the mode on.
-  bool get appOwnedAudioActive =>
-      internal.nativeBindings.medut_audio_external_is_active();
-
-  /// The format the current call negotiated, or null until it has media.
-  ///
-  /// There is no "media is up" event to wait on — [CallState.established] is a
-  /// SIP state and races the device, and a mid-call re-INVITE can change the
-  /// codec with no state change at all — so poll this to learn both that the
-  /// device opened and that its format changed.
-  ExternalAudioFormat? get appOwnedAudioFormat {
-    final srate = calloc<Uint32>();
-    final ch = calloc<Uint8>();
-    final ptime = calloc<Uint32>();
-    try {
-      final err = internal.nativeBindings
-          .medut_audio_external_format(srate, ch, ptime);
-      if (err != 0) return null;
-      return ExternalAudioFormat(srate.value, ch.value, ptime.value);
-    } finally {
-      calloc.free(srate);
-      calloc.free(ch);
-      calloc.free(ptime);
-    }
-  }
-
-  // ── Audio routes (mobile) ───────────────────────────────────────────────
-  //
-  // These delegate to the platform shim and also work WITHOUT a running
-  // stack (see MedutPlatform) — instance sugar lives here because a
-  // softphone built on Medut almost always wants them next to the calls.
-
-  /// The audio-output routes the system currently offers for a call
-  /// (earpiece / speaker / Bluetooth / wired). Empty on desktop — use
-  /// [listOutputDevices] there.
-  Future<List<AudioRoute>> listAudioRoutes() =>
-      MedutPlatform.listAudioRoutes();
-
-  /// Point call audio at a route from [listAudioRoutes]. Returns the
-  /// refreshed list — the route ACTUALLY in force (selection can fail or
-  /// complete asynchronously; watch [audioRoutes] for the settle).
-  Future<List<AudioRoute>> setAudioRoute(String id) =>
-      MedutPlatform.setAudioRoute(id);
-
-  /// Report-only mode for hosts whose call surface owns routing (Android
-  /// self-managed Telecom, CallKit). Enumeration and change events keep
-  /// flowing; selection stops applying.
-  Future<void> setExternalRouting(bool on) =>
-      MedutPlatform.setExternalRouting(on);
-
-  /// Route-set changes, pushed by the platform (headset plugged/unplugged,
-  /// Bluetooth connected, system-initiated moves). Each event carries the
-  /// fresh route list.
-  Stream<List<AudioRoute>> get audioRoutes {
-    _audioRoutesController ??= StreamController<List<AudioRoute>>.broadcast(
-      onListen: () {
-        MedutPlatform.onAudioRoutesChanged = () async {
-          _audioRoutesController?.add(await MedutPlatform.listAudioRoutes());
-        };
-      },
-      onCancel: () => MedutPlatform.onAudioRoutesChanged = null,
-    );
-    return _audioRoutesController!.stream;
-  }
-
-  StreamController<List<AudioRoute>>? _audioRoutesController;
-
-  // ── pcap ────────────────────────────────────────────────────────────────
-
-  int pcapStart(String path) {
-    final p = path.toNativeUtf8().cast<Char>();
-    try {
-      return internal.nativeBindings.medut_pcap_start(p);
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  int pcapStop() => internal.nativeBindings.medut_pcap_stop();
-
-  // ── Network handover (Wi-Fi <-> 4G/5G) ─────────────────────────────────
-
-  /// Tell the SDK the network may have changed. Safe from any thread.
-  /// On Android [Medut.start] wires this to ConnectivityManager already.
-  int networkChanged() => internal.nativeBindings.medut_network_changed();
-
-  /// Tell the SDK that interface [ifname] belongs to platform network
-  /// [handle] (Android `Network.getNetworkHandle()`), so ICE can gather on it
-  /// with sockets pinned to that network.  Wired automatically on Android
-  /// when [MedutConfig.iceMultipath] is on.
-  int networkSetInterfaceHandle(String ifname, int handle) {
-    final p = ifname.toNativeUtf8().cast<Char>();
-    try {
-      return internal.nativeBindings
-          .medut_network_set_interface_handle(p, handle);
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  /// Forget the handle recorded for [ifname].
-  int networkClearInterfaceHandle(String ifname) {
-    final p = ifname.toNativeUtf8().cast<Char>();
-    try {
-      return internal.nativeBindings.medut_network_clear_interface_handle(p);
-    } finally {
-      calloc.free(p);
-    }
-  }
-
-  /// Interface poll period in seconds; 0 disables polling.
-  int networkSetMonitorInterval(int seconds) =>
-      internal.nativeBindings.medut_network_set_monitor_interval(seconds);
-
-  /// Re-INVITE active calls on handover; optionally hang up on failure.
-  int networkSetHandoverPolicy(bool reinviteCalls, bool hangupOnFailure) =>
-      internal.nativeBindings
-          .medut_network_set_handover_policy(reinviteCalls, hangupOnFailure);
-
-  /// Local IP currently in use, or '' when the device has no address.
-  String networkLocalAddr() {
-    final buf = calloc<Uint8>(64);
-    try {
-      if (internal.nativeBindings
-              .medut_network_local_addr(buf.cast<Char>(), 64) !=
-          0) {
-        return '';
-      }
-      return buf.cast<Utf8>().toDartString();
-    } finally {
-      calloc.free(buf);
-    }
-  }
-
-  /// False while the device has no usable (non-loopback) local address.
-  bool networkIsUp() => internal.nativeBindings.medut_network_is_up();
-
-  /// Stop delivering events to this isolate, leaving the native stack running.
-  ///
-  /// The counterpart to the reattach in [Medut.start]: accounts stay
-  /// registered and reachable by push, calls stay up, and a later isolate picks
-  /// the stack back up with `Medut.start()`. Use it when a background isolate
-  /// is about to go away — an Android headless engine finishing its task — so
-  /// events are not fired at a callback whose isolate is being torn down.
-  ///
-  /// This instance is unusable afterwards; call [shutdown] instead when you
-  /// want the stack itself gone.
+  /// Stop listening, leaving the native stack running (registered, calls
+  /// up).  The next [start] attaches again.
   void detach() {
-    internal.nativeBindings.medut_set_event_handler(nullptr, nullptr, false);
-    _nativeCb.close();
-    _ctrl.close();
-    for (final a in _accounts.values) {
-      a._ctrl.close();
-    }
-    _accounts.clear();
-    _calls.clear();
-    MedutPlatform.onNetworkChanged = null;
-    MedutPlatform.onInterfaceHandle = null;
-    if (_multipath) unawaited(MedutPlatform.setCellularRequested(false));
-    _audioRoutesController?.close();
-    _audioRoutesController = null;
-    MedutPlatform.onAudioRoutesChanged = null;
-    _appOwnedAudioErrors?.close();
-    _appOwnedAudioErrors = null;
-    MedutPlatform.onAppOwnedAudioError = null;
-    // The app-owned audio loops are threads in the plugin, not in this
-    // isolate, and the calls they are feeding stay up across a detach — so
-    // they keep running. Only the Dart-side reporting goes away.
-    if (identical(_instance, this)) _instance = null;
+    MedutEventsApi.setUp(null);
+    _close();
   }
 
-  /// Tear down the stack. All accounts and calls are terminated.
-  void shutdown() {
-    // Stop the app-owned loops before the stack goes: they are plugin threads
-    // and would otherwise keep pushing into a torn-down device.
-    if (_appOwnedAudio) unawaited(MedutPlatform.stopAppOwnedAudio());
-    _appOwnedAudio = false;
-    internal.nativeBindings.medut_shutdown();
-    _nativeCb.close();
-    _ctrl.close();
-    for (final a in _accounts.values) {
-      a._ctrl.close();
-    }
-    _accounts.clear();
-    _calls.clear();
-    MedutPlatform.onNetworkChanged = null;
-    MedutPlatform.onInterfaceHandle = null;
-    if (_multipath) unawaited(MedutPlatform.setCellularRequested(false));
-    _audioRoutesController?.close();
-    _audioRoutesController = null;
-    MedutPlatform.onAudioRoutesChanged = null;
-    _appOwnedAudioErrors?.close();
-    _appOwnedAudioErrors = null;
-    MedutPlatform.onAppOwnedAudioError = null;
-    if (identical(_instance, this)) _instance = null;
-  }
-
-  // ── internals ───────────────────────────────────────────────────────────
-
-  Call _trackCall(Pointer<medut_call> handle, Account? account) {
-    return _calls.putIfAbsent(
-        handle.address, () => Call._(handle, account));
-  }
-
-  /// Activate/deactivate the voice audio session, at most once per transition.
-  ///
-  /// The returned future completes when the platform has actually applied it.
-  /// That matters on Android: `MODE_IN_COMMUNICATION` decides how the voice
-  /// streams are routed when they are *created*, and the native side creates
-  /// them as soon as media starts. Activating on the established event alone is
-  /// a race the app loses about as often as it wins — the streams open in
-  /// `MODE_NORMAL`, playback lands on the voice-call stream with nothing
-  /// routing it, and the call comes up with the far end audible only one way.
-  /// So callers that are about to start media ([Account.call], [Call.answer])
-  /// activate first, and the event path below is only a backstop.
-  ///
-  /// With [useAppOwnedAudio] on, the ordering stops being a race at all: the
-  /// app creates the streams itself, strictly after focus and mode are in
-  /// force, and strictly before them on the way down. That determinism is most
-  /// of why an app takes the device over.
-  Future<void> _audioSession(bool active) async {
-    if (!_manageAudioSession || active == _audioSessionActive) return;
-    _audioSessionActive = active;
-
-    if (active) {
-      await MedutPlatform.configureAudioSession(true);
-      if (_appOwnedAudio) await MedutPlatform.startAppOwnedAudio();
-    } else {
-      if (_appOwnedAudio) await MedutPlatform.stopAppOwnedAudio();
-      await MedutPlatform.configureAudioSession(false);
-    }
-  }
-
-  void _dispatchEvent(Pointer<medut_event_t> ev) {
+  /// Tear down the native stack: every call ends, every account unregisters.
+  Future<void> shutdown() async {
     try {
-      _decodeAndRoute(ev);
+      await _run('shutdown', (a) => a.shutdown());
     } finally {
-      internal.nativeBindings.medut_event_release(ev);
+      MedutEventsApi.setUp(null);
+      _close();
     }
   }
 
-  void _decodeAndRoute(Pointer<medut_event_t> ev) {
-    final type = ev.ref.type;
-
-    MedutEvent? decoded;
-    Account? target;
-
-    switch (type) {
-      case medut_event_type_t.MEDUT_EV_LOG:
-        decoded = LogEvent(_str(ev.ref.u.log.message) ?? '');
-        _broadcast(decoded);
-        return;
-
-      case medut_event_type_t.MEDUT_EV_REG_STATE:
-        final r = ev.ref.u.reg;
-        decoded = RegStateEvent(
-          RegState.fromRaw(r.state),
-          MedutError.fromRaw(r.error),
-          _str(r.error_str),
-          retryAttempt: r.retry_attempt,
-          retryDelayMs: r.retry_delay_ms,
-        );
-        target = _accounts[r.account.address];
-        break;
-
-      case medut_event_type_t.MEDUT_EV_INCOMING_CALL:
-        final ic = ev.ref.u.incoming;
-        target = _accounts[ic.account.address];
-        final call = _trackCall(ic.call, target);
-        call.state = CallState.ringing;
-        // Deliberately NOT activating the voice session here. No media flows on
-        // an unanswered incoming call, and on Android MODE_IN_COMMUNICATION
-        // makes the audio policy route the ringtone strategy to the phone
-        // route -- the app's ringtone comes out of the EARPIECE instead of the
-        // loudspeaker. [Call.answer] awaits the activation before the 200 OK,
-        // so the mode is still in force by the time the devices open.
-        decoded = IncomingCallEvent(
-            call, _str(ic.from_uri) ?? '', _str(ic.display_name));
-        break;
-
-      case medut_event_type_t.MEDUT_EV_CALL_STATE:
-        final cs = ev.ref.u.call_state;
-        target = _accounts[cs.account.address];
-        final call = _trackCall(cs.call, target);
-        final state = CallState.fromRaw(cs.state);
-        call.state = state;
-        if (state.isTerminal) {
-          _calls.remove(cs.call.address);
-          if (_calls.isEmpty) unawaited(_audioSession(false));
-        } else {
-          unawaited(_audioSession(true));
-        }
-        decoded = CallStateEvent(
-            call, state, MedutError.fromRaw(cs.error), _str(cs.reason));
-        break;
-
-      case medut_event_type_t.MEDUT_EV_CALL_DTMF:
-        final d = ev.ref.u.dtmf;
-        final call = _trackCall(d.call, null);
-        decoded = CallDtmfEvent(call, String.fromCharCode(d.digit));
-        target = call.account;
-        break;
-
-      case medut_event_type_t.MEDUT_EV_MEDIA_STATS:
-        final s = ev.ref.u.stats;
-        final call = _trackCall(s.call, null);
-        decoded = MediaStatsEvent(_decodeStats(s, call));
-        target = call.account;
-        break;
-
-      case medut_event_type_t.MEDUT_EV_QUALITY_ALERT:
-        final q = ev.ref.u.quality_alert;
-        final call = _trackCall(q.call, null);
-        decoded = QualityAlertEvent(call, QualityIssue.fromRaw(q.issue),
-            q.value, q.threshold, q.recovering);
-        target = call.account;
-        break;
-
-      case medut_event_type_t.MEDUT_EV_TRANSFER_REQUEST:
-        final t = ev.ref.u.transfer_req;
-        target = _accounts[t.account.address];
-        final call = _trackCall(t.call, target);
-        decoded = TransferRequestEvent(
-            call, _str(t.refer_to_uri) ?? '', t.has_replaces,
-            autoFollowed: t.auto_followed);
-        break;
-
-      case medut_event_type_t.MEDUT_EV_TRANSFER_FAILED:
-        final t = ev.ref.u.transfer_failed;
-        target = _accounts[t.account.address];
-        final call = _trackCall(t.call, target);
-        decoded = TransferFailedEvent(call, _str(t.reason) ?? '');
-        break;
-
-      case medut_event_type_t.MEDUT_EV_REGISTRAR_WARNING:
-        decoded = RegistrarWarningEvent(_str(ev.ref.u.reg_warn.message) ?? '');
-        _broadcast(decoded);
-        return;
-
-      case medut_event_type_t.MEDUT_EV_SDP_NEGOTIATION:
-        final sd = ev.ref.u.sdp;
-        final call = _trackCall(sd.call, null);
-        decoded = SdpNegotiationEvent(call, _str(sd.local_sdp),
-            _str(sd.remote_sdp), _str(sd.negotiated_codec),
-            _str(sd.negotiated_crypto));
-        target = call.account;
-        break;
-
-      case medut_event_type_t.MEDUT_EV_MWI:
-        final m = ev.ref.u.mwi;
-        decoded = MwiEvent(m.messages_waiting, m.new_voice, m.old_voice,
-            m.new_urgent, m.old_urgent, _str(m.raw_body));
-        target = _accounts[m.account.address];
-        break;
-
-      case medut_event_type_t.MEDUT_EV_MESSAGE:
-        final m = ev.ref.u.msg;
-        decoded = MessageEvent(_str(m.from_uri) ?? '', _str(m.body) ?? '',
-            _str(m.content_type) ?? 'text/plain');
-        target = _accounts[m.account.address];
-        break;
-
-      case medut_event_type_t.MEDUT_EV_PRESENCE_STATE:
-        final p = ev.ref.u.presence;
-        decoded = PresenceStateEvent(
-            _str(p.target_uri) ?? '', PresenceStatus.fromRaw(p.status));
-        target = _accounts[p.account.address];
-        break;
-
-      case medut_event_type_t.MEDUT_EV_SIP_TRACE:
-        final t = ev.ref.u.sip_trace;
-        decoded = SipTraceEvent(
-          MediaDirection.fromRaw(t.dir),
-          _str(t.transport) ?? '',
-          _str(t.remote_addr) ?? '',
-          _str(t.raw_message) ?? '',
-          t.timestamp_us,
-        );
-        break;
-
-      case medut_event_type_t.MEDUT_EV_NETWORK:
-        final n = ev.ref.u.network;
-        decoded = NetworkEvent(
-          stage: NetworkStage.fromRaw(n.event),
-          call: n.call == nullptr ? null : _trackCall(n.call, null),
-          localAddr: _str(n.local_addr) ?? '',
-          attempt: n.attempt,
-          maxAttempts: n.max_attempts,
-          elapsedMs: n.elapsed_ms,
-          ice: n.ice,
-          error: MedutError.fromRaw(n.error),
-        );
-        if (n.account != nullptr) target = _accounts[n.account.address];
-        break;
-
-      case medut_event_type_t.MEDUT_EV_ICE_STATE:
-        final i = ev.ref.u.ice;
-        decoded = IceStateEvent(
-          call: i.call == nullptr ? null : _trackCall(i.call, null),
-          state: IceState.fromRaw(i.state),
-          prev: IceState.fromRaw(i.prev),
-          generation: i.generation,
-          localType: IceCandType.fromRaw(i.local_type),
-          remoteType: IceCandType.fromRaw(i.remote_type),
-          localAddr: _str(i.local_addr) ?? '',
-          remoteAddr: _str(i.remote_addr) ?? '',
-          rttMs: i.rtt_ms,
-          error: MedutError.fromRaw(i.error),
-        );
-        break;
-
-      default:
-        decoded = UnknownEvent(type);
-        break;
-    }
-
-    // Everything reaches the SDK-wide stream; account-scoped events also go
-    // to their own account so existing listeners keep working.
-    if (!_ctrl.isClosed) _ctrl.add(decoded);
-    target?._add(decoded);
-  }
-
-  void _broadcast(MedutEvent ev) {
-    if (!_ctrl.isClosed) _ctrl.add(ev);
+  void _close() {
+    _ctrl.close();
+    _routes.close();
+    _appOwnedAudioErrors.close();
     for (final a in _accounts.values) {
-      a._add(ev);
+      a._ctrl.close();
+    }
+    _accounts.clear();
+    _calls.clear();
+    if (identical(_instance, this)) _instance = null;
+  }
+
+  /// Create a SIP account.  Registration starts with [Account.register].
+  Future<Account> createAccount(String uri, String password,
+      {AccountConfig config = const AccountConfig()}) async {
+    final m = await _run(
+        'createAccount', (a) => a.createAccount(config._toMessage(uri, password)));
+    return _trackAccount(m);
+  }
+
+  // ── Audio processing and devices ────────────────────────────────────────
+
+  Future<void> setAec(bool enable) =>
+      _run('setAec', (a) => a.setEchoCancellation(enable));
+  Future<void> setAecMode(AecMode mode) =>
+      _run('setAecMode', (a) => a.setAecMode(mode.raw));
+  Future<void> setNs(bool enable) =>
+      _run('setNs', (a) => a.setNoiseSuppression(enable));
+  Future<void> setAgc(bool enable) =>
+      _run('setAgc', (a) => a.setAutoGainControl(enable));
+  Future<void> setAecSuppressionLevel(double level) =>
+      _run('setAecSuppressionLevel', (a) => a.setAecSuppressionLevel(level));
+  Future<void> setMicGainDb(double db) =>
+      _run('setMicGainDb', (a) => a.setMicGainDb(db));
+  Future<void> setSpeakerGainDb(double db) =>
+      _run('setSpeakerGainDb', (a) => a.setSpeakerGainDb(db));
+  Future<void> setJitterBuffer(int minMs, int maxMs) =>
+      _run('setJitterBuffer', (a) => a.setJitterBuffer(minMs, maxMs));
+  Future<void> setJitterBufferType(JitterBufferType type) =>
+      _run('setJitterBufferType', (a) => a.setJitterBufferType(type.raw));
+  Future<void> setAdaptiveBitrate(bool enabled, {int minBps = 0, int maxBps = 0}) =>
+      _run('setAdaptiveBitrate', (a) => a.setAdaptiveBitrate(enabled, minBps, maxBps));
+
+  Future<List<AudioDevice>> listInputDevices() => _run('listInputDevices',
+      (a) async => (await a.inputDevices()).map(_device).toList());
+  Future<List<AudioDevice>> listOutputDevices() => _run('listOutputDevices',
+      (a) async => (await a.outputDevices()).map(_device).toList());
+  static AudioDevice _device(AudioDeviceMessage m) =>
+      AudioDevice(m.name, m.label, m.isDefault);
+
+  Future<void> setInputDevice(String? name) =>
+      _run('setInputDevice', (a) => a.setInputDevice(name));
+  Future<void> setOutputDevice(String? name) =>
+      _run('setOutputDevice', (a) => a.setOutputDevice(name));
+
+  // ── Call-audio routes ───────────────────────────────────────────────────
+
+  /// Routes call audio can take (earpiece / speaker / Bluetooth / wired).
+  Future<List<AudioRoute>> listAudioRoutes() => _run('listAudioRoutes',
+      (a) async => (await a.audioRoutes()).map(AudioRoute._fromMessage).toList());
+
+  /// Route call audio to [id] from [listAudioRoutes]; returns the routes as
+  /// they are now (Bluetooth may become active a moment later, reported on
+  /// [audioRoutes]).
+  Future<List<AudioRoute>> setAudioRoute(String id) => _run('setAudioRoute',
+      (a) async => (await a.selectAudioRoute(id)).map(AudioRoute._fromMessage).toList());
+
+  /// Loudspeaker on, or back to the best other route.
+  Future<void> setSpeakerphone(bool on) =>
+      _run('setSpeakerphone', (a) => a.setSpeakerphone(on));
+
+  /// Report-only routing, for apps whose CallKit / Telecom integration owns
+  /// the route: routes are still listed and changes reported, selection
+  /// does nothing.
+  Future<void> setExternalRouting(bool on) =>
+      _run('setExternalRouting', (a) => a.setExternalRouting(on));
+
+  /// The routes, each time they change (device plugged, Bluetooth
+  /// connected, a system move).
+  Stream<List<AudioRoute>> get audioRoutes => _routes.stream;
+
+  // ── App-owned audio ─────────────────────────────────────────────────────
+
+  /// Hand the microphone and speaker to the SDK's app-owned engine
+  /// (VoiceProcessingIO on iOS, AudioRecord/AudioTrack through
+  /// VOICE_COMMUNICATION on Android), which opens only once call audio is
+  /// active.
+  Future<void> useAppOwnedAudio(bool enable) =>
+      _run('useAppOwnedAudio', (a) => a.useAppOwnedAudio(enable));
+
+  /// Diagnostics for the app-owned engine: armed, running, format, frame
+  /// counters, last error.
+  Future<Map<String, Object?>> appOwnedAudioStatus() =>
+      _run('appOwnedAudioStatus', (a) => a.appOwnedAudioStatus());
+
+  /// True while a call is capturing or playing through the app-owned device.
+  Future<bool> appOwnedAudioActive() =>
+      _run('appOwnedAudioActive', (a) => a.appOwnedAudioActive());
+
+  /// What the current call negotiated, or null before it has media.  Poll
+  /// it: a re-INVITE can change the codec with no call-state change.
+  Future<ExternalAudioFormat?> appOwnedAudioFormat() =>
+      _run('appOwnedAudioFormat', (a) async {
+        final f = await a.appOwnedAudioFormat();
+        return f == null
+            ? null
+            : ExternalAudioFormat(f.sampleRate, f.channels, f.ptimeMs);
+      });
+
+  /// Failures of the app-owned engine, which the SDK cannot see.
+  Stream<AppOwnedAudioError> get appOwnedAudioErrors =>
+      _appOwnedAudioErrors.stream;
+
+  /// Forward the platform call framework's audio activation: CallKit's
+  /// `provider(_:didActivate:)` / `didDeactivate` on iOS, Telecom making the
+  /// call active / inactive on Android.  Needed with
+  /// [AudioSessionMode.callFramework], where the SDK does not activate audio
+  /// itself.
+  Future<void> notifyCallKitAudioActive(bool active) =>
+      _run('notifyCallKitAudioActive', (a) => a.platformCallAudioActive(active));
+
+  // ── Network and capture ─────────────────────────────────────────────────
+
+  Future<void> networkChanged() => _run('networkChanged', (a) => a.networkChanged());
+  Future<void> networkSetMonitorInterval(int seconds) =>
+      _run('networkSetMonitorInterval', (a) => a.networkSetMonitorInterval(seconds));
+  Future<void> networkSetHandoverPolicy(bool reinviteCalls, bool hangupOnFailure) =>
+      _run('networkSetHandoverPolicy',
+          (a) => a.networkSetHandoverPolicy(reinviteCalls, hangupOnFailure));
+
+  /// The local IP the stack is using; empty when there is none.
+  Future<String> networkLocalAddr() =>
+      _run('networkLocalAddr', (a) => a.networkLocalAddress());
+  Future<bool> networkIsUp() => _run('networkIsUp', (a) => a.networkIsUp());
+
+  /// Capture SIP + RTP to a Wireshark-readable pcap file.
+  Future<void> pcapStart(String path) => _run('pcapStart', (a) => a.startPcap(path));
+  Future<void> pcapStop() => _run('pcapStop', (a) => a.stopPcap());
+
+  // ── Internals ───────────────────────────────────────────────────────────
+
+  Future<T> _run<T>(String op, Future<T> Function(MedutHostApi api) f) async {
+    try {
+      return await f(_api);
+    } on PlatformException catch (e) {
+      throw MedutException(
+          e.code, (e.details is int) ? e.details as int : 0, op, e.message);
     }
   }
+
+  Account _trackAccount(AccountMessage m) {
+    final existing = _accounts[m.id];
+    if (existing != null) return existing;
+    return _accounts[m.id] = Account._(m, this);
+  }
+
+  /// The Call for a message, creating it on first sight and taking its state.
+  /// Ended calls are dropped from [calls]; the object handed out stays usable.
+  Call _trackCall(CallMessage m) {
+    final call = _calls[m.id] ??
+        Call._(m, m.accountId == null ? null : _accounts[m.accountId], this);
+    call.state = CallState.fromRaw(m.state);
+    if (call.state.isTerminal) {
+      _calls.remove(m.id);
+    } else {
+      _calls[m.id] = call;
+    }
+    return call;
+  }
+
+  /// Decode and route one event.
+  void _onEvent(EventMessage m) {
+    final account = m.accountId == null ? null : _accounts[m.accountId];
+    final call = m.call == null ? null : _trackCall(m.call!);
+    final error = MedutError.fromRaw(m.error ?? 0);
+
+    final MedutEvent event;
+    switch (m.type) {
+      case _EventType.log:
+        event = LogEvent(m.message ?? '');
+      case _EventType.regState:
+        final state = RegState.fromRaw(m.state ?? 0);
+        account?.regState = state;
+        event = RegStateEvent(state, error, m.errorText,
+            retryAttempt: m.retryAttempt ?? 0, retryDelayMs: m.retryDelayMs ?? 0);
+      case _EventType.incomingCall:
+        event = IncomingCallEvent(call!, m.fromUri ?? '', m.displayName);
+      case _EventType.callState:
+        event = CallStateEvent(call!, CallState.fromRaw(m.state ?? 0), error, m.reason);
+      case _EventType.dtmf:
+        event = CallDtmfEvent(call!, m.digit ?? '');
+      case _EventType.sdpNegotiation:
+        event = SdpNegotiationEvent(call!, m.localSdp, m.remoteSdp,
+            m.negotiatedCodec, m.negotiatedCrypto);
+      case _EventType.sipTrace:
+        event = SipTraceEvent(MediaDirection.fromRaw(m.direction ?? 0),
+            m.transport ?? '', m.remoteAddress ?? '', m.rawMessage ?? '',
+            m.timestampUs ?? 0);
+      case _EventType.mediaStats:
+        event = MediaStatsEvent(MediaStats._fromMessage(call!, m.stats!));
+      case _EventType.registrarWarning:
+        event = RegistrarWarningEvent(m.message ?? '');
+      case _EventType.transferRequest:
+        event = TransferRequestEvent(call!, m.referToUri ?? '', m.isAttended ?? false,
+            autoFollowed: m.autoFollowed ?? false);
+      case _EventType.mwi:
+        event = MwiEvent(m.messagesWaiting ?? false, m.newVoice ?? 0, m.oldVoice ?? 0,
+            m.newUrgent ?? 0, m.oldUrgent ?? 0, m.rawBody);
+      case _EventType.message:
+        event = MessageEvent(m.fromUri ?? '', m.body ?? '', m.contentType ?? 'text/plain');
+      case _EventType.presence:
+        event = PresenceStateEvent(m.targetUri ?? '', PresenceStatus.fromRaw(m.status ?? 0));
+      case _EventType.qualityAlert:
+        event = QualityAlertEvent(call!, QualityIssue.fromRaw(m.issue ?? 0),
+            m.value ?? 0, m.threshold ?? 0, m.recovering ?? false);
+      case _EventType.network:
+        event = NetworkEvent(
+          stage: NetworkStage.fromRaw(m.stage ?? 0),
+          call: call,
+          localAddr: m.localAddress ?? '',
+          attempt: m.attempt ?? 0,
+          maxAttempts: m.maxAttempts ?? 0,
+          elapsedMs: m.elapsedMs ?? 0,
+          ice: m.ice ?? false,
+          error: error,
+        );
+      case _EventType.transferFailed:
+        event = TransferFailedEvent(call!, m.reason ?? '');
+      case _EventType.iceState:
+        event = IceStateEvent(
+          call: call,
+          state: IceState.fromRaw(m.state ?? 0),
+          prev: IceState.fromRaw(m.previousState ?? 0),
+          generation: m.generation ?? 0,
+          localType: IceCandType.fromRaw(m.localType ?? 4),
+          remoteType: IceCandType.fromRaw(m.remoteType ?? 4),
+          localAddr: m.localAddress ?? '',
+          remoteAddr: m.remoteAddress ?? '',
+          rttMs: m.rttMs ?? 0,
+          error: error,
+        );
+      case _EventType.audioRoutesChanged:
+        if (!_routes.isClosed) {
+          _routes.add((m.routes ?? const []).map(AudioRoute._fromMessage).toList());
+        }
+        return;
+      case _EventType.appOwnedAudioError:
+        if (!_appOwnedAudioErrors.isClosed) {
+          _appOwnedAudioErrors.add(AppOwnedAudioError(m.errorCode ?? '', m.message ?? ''));
+        }
+        return;
+      default:
+        event = UnknownEvent(m.type);
+    }
+
+    if (!_ctrl.isClosed) _ctrl.add(event);
+    (account ?? call?.account)?._add(event);
+  }
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-String? _str(Pointer<Char> p) =>
-    p == nullptr ? null : p.cast<Utf8>().toDartString();
-
-/// Read a fixed-size NUL-terminated char array out of an FFI struct field.
-String _charArr(Array<Char> a, int len) {
-  final b = StringBuffer();
-  for (var i = 0; i < len; i++) {
-    final c = a[i];
-    if (c == 0) break;
-    b.writeCharCode(c);
-  }
-  return b.toString();
+/// medut_event_type_t, plus the plugin's own events.
+abstract final class _EventType {
+  static const log = 0;
+  static const regState = 1;
+  static const incomingCall = 2;
+  static const callState = 3;
+  static const dtmf = 4;
+  static const sdpNegotiation = 5;
+  static const sipTrace = 6;
+  static const mediaStats = 7;
+  static const registrarWarning = 8;
+  static const transferRequest = 9;
+  static const mwi = 10;
+  static const message = 11;
+  static const presence = 12;
+  static const qualityAlert = 13;
+  static const network = 14;
+  static const transferFailed = 15;
+  static const iceState = 16;
+  static const audioRoutesChanged = 100;
+  static const appOwnedAudioError = 101;
 }
 
-MediaStats _decodeStats(medut_ev_media_stats_t s, Call call) {
-  final addr = StringBuffer();
-  for (var i = 0; i < 64; i++) {
-    final b = s.remote_addr[i];
-    if (b == 0) break;
-    addr.writeCharCode(b);
-  }
-  return MediaStats(
-    call: call,
-    packetsSent: s.packets_sent,
-    packetsReceived: s.packets_received,
-    packetsLost: s.packets_lost,
-    packetsLostRx: s.packets_lost_rx,
-    bytesSent: s.bytes_sent,
-    bytesReceived: s.bytes_received,
-    txErrors: s.tx_errors,
-    rxErrors: s.rx_errors,
-    lossPct: s.loss_pct,
-    lossPctRx: s.loss_pct_rx,
-    jitterMs: s.jitter_ms,
-    txJitterMs: s.tx_jitter_ms,
-    rttMs: s.rtt_ms,
-    jitterBufferMs: s.jitter_buffer_ms,
-    jitterBufferLoad: s.jitter_buffer_load,
-    latePackets: s.late_packets,
-    discardedPackets: s.discarded_packets,
-    jitterBufferTargetMs: s.jitter_buffer_target_ms,
-    jitterBufferAdaptive: s.jitter_buffer_adaptive,
-    plcFrames: s.plc_frames,
-    plcRatio: s.plc_ratio,
-    bandwidthTx: s.bandwidth_kbps_tx,
-    bandwidthRx: s.bandwidth_kbps_rx,
-    avgBandwidthTx: s.avg_bandwidth_kbps_tx,
-    avgBandwidthRx: s.avg_bandwidth_kbps_rx,
-    mosLq: s.mos_lq,
-    mosCq: s.mos_cq,
-    mosLqRx: s.mos_lq_rx,
-    mosCqRx: s.mos_cq_rx,
-    mosMethod: s.mos_method,
-    codec: _str(s.codec_name) ?? '',
-    codecClockRate: s.codec_clock_rate,
-    codecSampleRate: s.codec_sample_rate,
-    codecChannels: s.codec_channels,
-    payloadType: s.payload_type,
-    audioLevelDbov: s.audio_level_dbov,
-    micLevelDbov: s.mic_level_dbov,
-    ssrcTx: s.ssrc_tx,
-    ssrcRx: s.ssrc_rx,
-    remoteAddr: addr.toString(),
-    mosLqMin: s.mos_lq_min,
-    mosLqAvg: s.mos_lq_avg,
-    statsTick: s.stats_tick,
-    callDurationMs: s.call_duration_ms,
-    isFinal: s.is_final,
-    iceState: IceState.fromRaw(s.ice_state),
-    iceLocalType: IceCandType.fromRaw(s.ice_local_type),
-    iceRemoteType: IceCandType.fromRaw(s.ice_remote_type),
-    iceRttMs: s.ice_rtt_ms,
-    iceGeneration: s.ice_generation,
-    iceLocalAddr: _charArr(s.ice_local_addr, 64),
-    iceRemoteAddr: _charArr(s.ice_remote_addr, 64),
-    fecActive: s.fec_active,
-    fecLevelPct: s.fec_level_pct,
-    fecRecovered: s.fec_recovered,
-    plcConcealed: s.plc_concealed,
-  );
+class _EventSink implements MedutEventsApi {
+  final Medut _sdk;
+  _EventSink(this._sdk);
+
+  @override
+  void onEvent(EventMessage event) => _sdk._onEvent(event);
 }

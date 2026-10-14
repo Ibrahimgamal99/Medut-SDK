@@ -1,415 +1,632 @@
 package dev.medut.flutter
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
-import android.net.ConnectivityManager
-import android.net.LinkProperties
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import dev.medut.Account
+import dev.medut.AccountConfig
+import dev.medut.AecMode
+import dev.medut.Call
+import dev.medut.CallInfo
+import dev.medut.DtmfMode
+import dev.medut.IceHandoverPolicy
+import dev.medut.IceServer
+import dev.medut.IceTransportPolicy
+import dev.medut.JitterBufferType
+import dev.medut.LogLevel
+import dev.medut.MediaEncryption
+import dev.medut.MediaStats
+import dev.medut.Medut
+import dev.medut.MedutConfig
+import dev.medut.MedutEvent
+import dev.medut.MedutException
+import dev.medut.MedutSubscription
+import dev.medut.MosMethod
+import dev.medut.OpusConfig
+import dev.medut.PresenceStatus
+import dev.medut.PushProvider
+import dev.medut.ReliableProvisionalMode
+import dev.medut.Transport
+import dev.medut.android.AndroidOptions
+import dev.medut.android.AudioModePolicy
+import dev.medut.android.AudioRoute
+import dev.medut.android.MedutAndroid
 import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
- * Platform shim for the Medut FFI plugin.
+ * Flutter side of the Kotlin SDK (bindings/kotlin): every Pigeon host call
+ * delegates to [Medut] / [MedutAndroid], and SDK events are forwarded to Dart.
  *
- * The SIP/media work happens entirely in native code driven over Dart FFI;
- * this class only covers what FFI cannot reach:
- *  - the app cache dir (Medut's required tmp_dir on Android),
- *  - voice-call audio focus + MODE_IN_COMMUNICATION,
- *  - speakerphone routing,
- *  - ConnectivityManager default-network callbacks, forwarded to Dart so
- *    the SDK can re-register / migrate calls on network handover.
+ * The stack belongs to native code for the process lifetime.  Dart's start
+ * attaches to it when the app already started it (from Application.onCreate
+ * or a push), and detaching the engine leaves it running.
  */
-class MedutPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
-    private lateinit var channel: MethodChannel
+class MedutPlugin : FlutterPlugin, MedutHostApi {
     private lateinit var context: Context
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private var events: MedutEventsApi? = null
+    private var subscription: MedutSubscription? = null
+    private var scope: CoroutineScope? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val mainExecutor = Executor { main.post(it) }
 
-    private var audioManager: AudioManager? = null
-    private var focusRequest: AudioFocusRequest? = null
-    private var connectivityManager: ConnectivityManager? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var cellularCallback: ConnectivityManager.NetworkCallback? = null
-    private var cellularIfname: String? = null
-
-    // The network that is currently the default, as last reported by the
-    // callback below. Identity, not capabilities — see onAvailable/onLost.
-    // Volatile: the callbacks arrive on ConnectivityManager's thread, the
-    // register/unregister path writes it from the main thread.
-    @Volatile
-    private var defaultNetwork: Network? = null
-    private var audioRouter: AudioRouter? = null
-    private var appAudio: AppOwnedAudioEngine? = null
+    // Objects Dart refers to by id.  Ended calls stay until Dart releases
+    // them (or the cap below evicts them), so methods on an ended Dart Call
+    // keep resolving.
+    private val accounts = ConcurrentHashMap<String, Account>()
+    private val calls = ConcurrentHashMap<String, Call>()
+    private val endedCalls = ArrayDeque<String>()
+    private var routesListener: (() -> Unit)? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
-        channel = MethodChannel(binding.binaryMessenger, "medut")
-        channel.setMethodCallHandler(this)
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        audioManager = am
-        appAudio = AppOwnedAudioEngine(am) { code, message ->
-            mainHandler.post {
-                channel.invokeMethod(
-                    "onAppOwnedAudioError",
-                    mapOf("code" to code, "message" to message))
-            }
+        MedutHostApi.setUp(binding.binaryMessenger, this)
+        events = MedutEventsApi(binding.binaryMessenger)
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        subscription = Medut.addListener(mainExecutor) { forward(it) }
+        MedutAndroid.onAppOwnedAudioError = { code, message ->
+            send(EventMessage(type = APP_OWNED_AUDIO_ERROR, errorCode = code, message = message))
         }
-        audioRouter = AudioRouter(
-            context,
-            onRoutesChanged = {
-                // Already posted to the main thread by AudioRouter.
-                channel.invokeMethod("onAudioRoutesChanged", null)
-            },
-            // Pre-31 only: SCO has just connected or dropped, so any stream
-            // created before it is stuck on the old device for its lifetime.
-            // If the app owns the streams we can rebuild them; if the SDK owns
-            // them there is nothing to do and this is a no-op.
-            onRouteSettled = { appAudio?.restartStreams() },
-        ).also { it.start() }
-        registerNetworkCallback()
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        setCellularRequested(false)
-        unregisterNetworkCallback()
-        audioRouter?.stop()
-        audioRouter = null
-        // Streams die before the mode reverts to MODE_NORMAL — the reverse of
-        // the startup order, for the same routing reason.
-        appAudio?.disarm()
-        appAudio = null
-        abandonAudioFocus()
-        channel.setMethodCallHandler(null)
+        subscription?.cancel()
+        subscription = null
+        routesListener?.let { l -> runCatching { MedutAndroid.audioRoutes.removeListener(l) } }
+        routesListener = null
+        MedutAndroid.onAppOwnedAudioError = null
+        MedutHostApi.setUp(binding.binaryMessenger, null)
+        events = null
+        scope?.cancel()
+        scope = null
     }
 
-    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        when (call.method) {
-            "getCacheDir" -> result.success(context.cacheDir.absolutePath)
-            "setCellularRequested" -> {
-                setCellularRequested(call.argument<Boolean>("on") ?: false)
-                result.success(null)
-            }
-            "configureAudioSession" -> {
-                val active = call.argument<Boolean>("active") ?: false
-                if (active) {
-                    requestAudioFocus()
-                    logPlatformEffects()
-                } else {
-                    abandonAudioFocus()
-                }
-                result.success(null)
-            }
-            "setSpeakerphone" -> {
-                val on = call.argument<Boolean>("on") ?: false
-                val router = audioRouter
-                if (router != null) {
-                    // Route-aware: OFF returns to the best non-speaker route
-                    // (BT > wired > earpiece), not blindly to the earpiece.
-                    router.setSpeakerphone(on)
-                } else {
-                    audioManager?.isSpeakerphoneOn = on
-                }
-                result.success(null)
-            }
-            "listAudioRoutes" ->
-                result.success(audioRouter?.listRoutes() ?: emptyList<Map<String, Any>>())
-            "setAudioRoute" -> {
-                val id = call.argument<String>("id")
-                if (id == null) {
-                    result.error("bad-args", "setAudioRoute needs an id", null)
-                } else {
-                    result.success(audioRouter?.selectRoute(id)
-                        ?: emptyList<Map<String, Any>>())
-                }
-            }
-            "setExternalRouting" -> {
-                audioRouter?.externalRouting = call.argument<Boolean>("on") ?: false
-                result.success(null)
-            }
-            "startAppOwnedAudio" -> {
-                appAudio?.arm()
-                result.success(null)
-            }
-            "stopAppOwnedAudio" -> {
-                appAudio?.disarm()
-                result.success(null)
-            }
-            "appOwnedAudioStatus" ->
-                result.success(appAudio?.status() ?: emptyMap<String, Any?>())
-            // iOS-only: CallKit activates and deactivates the AVAudioSession, and
-            // the host forwards that here. Android has no such broker — audio focus
-            // is requested by configureAudioSession above — so this is a genuine
-            // no-op. It still needs a case: the Dart guard is `_isMobile`, which is
-            // true for Android too, so falling through to notImplemented() below
-            // raised MissingPluginException on a call three doc comments promise is
-            // harmless (platform_channel.dart, medut.dart, docs/api/media.md).
-            "notifyCallKitAudioActive" -> result.success(null)
-            else -> result.notImplemented()
+    // ── Events ───────────────────────────────────────────────────────────
+
+    private fun send(event: EventMessage) {
+        val api = events ?: return
+        // UNDISPATCHED: the message is handed to the channel in the caller's
+        // (main-thread) order, before the coroutine first suspends.
+        scope?.launch(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { api.onEvent(event) }
         }
     }
 
-    // Field data, nothing acts on it yet. The SDK reads back whether the
-    // VOICE_COMMUNICATION preset took (sles_vc.c), which cannot tell a phone
-    // with no hardware AEC from one with it; whether the phone exposes the
-    // separate effects is a hint, collected here before any behaviour leans on
-    // it. Not proof either way: many vendors cancel inside the HAL under the
-    // preset and report no effect. Logged as each call's audio comes up, just
-    // ahead of the SDK's "TX chain" line for that call.
-    private fun logPlatformEffects() {
-        val aec = runCatching { AcousticEchoCanceler.isAvailable() }.getOrDefault(false)
-        val ns = runCatching { NoiseSuppressor.isAvailable() }.getOrDefault(false)
-        Log.i(TAG, "platform effects: AcousticEchoCanceler.isAvailable=$aec " +
-                   "NoiseSuppressor.isAvailable=$ns " +
-                   "(${Build.MANUFACTURER} ${Build.MODEL}, API ${Build.VERSION.SDK_INT})")
+    private fun forward(event: MedutEvent) {
+        event.account?.let { accounts[it.id.toString()] = it }
+        event.call?.let { track(it) }
+        send(event.toMessage())
     }
 
-    // ── Audio focus ─────────────────────────────────────────────────────
-    //
-    // Both of these must finish their work before the method-channel result is
-    // sent: the Dart side awaits `configureAudioSession(true)` before it starts
-    // a call, precisely so MODE_IN_COMMUNICATION is in force by the time the
-    // native core opens the OpenSL streams. Android fixes a stream's routing
-    // when it is created, so a mode set that lands late does not move the
-    // audio — it produces a call the user cannot hear. Keep this synchronous.
-
-    // When the SDK owns the device, a transient focus loss is survivable —
-    // OpenSL keeps running and the far end hears the interruption at worst.
-    // When the app owns it, nothing else would tell our capture and playback
-    // threads to stand down, so the listener is not optional.
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        when (change) {
-            AudioManager.AUDIOFOCUS_LOSS,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> appAudio?.pause()
-            AudioManager.AUDIOFOCUS_GAIN -> appAudio?.resume()
-        }
-    }
-
-    private fun requestAudioFocus() {
-        val am = audioManager ?: return
-        // Mode first, then focus: the mode is what routes the voice streams,
-        // and it must be set even if the focus request is refused.
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (focusRequest == null) {
-                focusRequest = AudioFocusRequest.Builder(
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-                )
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
-                    .setOnAudioFocusChangeListener(focusListener, mainHandler)
-                    .build()
+    private fun track(call: Call): CallMessage {
+        val id = call.id.toString()
+        calls[id] = call
+        if (call.isEnded) synchronized(endedCalls) {
+            if (id !in endedCalls) {
+                endedCalls.addLast(id)
+                while (endedCalls.size > MAX_ENDED_CALLS) calls.remove(endedCalls.removeFirst())
             }
-            focusRequest?.let { am.requestAudioFocus(it) }
-        } else {
-            @Suppress("DEPRECATION")
-            am.requestAudioFocus(
-                focusListener,
-                AudioManager.STREAM_VOICE_CALL,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-            )
+        }
+        return call.toMessage()
+    }
+
+    // ── Lifecycle ────────────────────────────────────────────────────────
+
+    override fun start(config: ConfigMessage, options: StartOptionsMessage): StartResultMessage = sdk {
+        val reattached = Medut.isRunning
+        if (!reattached) {
+            MedutAndroid.start(context, config.toSdk(), AndroidOptions(
+                monitorNetwork = options.monitorNetwork,
+                audioMode = when (options.audioMode) {
+                    1L -> AudioModePolicy.TELECOM
+                    2L -> AudioModePolicy.MANUAL
+                    else -> AudioModePolicy.AUTOMATIC
+                },
+            ))
+        }
+        if (options.appOwnedAudio) MedutAndroid.useAppOwnedAudio(true)
+        if (routesListener == null) {
+            val l = { send(EventMessage(type = AUDIO_ROUTES_CHANGED, routes = routes())) }
+            // Absent when the app started the stack without MedutAndroid.
+            if (runCatching { MedutAndroid.audioRoutes.addListener(l) }.isSuccess) routesListener = l
+        }
+        Medut.accounts.forEach { accounts[it.id.toString()] = it }
+        StartResultMessage(
+            reattached = reattached,
+            version = Medut.version,
+            accounts = Medut.accounts.map { it.toMessage() },
+            calls = Medut.calls.map { track(it) },
+        )
+    }
+
+    override fun shutdown() = sdk {
+        MedutAndroid.shutdown()
+        accounts.clear()
+        calls.clear()
+        synchronized(endedCalls) { endedCalls.clear() }
+    }
+
+    override fun releaseCall(callId: String) {
+        val call = calls[callId] ?: return
+        if (call.isEnded) {
+            calls.remove(callId)
+            synchronized(endedCalls) { endedCalls.remove(callId) }
         }
     }
 
-    private fun abandonAudioFocus() {
-        val am = audioManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest?.let { am.abandonAudioFocusRequest(it) }
-        } else {
-            @Suppress("DEPRECATION")
-            am.abandonAudioFocus(focusListener)
-        }
-        am.isSpeakerphoneOn = false
-        am.mode = AudioManager.MODE_NORMAL
+    // ── Accounts ─────────────────────────────────────────────────────────
+
+    override fun createAccount(config: AccountConfigMessage): AccountMessage = sdk {
+        val account = Medut.createAccount(config.toSdk())
+        accounts[account.id.toString()] = account
+        account.toMessage()
     }
 
-    // ── Network change → Dart → medut_network_changed() ──────────────
-
-    private fun registerNetworkCallback() {
-        // Idempotent. Android's guidance is that a NetworkCallback is
-        // registered at most once at a time, and overwriting the field would
-        // leak the previous one: it stays registered and keeps delivering, so
-        // every network change would arrive twice and cost two handovers
-        // (transport flush + re-REGISTER + a re-INVITE per live call). Not
-        // hypothetical for a push-woken app whose engine can be re-attached
-        // without onDetachedFromEngine having run.
-        unregisterNetworkCallback()
-
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
-                as ConnectivityManager
-        connectivityManager = cm
-        val cb = object : ConnectivityManager.NetworkCallback() {
-            // Only the default-network *identity* matters here. onCapabilities-
-            // Changed / onLinkPropertiesChanged fire constantly on a healthy
-            // network (signal strength, validation, DNS) and are deliberately
-            // not overridden: each one would be an unnecessary handover.
-            //
-            // One Wi-Fi<->cellular switch delivers both of the callbacks below
-            // — for a default-network callback onLost() means "no longer the
-            // default", not "gone" — and the ordering between them is not
-            // guaranteed. Reporting both means two handovers for one switch,
-            // and the second one lands while the first is still re-REGISTERing.
-            // Observed on-device (2026-09-02, Android, mid-call over WSS): two
-            // changeDetected 3.5 s apart, two transport resets, two re-INVITEs
-            // of the same call. So key on the network that is default now.
-            override fun onAvailable(network: Network) {
-                if (defaultNetwork == network) return   // re-reported, not new
-                defaultNetwork = network
-                notifyDart()
-            }
-
-            override fun onLost(network: Network) {
-                // A replacement already arrived: this is the tail of the switch
-                // that onAvailable reported, not a second one. When it is the
-                // current default that went away, there is no replacement yet
-                // and the SDK does need to know — it has no address to bind.
-                if (defaultNetwork != network) return
-                defaultNetwork = null
-                notifyDart()
-            }
-        }
-        networkCallback = cb
-        try {
-            cm.registerDefaultNetworkCallback(cb)
-        } catch (_: Exception) {
-            // Missing ACCESS_NETWORK_STATE or too many callbacks — the SDK
-            // still works, handover just relies on its own detection.
-            networkCallback = null
-        }
+    override fun accountDestroy(accountId: String) = sdk {
+        accounts.remove(accountId)?.destroy()
+        Unit
     }
 
-    // ── Second path for ICE: keep cellular up next to Wi-Fi during a call ──
-    //
-    // Android tears the cellular data path down while Wi-Fi is the default,
-    // so there is nothing to gather candidates on until the switch has
-    // already happened. requestNetwork(TRANSPORT_CELLULAR) keeps the radio
-    // attached for as long as the request is held; the SDK then binds its
-    // extra sockets to that Network (android_setsocknetwork) through the
-    // handle handed over here. Held only while a call is up — Dart drives it.
-    private fun setCellularRequested(on: Boolean) {
-        val cm = connectivityManager
-            ?: (context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
-                .also { connectivityManager = it }
-        if (!on) {
-            val cb = cellularCallback ?: return
-            cellularCallback = null
-            try { cm.unregisterNetworkCallback(cb) } catch (_: Exception) {}
-            cellularIfname?.let { name ->
-                cellularIfname = null
-                mainHandler.post {
-                    channel.invokeMethod("onInterfaceHandle",
-                        mapOf("ifname" to name, "handle" to null))
-                }
-            }
-            return
-        }
-        if (cellularCallback != null) return
-        val req = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        val cb = object : ConnectivityManager.NetworkCallback() {
-            private fun report(network: Network, lp: LinkProperties?) {
-                val name = lp?.interfaceName ?: return
-                cellularIfname = name
-                val handle = network.networkHandle
-                mainHandler.post {
-                    channel.invokeMethod("onInterfaceHandle",
-                        mapOf("ifname" to name, "handle" to handle))
-                }
-            }
-            override fun onAvailable(network: Network) {
-                report(network, cm.getLinkProperties(network))
-            }
-            override fun onLinkPropertiesChanged(network: Network, lp: LinkProperties) {
-                report(network, lp)
-            }
-            override fun onLost(network: Network) {
-                val name = cellularIfname ?: return
-                cellularIfname = null
-                mainHandler.post {
-                    channel.invokeMethod("onInterfaceHandle",
-                        mapOf("ifname" to name, "handle" to null))
-                }
-            }
-        }
-        cellularCallback = cb
-        try {
-            cm.requestNetwork(req, cb)
-        } catch (e: Exception) {
-            // No CHANGE_NETWORK_STATE / no modem: multipath stays off.
-            Log.w(TAG, "requestNetwork(cellular) failed: $e")
-            cellularCallback = null
-        }
+    override fun accountRegister(accountId: String) = sdk { account(accountId).register() }
+    override fun accountUnregister(accountId: String) = sdk { account(accountId).unregister() }
+    override fun accountRegistrationState(accountId: String): Long =
+        sdk { account(accountId).registrationState.value.toLong() }
+
+    override fun accountSetRetryPolicy(accountId: String, initialMs: Long, maxMs: Long,
+                                       backoff: Double, maxAttempts: Long) = sdk {
+        account(accountId).setRetryPolicy(initialMs.toInt(), maxMs.toInt(), backoff.toFloat(), maxAttempts.toInt())
     }
 
-    private fun unregisterNetworkCallback() {
-        // A debounced notify must not outlive the callback that scheduled it:
-        // onDetachedFromEngine clears the method-call handler right after this,
-        // and invoking into a detached channel throws.
-        mainHandler.removeCallbacks(notifyRunnable)
-        defaultNetwork = null
-        val cb = networkCallback ?: return
-        try {
-            connectivityManager?.unregisterNetworkCallback(cb)
-        } catch (_: Exception) {
-        }
-        networkCallback = null
+    override fun accountCancelRetry(accountId: String) = sdk { account(accountId).cancelRetry() }
+    override fun accountRetryNow(accountId: String) = sdk { account(accountId).retryNow() }
+    override fun accountKeepaliveNow(accountId: String) = sdk { account(accountId).keepaliveNow() }
+    override fun accountSetPushToken(accountId: String, token: String?) =
+        sdk { account(accountId).setPushToken(token) }
+
+    override fun accountSetIceServers(accountId: String, servers: List<IceServerMessage>, policy: Long) = sdk {
+        account(accountId).setIceServers(servers.map { it.toSdk() },
+            enumOf(policy, IceTransportPolicy.entries) { it.value })
     }
 
-    /**
-     * Coalesce a burst of default-network callbacks into ONE handover.
-     *
-     * onAvailable's and onLost's own dedupes each assume they see the other
-     * half of a switch first, and the ordering is not guaranteed (see the
-     * comment on the callback above). When onLost(old) lands FIRST,
-     * `defaultNetwork == network` still holds, so it notifies and clears the
-     * field — and the onAvailable(new) that follows sees a different network
-     * and notifies again. That is two handovers for one switch in half of all
-     * orderings: exactly the doubled transport reset + doubled re-INVITE the
-     * dedupes exist to prevent.
-     *
-     * Debouncing on the main thread makes the result ordering-independent: the
-     * last state to settle within the window is the one the SDK is told about.
-     * The window is short enough to stay imperceptible against the 1/2/4/8s
-     * handover ladder in netmon.c, and it costs nothing when only one callback
-     * arrives.
-     */
-    private fun notifyDart() {
-        // MethodChannel calls must run on the platform (main) thread anyway, so
-        // the debounce and the invoke share one handler and need no locking.
-        mainHandler.removeCallbacks(notifyRunnable)
-        mainHandler.postDelayed(notifyRunnable, NETWORK_COALESCE_MS)
+    override fun accountAddHeader(accountId: String, name: String, value: String) =
+        sdk { account(accountId).addHeader(name, value) }
+
+    override fun accountAddRegisterHeader(accountId: String, name: String, value: String) =
+        sdk { account(accountId).addRegisterHeader(name, value) }
+
+    override fun accountSetReliableProvisional(accountId: String, mode: Long) = sdk {
+        account(accountId).setReliableProvisional(enumOf(mode, ReliableProvisionalMode.entries) { it.value })
     }
 
-    private val notifyRunnable = Runnable {
-        channel.invokeMethod("onNetworkChanged", null)
+    override fun accountSendMessage(accountId: String, to: String, body: String, contentType: String?) =
+        sdk { account(accountId).sendMessage(to, body, contentType) }
+
+    override fun accountPublishPresence(accountId: String, status: Long) = sdk {
+        account(accountId).publishPresence(enumOf(status, PresenceStatus.entries) { it.value })
+    }
+
+    override fun accountSubscribePresence(accountId: String, uri: String) =
+        sdk { account(accountId).subscribePresence(uri) }
+
+    override fun accountUnsubscribePresence(accountId: String, uri: String) =
+        sdk { account(accountId).unsubscribePresence(uri) }
+
+    override fun accountCall(accountId: String, uri: String): CallMessage =
+        sdk { track(account(accountId).call(uri)) }
+
+    // ── Calls ────────────────────────────────────────────────────────────
+
+    override fun callAnswer(callId: String) = sdk { call(callId).answer() }
+    override fun callHangup(callId: String) = sdk { call(callId).hangup() }
+    override fun callReject(callId: String, statusCode: Long, reason: String?) =
+        sdk { call(callId).reject(statusCode.toInt(), reason) }
+    override fun callHold(callId: String) = sdk { call(callId).hold() }
+    override fun callResume(callId: String) = sdk { call(callId).resume() }
+    override fun callIsHeld(callId: String): Boolean = sdk { call(callId).isHeld }
+
+    override fun callSendDtmf(callId: String, digit: String) = sdk {
+        val c = digit.singleOrNull()
+            ?: throw FlutterError("INVALID_ARGUMENT", "sendDtmf takes one digit, got \"$digit\"", -1)
+        call(callId).sendDtmf(c)
+    }
+
+    override fun callTransfer(callId: String, uri: String) = sdk { call(callId).transfer(uri) }
+    override fun callAttendedTransfer(callId: String, consultationCallId: String) =
+        sdk { call(callId).attendedTransfer(call(consultationCallId)) }
+    override fun callAcceptTransfer(callId: String): CallMessage =
+        sdk { track(call(callId).acceptTransfer()) }
+    override fun callRejectTransfer(callId: String, statusCode: Long, reason: String?) =
+        sdk { call(callId).rejectTransfer(statusCode.toInt(), reason) }
+    override fun callAddHeader(callId: String, name: String, value: String) =
+        sdk { call(callId).addHeader(name, value) }
+    override fun callSetMuted(callId: String, muted: Boolean) = sdk { call(callId).setMuted(muted) }
+    override fun callIsMuted(callId: String): Boolean = sdk { call(callId).isMuted }
+    override fun callSetReceiveMuted(callId: String, muted: Boolean) =
+        sdk { call(callId).setReceiveMuted(muted) }
+    override fun callStartRecording(callId: String, path: String) =
+        sdk { call(callId).startRecording(path) }
+    override fun callStopRecording(callId: String) = sdk { call(callId).stopRecording() }
+    override fun callSetDscp(callId: String, dscp: Long) = sdk { call(callId).setDscp(dscp.toInt()) }
+    override fun callSetRtpTimeout(callId: String, seconds: Long) =
+        sdk { call(callId).setRtpTimeout(seconds.toInt()) }
+    override fun callSetBitrate(callId: String, bps: Long) = sdk { call(callId).setBitrate(bps.toInt()) }
+    override fun callIceState(callId: String): Long = sdk { call(callId).iceState.value.toLong() }
+    override fun callInfo(callId: String): CallInfoMessage = sdk { call(callId).info().toMessage() }
+    override fun callStats(callId: String): MediaStatsMessage = sdk { call(callId).stats().toMessage() }
+
+    // ── Audio processing and devices ─────────────────────────────────────
+
+    override fun setEchoCancellation(enabled: Boolean) = sdk { Medut.audio.setEchoCancellation(enabled) }
+    override fun setAecMode(mode: Long) = sdk { Medut.audio.setAecMode(enumOf(mode, AecMode.entries) { it.value }) }
+    override fun setAecSuppressionLevel(level: Double) = sdk { Medut.audio.setAecSuppressionLevel(level.toFloat()) }
+    override fun setNoiseSuppression(enabled: Boolean) = sdk { Medut.audio.setNoiseSuppression(enabled) }
+    override fun setAutoGainControl(enabled: Boolean) = sdk { Medut.audio.setAutoGainControl(enabled) }
+    override fun setMicGainDb(db: Double) = sdk { Medut.audio.setMicGainDb(db.toFloat()) }
+    override fun setSpeakerGainDb(db: Double) = sdk { Medut.audio.setSpeakerGainDb(db.toFloat()) }
+    override fun setJitterBuffer(minMs: Long, maxMs: Long) =
+        sdk { Medut.audio.setJitterBuffer(minMs.toInt(), maxMs.toInt()) }
+    override fun setJitterBufferType(type: Long) =
+        sdk { Medut.audio.setJitterBufferType(enumOf(type, JitterBufferType.entries) { it.value }) }
+    override fun setAdaptiveBitrate(enabled: Boolean, minBps: Long, maxBps: Long) =
+        sdk { Medut.audio.setAdaptiveBitrate(enabled, minBps.toInt(), maxBps.toInt()) }
+
+    override fun inputDevices(): List<AudioDeviceMessage> =
+        sdk { Medut.audio.inputDevices().map { AudioDeviceMessage(it.name, it.description, it.isDefault) } }
+
+    override fun outputDevices(): List<AudioDeviceMessage> =
+        sdk { Medut.audio.outputDevices().map { AudioDeviceMessage(it.name, it.description, it.isDefault) } }
+
+    override fun setInputDevice(name: String?) = sdk { Medut.audio.setInputDevice(name) }
+    override fun setOutputDevice(name: String?) = sdk { Medut.audio.setOutputDevice(name) }
+
+    // ── Call-audio routes ────────────────────────────────────────────────
+
+    private fun routes(): List<AudioRouteMessage> = MedutAndroid.audioRoutes.list().map { it.toMessage() }
+
+    override fun audioRoutes(): List<AudioRouteMessage> = sdk { routes() }
+    override fun selectAudioRoute(id: String): List<AudioRouteMessage> =
+        sdk { MedutAndroid.audioRoutes.select(id).map { it.toMessage() } }
+    override fun setSpeakerphone(on: Boolean) = sdk { MedutAndroid.audioRoutes.setSpeakerphone(on) }
+    override fun setExternalRouting(on: Boolean) = sdk { MedutAndroid.audioRoutes.externalRouting = on }
+
+    // ── App-owned audio ──────────────────────────────────────────────────
+
+    override fun useAppOwnedAudio(enable: Boolean) = sdk { MedutAndroid.useAppOwnedAudio(enable) }
+    override fun appOwnedAudioStatus(): Map<String, Any?> = MedutAndroid.appOwnedAudioStatus
+    override fun appOwnedAudioActive(): Boolean = Medut.audio.isExternalActive
+    override fun appOwnedAudioFormat(): ExternalAudioFormatMessage? = Medut.audio.externalFormat?.let {
+        ExternalAudioFormatMessage(it.sampleRate.toLong(), it.channels.toLong(), it.ptimeMs.toLong())
+    }
+    override fun platformCallAudioActive(active: Boolean) = MedutAndroid.setCallAudioActive(active)
+
+    // ── Network and capture ──────────────────────────────────────────────
+
+    override fun networkChanged() = sdk { Medut.network.changed() }
+    override fun networkSetMonitorInterval(seconds: Long) =
+        sdk { Medut.network.setMonitorInterval(seconds.toInt()) }
+    override fun networkSetHandoverPolicy(reinviteCalls: Boolean, hangupOnFailure: Boolean) =
+        sdk { Medut.network.setHandoverPolicy(reinviteCalls, hangupOnFailure) }
+    override fun networkLocalAddress(): String = sdk { Medut.network.localAddress }
+    override fun networkIsUp(): Boolean = Medut.network.isUp
+    override fun startPcap(path: String) = sdk { Medut.startPcap(path) }
+    override fun stopPcap() = sdk { Medut.stopPcap() }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private fun account(id: String): Account = accounts[id]
+        ?: throw FlutterError("ACCOUNT_DESTROYED", "no account $id", -3)
+
+    private fun call(id: String): Call = calls[id]
+        ?: throw FlutterError("CALL_ENDED", "no call $id (ended and released)", -3)
+
+    /** Run an SDK call, turning its failures into the errors Dart decodes. */
+    private inline fun <T> sdk(body: () -> T): T = try {
+        body()
+    } catch (e: MedutException) {
+        throw FlutterError(e.code.name, e.message, e.error.rawValue)
+    } catch (e: IllegalStateException) {
+        throw FlutterError("NOT_RUNNING", e.message, -3)
     }
 
     private companion object {
-        /**
-         * How long [notifyDart] waits for a default-network burst to settle.
-         *
-         * A Wi-Fi<->cellular switch delivers onLost + onAvailable within a few
-         * hundred ms; 400 ms swallows the pair without adding a delay the SDK's
-         * own handover ladder (1/2/4/8s, netmon.c) would notice.
-         */
-        const val NETWORK_COALESCE_MS = 400L
+        const val AUDIO_ROUTES_CHANGED = 100L
+        const val APP_OWNED_AUDIO_ERROR = 101L
 
-        const val TAG = "Medut"
+        /** Ended calls kept for Dart before the oldest is dropped. */
+        const val MAX_ENDED_CALLS = 32
+    }
+}
+
+// ── Pigeon <-> SDK conversions ───────────────────────────────────────────
+
+private inline fun <E> enumOf(value: Long, entries: List<E>, raw: (E) -> Int): E =
+    entries.firstOrNull { raw(it) == value.toInt() }
+        ?: throw FlutterError("INVALID_ARGUMENT", "unknown enum value $value", -1)
+
+private fun IceServerMessage.toSdk() = IceServer(url, username, password)
+
+private fun ConfigMessage.toSdk(): MedutConfig {
+    val d = MedutConfig()
+    return MedutConfig(
+        transport = transport?.let { enumOf(it, Transport.entries) { e -> e.value } } ?: d.transport,
+        localIp = localIp ?: d.localIp,
+        localPort = localPort?.toInt() ?: d.localPort,
+        bindInterface = bindInterface ?: d.bindInterface,
+        preferIpv6 = preferIpv6 ?: d.preferIpv6,
+        sipDomain = sipDomain ?: d.sipDomain,
+        serverUrl = serverUrl ?: d.serverUrl,
+        serverHost = serverHost ?: d.serverHost,
+        serverPort = serverPort?.toInt() ?: d.serverPort,
+        outboundProxy = outboundProxy ?: d.outboundProxy,
+        caCertPath = caCertPath ?: d.caCertPath,
+        clientCert = clientCert ?: d.clientCert,
+        clientKey = clientKey ?: d.clientKey,
+        verifyServer = verifyServer ?: d.verifyServer,
+        sniHostname = sniHostname ?: d.sniHostname,
+        userAgent = userAgent ?: d.userAgent,
+        wsOrigin = wsOrigin ?: d.wsOrigin,
+        wsExtraHeaders = wsExtraHeaders ?: d.wsExtraHeaders,
+        wsKeepaliveMs = wsKeepaliveMs?.toInt() ?: d.wsKeepaliveMs,
+        stunServer = stunServer ?: d.stunServer,
+        turnServer = turnServer ?: d.turnServer,
+        turnUser = turnUser ?: d.turnUser,
+        turnPass = turnPass ?: d.turnPass,
+        iceEnabled = iceEnabled ?: d.iceEnabled,
+        rtcpMux = rtcpMux ?: d.rtcpMux,
+        iceServers = iceServers?.map { it.toSdk() } ?: d.iceServers,
+        iceTransportPolicy = iceTransportPolicy?.let { enumOf(it, IceTransportPolicy.entries) { e -> e.value } }
+            ?: d.iceTransportPolicy,
+        iceGatheringTimeoutMs = iceGatheringTimeoutMs?.toInt() ?: d.iceGatheringTimeoutMs,
+        iceMultipath = iceMultipath ?: d.iceMultipath,
+        mediaEncryption = mediaEncryption?.let { enumOf(it, MediaEncryption.entries) { e -> e.value } }
+            ?: d.mediaEncryption,
+        audioCodecs = audioCodecs ?: d.audioCodecs,
+        dscpSip = dscpSip?.toInt() ?: d.dscpSip,
+        dscpRtp = dscpRtp?.toInt() ?: d.dscpRtp,
+        aecMode = aecMode?.let { enumOf(it, AecMode.entries) { e -> e.value } } ?: d.aecMode,
+        noiseSuppression = noiseSuppression ?: d.noiseSuppression,
+        autoGainControl = autoGainControl ?: d.autoGainControl,
+        aecSuppressionLevel = aecSuppressionLevel?.toFloat() ?: d.aecSuppressionLevel,
+        micGainDb = micGainDb?.toFloat() ?: d.micGainDb,
+        speakerGainDb = speakerGainDb?.toFloat() ?: d.speakerGainDb,
+        opus = OpusConfig(
+            bitrate = opusBitrate?.toInt() ?: d.opus.bitrate,
+            complexity = opusComplexity?.toInt() ?: d.opus.complexity,
+            constantBitrate = opusConstantBitrate ?: d.opus.constantBitrate,
+            discontinuousTransmission = opusDtx ?: d.opus.discontinuousTransmission,
+            forwardErrorCorrection = opusFec ?: d.opus.forwardErrorCorrection,
+            stereo = opusStereo ?: d.opus.stereo,
+        ),
+        platformAudioActivate = platformAudioActivate ?: d.platformAudioActivate,
+        jitterBufferType = jitterBufferType?.let { enumOf(it, JitterBufferType.entries) { e -> e.value } }
+            ?: d.jitterBufferType,
+        jitterBufferMinMs = jitterBufferMinMs?.toInt() ?: d.jitterBufferMinMs,
+        jitterBufferMaxMs = jitterBufferMaxMs?.toInt() ?: d.jitterBufferMaxMs,
+        regExpires = regExpires?.toInt() ?: d.regExpires,
+        regRefreshPct = regRefreshPct?.toInt() ?: d.regRefreshPct,
+        keepaliveIntervalMs = keepaliveIntervalMs?.toInt() ?: d.keepaliveIntervalMs,
+        keepaliveReregister = keepaliveReregister ?: d.keepaliveReregister,
+        regRetryInitialMs = regRetryInitialMs?.toInt() ?: d.regRetryInitialMs,
+        regRetryMaxMs = regRetryMaxMs?.toInt() ?: d.regRetryMaxMs,
+        regRetryBackoff = regRetryBackoff?.toFloat() ?: d.regRetryBackoff,
+        regRetryMaxAttempts = regRetryMaxAttempts?.toInt() ?: d.regRetryMaxAttempts,
+        regRetryJitter = regRetryJitter?.toFloat() ?: d.regRetryJitter,
+        dnsSrvFailover = dnsSrvFailover ?: d.dnsSrvFailover,
+        sipTimerBMs = sipTimerBMs?.toInt() ?: d.sipTimerBMs,
+        sipTimerFMs = sipTimerFMs?.toInt() ?: d.sipTimerFMs,
+        sessionTimerEnabled = sessionTimerEnabled ?: d.sessionTimerEnabled,
+        sessionExpiresSeconds = sessionExpiresSeconds?.toInt() ?: d.sessionExpiresSeconds,
+        sessionMinSeSeconds = sessionMinSeSeconds?.toInt() ?: d.sessionMinSeSeconds,
+        statsIntervalMs = statsIntervalMs?.toInt() ?: d.statsIntervalMs,
+        mosMethod = mosMethod?.let { enumOf(it, MosMethod.entries) { e -> e.value } } ?: d.mosMethod,
+        mosAlertThreshold = mosAlertThreshold?.toFloat() ?: d.mosAlertThreshold,
+        lossAlertThreshold = lossAlertThreshold?.toFloat() ?: d.lossAlertThreshold,
+        jitterAlertThreshold = jitterAlertThreshold?.toFloat() ?: d.jitterAlertThreshold,
+        rtpTimeoutSeconds = rtpTimeoutSeconds?.toInt() ?: d.rtpTimeoutSeconds,
+        mediaStallMs = mediaStallMs?.toInt() ?: d.mediaStallMs,
+        adaptiveBitrate = adaptiveBitrate ?: d.adaptiveBitrate,
+        adaptMinBitrate = adaptMinBitrate?.toInt() ?: d.adaptMinBitrate,
+        adaptMaxBitrate = adaptMaxBitrate?.toInt() ?: d.adaptMaxBitrate,
+        adaptLossDownPct = adaptLossDownPct?.toFloat() ?: d.adaptLossDownPct,
+        adaptLossUpPct = adaptLossUpPct?.toFloat() ?: d.adaptLossUpPct,
+        adaptRecoverTicks = adaptRecoverTicks?.toInt() ?: d.adaptRecoverTicks,
+        opusExpectedLossPct = opusExpectedLossPct?.toInt() ?: d.opusExpectedLossPct,
+        netMonitorIntervalSeconds = netMonitorIntervalSeconds?.toInt() ?: d.netMonitorIntervalSeconds,
+        netSettleMs = netSettleMs?.toInt() ?: d.netSettleMs,
+        netReinviteCalls = netReinviteCalls ?: d.netReinviteCalls,
+        netHangupOnMigrationFailure = netHangupOnMigrationFailure ?: d.netHangupOnMigrationFailure,
+        netVerifyMs = netVerifyMs?.toInt() ?: d.netVerifyMs,
+        netMaxAttempts = netMaxAttempts?.toInt() ?: d.netMaxAttempts,
+        netIceHandover = netIceHandover?.let { enumOf(it, IceHandoverPolicy.entries) { e -> e.value } }
+            ?: d.netIceHandover,
+        tmpDir = tmpDir ?: d.tmpDir,
+        traceSip = traceSip ?: d.traceSip,
+        traceSdpDiff = traceSdpDiff ?: d.traceSdpDiff,
+        pcapPath = pcapPath ?: d.pcapPath,
+        logLevel = logLevel?.let { enumOf(it, LogLevel.entries) { e -> e.value } } ?: d.logLevel,
+    )
+}
+
+private fun AccountConfigMessage.toSdk(): AccountConfig {
+    val d = AccountConfig(uri, password)
+    return d.copy(
+        transport = transport?.let { enumOf(it, Transport.entries) { e -> e.value } } ?: d.transport,
+        serverUrl = serverUrl ?: d.serverUrl,
+        serverHost = serverHost ?: d.serverHost,
+        serverPort = serverPort?.toInt() ?: d.serverPort,
+        outboundProxy = outboundProxy ?: d.outboundProxy,
+        authUser = authUser ?: d.authUser,
+        displayName = displayName ?: d.displayName,
+        mediaEncryption = mediaEncryption?.let { enumOf(it, MediaEncryption.entries) { e -> e.value } }
+            ?: d.mediaEncryption,
+        iceEnabled = iceEnabled ?: d.iceEnabled,
+        rtcpMux = rtcpMux ?: d.rtcpMux,
+        stunServer = stunServer ?: d.stunServer,
+        turnServer = turnServer ?: d.turnServer,
+        turnUser = turnUser ?: d.turnUser,
+        turnPass = turnPass ?: d.turnPass,
+        iceServers = iceServers?.map { it.toSdk() } ?: d.iceServers,
+        iceTransportPolicy = iceTransportPolicy?.let { enumOf(it, IceTransportPolicy.entries) { e -> e.value } }
+            ?: d.iceTransportPolicy,
+        verifyTls = verifyTls ?: d.verifyTls,
+        pushProvider = pushProvider?.let { enumOf(it, PushProvider.entries) { e -> e.value } } ?: d.pushProvider,
+        pushToken = pushToken ?: d.pushToken,
+        pushParam = pushParam ?: d.pushParam,
+        audioCodecs = audioCodecs ?: d.audioCodecs,
+        dtmfMode = dtmfMode?.let { enumOf(it, DtmfMode.entries) { e -> e.value } } ?: d.dtmfMode,
+    )
+}
+
+private fun Account.toMessage() =
+    AccountMessage(id.toString(), aor, registrationState.value.toLong())
+
+private fun Call.toMessage() = CallMessage(
+    id = id.toString(),
+    accountId = account?.id?.toString(),
+    state = state.value.toLong(),
+    isOutgoing = isOutgoing,
+    remoteUri = remoteUri,
+    remoteDisplayName = remoteDisplayName,
+)
+
+private fun AudioRoute.toMessage() = AudioRouteMessage(
+    id = id,
+    name = name,
+    kind = when (kind) {
+        AudioRoute.Kind.EARPIECE -> "earpiece"
+        AudioRoute.Kind.SPEAKER -> "speaker"
+        AudioRoute.Kind.BLUETOOTH -> "bluetooth"
+        AudioRoute.Kind.WIRED_HEADSET -> "wired-headset"
+    },
+    isActive = isActive,
+)
+
+private fun CallInfo.toMessage() = CallInfoMessage(
+    peerUri = peerUri,
+    peerDisplayName = peerDisplayName,
+    localUri = localUri,
+    contactUri = contactUri,
+    callId = callId,
+    diverterUri = diverterUri,
+    isOutgoing = isOutgoing,
+    isRemoteHold = isRemoteHold,
+    sipStatus = sipStatus.toLong(),
+    durationMs = durationMs,
+    setupDurationMs = setupDurationMs,
+    lineNumber = lineNumber,
+    transport = transport.value.toLong(),
+    state = state.value.toLong(),
+)
+
+private fun MediaStats.toMessage() = MediaStatsMessage(
+    packetsSent = packetsSent,
+    packetsReceived = packetsReceived,
+    packetsLost = packetsLost,
+    packetsLostRx = packetsLostRx,
+    bytesSent = bytesSent,
+    bytesReceived = bytesReceived,
+    txErrors = txErrors,
+    rxErrors = rxErrors,
+    lossPct = lossPct.toDouble(),
+    lossPctRx = lossPctRx.toDouble(),
+    jitterMs = jitterMs.toDouble(),
+    txJitterMs = txJitterMs.toDouble(),
+    rttMs = rttMs.toDouble(),
+    jitterBufferMs = jitterBufferMs,
+    jitterBufferLoad = jitterBufferLoad,
+    latePackets = latePackets,
+    discardedPackets = discardedPackets,
+    jitterBufferTargetMs = jitterBufferTargetMs,
+    jitterBufferAdaptive = jitterBufferAdaptive,
+    plcFrames = plcFrames,
+    plcRatio = plcRatio.toDouble(),
+    fecRecovered = fecRecovered,
+    plcConcealed = plcConcealed,
+    fecActive = fecActive,
+    fecLevelPct = fecLevelPct,
+    bandwidthKbpsTx = bandwidthKbpsTx,
+    bandwidthKbpsRx = bandwidthKbpsRx,
+    avgBandwidthKbpsTx = avgBandwidthKbpsTx,
+    avgBandwidthKbpsRx = avgBandwidthKbpsRx,
+    mosLq = mosLq.toDouble(),
+    mosCq = mosCq.toDouble(),
+    mosLqRx = mosLqRx.toDouble(),
+    mosCqRx = mosCqRx.toDouble(),
+    mosLqMin = mosLqMin.toDouble(),
+    mosLqAvg = mosLqAvg.toDouble(),
+    mosMethod = mosMethod.value.toLong(),
+    codecName = codecName,
+    codecClockRate = codecClockRate,
+    codecSampleRate = codecSampleRate,
+    codecChannels = codecChannels.toLong(),
+    payloadType = payloadType.toLong(),
+    audioLevelDbov = audioLevelDbov.toDouble(),
+    micLevelDbov = micLevelDbov.toDouble(),
+    ssrcTx = ssrcTx,
+    ssrcRx = ssrcRx,
+    remoteAddress = remoteAddress,
+    statsTick = statsTick,
+    callDurationMs = callDurationMs,
+    isFinal = isFinal,
+    iceState = iceState.value.toLong(),
+    iceLocalType = iceLocalType.value.toLong(),
+    iceRemoteType = iceRemoteType.value.toLong(),
+    iceRttMs = iceRttMs.toDouble(),
+    iceGeneration = iceGeneration,
+    iceLocalAddress = iceLocalAddress,
+    iceRemoteAddress = iceRemoteAddress,
+)
+
+private fun MedutEvent.toMessage(): EventMessage {
+    val acct = account?.id?.toString()
+    val callMsg = call?.toMessage()
+    return when (this) {
+        is MedutEvent.Log -> EventMessage(type = 0, message = message)
+        is MedutEvent.Registration -> EventMessage(type = 1, accountId = acct,
+            state = state.value.toLong(), error = error?.rawValue?.toLong(), errorText = errorText,
+            retryAttempt = retryAttempt, retryDelayMs = retryDelayMs)
+        is MedutEvent.IncomingCall -> EventMessage(type = 2, accountId = acct, call = callMsg,
+            fromUri = fromUri, displayName = displayName)
+        is MedutEvent.CallStateChanged -> EventMessage(type = 3, accountId = acct, call = callMsg,
+            state = state.value.toLong(), error = error?.rawValue?.toLong(), reason = reason)
+        is MedutEvent.Dtmf -> EventMessage(type = 4, call = callMsg, digit = digit.toString())
+        is MedutEvent.SdpNegotiation -> EventMessage(type = 5, call = callMsg, localSdp = localSdp,
+            remoteSdp = remoteSdp, negotiatedCodec = negotiatedCodec,
+            negotiatedCrypto = negotiatedCrypto, rejectedCodecs = rejectedCodecs, warnings = warnings)
+        is MedutEvent.SipTrace -> EventMessage(type = 6, direction = direction.value.toLong(),
+            transport = transport, remoteAddress = remoteAddress, rawMessage = message,
+            timestampUs = timestampMicros)
+        is MedutEvent.MediaStatsUpdate -> EventMessage(type = 7, call = callMsg, stats = stats.toMessage())
+        is MedutEvent.RegistrarWarning -> EventMessage(type = 8, message = message)
+        is MedutEvent.TransferRequest -> EventMessage(type = 9, accountId = acct, call = callMsg,
+            referToUri = referToUri, isAttended = isAttended, autoFollowed = autoFollowed)
+        is MedutEvent.MessageWaiting -> EventMessage(type = 10, accountId = acct,
+            messagesWaiting = messagesWaiting, newVoice = newVoice, oldVoice = oldVoice,
+            newUrgent = newUrgent, oldUrgent = oldUrgent, rawBody = rawBody)
+        is MedutEvent.Message -> EventMessage(type = 11, accountId = acct, fromUri = fromUri,
+            body = body, contentType = contentType)
+        is MedutEvent.Presence -> EventMessage(type = 12, accountId = acct, targetUri = targetUri,
+            status = status.value.toLong())
+        is MedutEvent.QualityAlert -> EventMessage(type = 13, call = callMsg, issue = issue.value.toLong(),
+            value = value.toDouble(), threshold = threshold.toDouble(), recovering = recovering)
+        is MedutEvent.Network -> EventMessage(type = 14, accountId = acct, call = callMsg,
+            stage = stage.value.toLong(), localAddress = localAddress, attempt = attempt,
+            maxAttempts = maxAttempts, elapsedMs = elapsedMs, ice = ice,
+            error = error?.rawValue?.toLong())
+        is MedutEvent.TransferFailed -> EventMessage(type = 15, accountId = acct, call = callMsg,
+            reason = reason)
+        is MedutEvent.IceStateChanged -> EventMessage(type = 16, call = callMsg,
+            state = state.value.toLong(), previousState = previous.value.toLong(),
+            generation = generation, localType = localType.value.toLong(),
+            remoteType = remoteType.value.toLong(), localAddress = localAddress,
+            remoteAddress = remoteAddress, rttMs = rttMs.toDouble(), error = error?.rawValue?.toLong())
+        is MedutEvent.Unknown -> EventMessage(type = type.toLong())
     }
 }

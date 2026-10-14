@@ -1,7 +1,7 @@
 name: medut
 description: >-
-  Flutter/Dart SIP softphone SDK (baresip-based): UDP/TCP/TLS/WS/WSS
-  registration, calls, codec control, reconnection & network handover,
+  Flutter SIP softphone SDK for Android and iOS (baresip-based): UDP/TCP/TLS/
+  WS/WSS registration, calls, codec control, reconnection & network handover,
   media statistics and quality alerts.
 version: 1.0.0
 homepage: https://github.com/Ibrahimgamal99/Medut-SDK
@@ -13,7 +13,7 @@ topics:
   - voip
   - softphone
   - webrtc
-  - ffi
+  - pigeon
 
 environment:
   sdk: ">=3.1.0 <4.0.0"
@@ -22,28 +22,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  ffi: ^2.1.0
 
 dev_dependencies:
-  ffigen: ^12.0.0
   flutter_test:
     sdk: flutter
+  pigeon: ^29.0.8
 
 flutter:
   plugin:
     platforms:
-      # Android is a hybrid plugin:
-      #  - ffiPlugin ships the prebuilt libmedut.so from src/main/jniLibs
-      #  - MedutPlugin (Kotlin) provides cache dir, audio focus, speaker
-      #    routing and ConnectivityManager callbacks over MethodChannel.
+      # Pigeon over the native SDKs, which own the stack: the Kotlin SDK
+      # (bindings/kotlin) on Android and MedutKit (bindings/swift) on iOS.
       android:
         package: dev.medut.flutter
         pluginClass: MedutPlugin
-        ffiPlugin: true
-      # iOS vendors the prebuilt dynamic Medut.xcframework via the podspec
-      # (built by scripts/build-ios.sh on macOS/CI) plus a Swift shim for
-      # audio session / speaker routing / NWPathMonitor callbacks.
       ios:
         pluginClass: MedutPlugin
-      # Desktop: the app bundles the native library itself (or passes
-      # Medut(libPath: ...)); see lib/src/sdk.dart loadLib().

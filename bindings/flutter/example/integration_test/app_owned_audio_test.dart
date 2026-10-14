@@ -67,9 +67,9 @@ void main() {
     expect(st['available'], isTrue,
         reason: 'libmedut.so did not load, or the JNI symbols are missing — '
             'every push/pull would throw UnsatisfiedLinkError');
-    expect(sdk.appOwnedAudioActive, isFalse,
+    expect(await sdk.appOwnedAudioActive(), isFalse,
         reason: 'no call yet, so no device should be open');
-    expect(sdk.appOwnedAudioFormat, isNull);
+    expect(await sdk.appOwnedAudioFormat(), isNull);
 
     // 2 ── Register.
     final states = <RegState>[];
@@ -94,7 +94,7 @@ void main() {
       }
     });
 
-    final account = sdk.createAccount(
+    final account = await sdk.createAccount(
       'sip:$_uri',
       _pass,
       config: AccountConfig(
@@ -106,7 +106,7 @@ void main() {
         audioCodecs: const ['opus'],
       ),
     );
-    account.register();
+    await account.register();
 
     await _until(() => states.contains(RegState.registered),
         timeout: const Duration(seconds: 25));
@@ -116,17 +116,18 @@ void main() {
 
     // 3 ── Place the call and wait for media, not for SIP state: the device
     //      opens when the call has media, which is later than "established".
-    final call = account.call(_callee);
+    final call = await account.call(_callee);
     note('dialling $_callee');
 
-    await _until(() => sdk.appOwnedAudioFormat != null,
+    ExternalAudioFormat? polled;
+    await _untilAsync(() async => (polled = await sdk.appOwnedAudioFormat()) != null,
         timeout: const Duration(seconds: 30));
-    final fmt = sdk.appOwnedAudioFormat;
+    final fmt = polled;
     expect(fmt, isNotNull,
         reason: 'the app-owned device never opened; call states seen: $calls');
     note('negotiated $fmt (${fmt!.samplesPerFrame} samples/frame)');
 
-    expect(sdk.appOwnedAudioActive, isTrue);
+    expect(await sdk.appOwnedAudioActive(), isTrue);
     expect(fmt.sampleRate, greaterThan(0));
     expect(fmt.channels, inInclusiveRange(1, 2));
     expect(fmt.ptimeMs, greaterThan(0));
@@ -216,10 +217,19 @@ void main() {
     note('status after handing back: $st');
     expect(st['armed'], isFalse, reason: 'engine should have disarmed');
 
-    call.hangup();
+    await call.hangup();
     await Future<void>.delayed(const Duration(seconds: 1));
     note('done');
   });
+}
+
+Future<void> _untilAsync(Future<bool> Function() cond,
+    {Duration timeout = const Duration(seconds: 10)}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (await cond()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
 }
 
 Future<void> _until(bool Function() cond,

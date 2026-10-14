@@ -316,8 +316,8 @@ class _PhonePageState extends State<PhonePage>
           jitterAlertThreshold: 40.0,
         ),
       );
-    } on StateError catch (e) {
-      _snack(e.message);
+    } on MedutException catch (e) {
+      _snack(e.message ?? e.code);
       return;
     }
 
@@ -333,10 +333,10 @@ class _PhonePageState extends State<PhonePage>
     // forever (a mistyped domain never resolves, so it never gives up) and
     // counts as a second SIP server for as long as it lives, which switches
     // off the SDK's WebSocket connection pinning for the account that works.
-    _account?.destroy();
+    await _account?.destroy();
     _account = null;
 
-    final account = _sdk!.createAccount(
+    final account = await _sdk!.createAccount(
       _user.text,
       _pass.text,
       config: AccountConfig(
@@ -358,7 +358,12 @@ class _PhonePageState extends State<PhonePage>
     _sub?.cancel();
     _sub = _sdk!.events.listen(_onEvent);
 
-    account.register();
+    try {
+      await account.register();
+    } on MedutException catch (e) {
+      _snack('register: ${e.message ?? e.code}');
+      return;
+    }
     setState(() => _regState = RegState.registering);
 
     // Save on register rather than on every keystroke: it is the point where
@@ -488,9 +493,9 @@ class _PhonePageState extends State<PhonePage>
         // happened, and only accept/reject sends one. Accepting keeps the new
         // call linked to this one so the SDK reports the outcome for us —
         // hanging up and dialling the URI would not.
-        if (e.call.transferAccept() == null) {
-          e.call.transferReject();
-        }
+        e.call.transferAccept().then((accepted) {
+          if (accepted == null) e.call.transferReject();
+        });
 
       case RegistrarWarningEvent e:
         _logLine('registrar warning: ${e.message}');
@@ -527,14 +532,20 @@ class _PhonePageState extends State<PhonePage>
 
   // ── call actions ───────────────────────────────────────────────────────
 
-  void _dial() {
+  Future<void> _dial() async {
     final acct = _account;
     if (acct == null || _callee.text.isEmpty) return;
-    setState(() {
-      _call = acct.call(_callee.text);
-      _callState = CallState.calling;
-      _callPeer = _callee.text;
-    });
+    final peer = _callee.text;
+    try {
+      final call = await acct.call(peer);
+      setState(() {
+        _call = call;
+        _callState = CallState.calling;
+        _callPeer = peer;
+      });
+    } on MedutException catch (e) {
+      _snack('call: ${e.message ?? e.code}');
+    }
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────
