@@ -708,7 +708,8 @@ private extension MedutEvent {
                                 fromUri: e.fromURI, displayName: e.displayName)
         case .callState(let e):
             return EventMessage(type: 3, accountId: accountId, call: callMessage,
-                                state: Int64(e.state.rawValue), error: raw(e.error), reason: e.reason)
+                                state: Int64(e.state.rawValue), error: raw(e.error), reason: e.reason,
+                                endedLocally: e.endedLocally)
         case .dtmf(let e):
             return EventMessage(type: 4, call: callMessage, digit: String(e.digit))
         case .sdpNegotiation(let e):

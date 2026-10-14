@@ -1694,6 +1694,7 @@ class EventMessage {
     this.fromUri,
     this.displayName,
     this.reason,
+    this.endedLocally,
     this.digit,
     this.localSdp,
     this.remoteSdp,
@@ -1765,6 +1766,9 @@ class EventMessage {
   String? displayName;
 
   String? reason;
+
+  /// Call state: this side ended the call (see CallStateEvent.endedLocally).
+  bool? endedLocally;
 
   String? digit;
 
@@ -1865,6 +1869,7 @@ class EventMessage {
       fromUri,
       displayName,
       reason,
+      endedLocally,
       digit,
       localSdp,
       remoteSdp,
@@ -1929,48 +1934,49 @@ class EventMessage {
       fromUri: result[10] as String?,
       displayName: result[11] as String?,
       reason: result[12] as String?,
-      digit: result[13] as String?,
-      localSdp: result[14] as String?,
-      remoteSdp: result[15] as String?,
-      negotiatedCodec: result[16] as String?,
-      negotiatedCrypto: result[17] as String?,
-      rejectedCodecs: (result[18] as List<Object?>?)?.cast<String>(),
-      warnings: (result[19] as List<Object?>?)?.cast<String>(),
-      direction: result[20] as int?,
-      transport: result[21] as String?,
-      remoteAddress: result[22] as String?,
-      rawMessage: result[23] as String?,
-      timestampUs: result[24] as int?,
-      stats: result[25] as MediaStatsMessage?,
-      referToUri: result[26] as String?,
-      isAttended: result[27] as bool?,
-      autoFollowed: result[28] as bool?,
-      messagesWaiting: result[29] as bool?,
-      newVoice: result[30] as int?,
-      oldVoice: result[31] as int?,
-      newUrgent: result[32] as int?,
-      oldUrgent: result[33] as int?,
-      rawBody: result[34] as String?,
-      body: result[35] as String?,
-      contentType: result[36] as String?,
-      targetUri: result[37] as String?,
-      status: result[38] as int?,
-      issue: result[39] as int?,
-      value: result[40] as double?,
-      threshold: result[41] as double?,
-      recovering: result[42] as bool?,
-      stage: result[43] as int?,
-      localAddress: result[44] as String?,
-      attempt: result[45] as int?,
-      maxAttempts: result[46] as int?,
-      elapsedMs: result[47] as int?,
-      ice: result[48] as bool?,
-      generation: result[49] as int?,
-      localType: result[50] as int?,
-      remoteType: result[51] as int?,
-      rttMs: result[52] as double?,
-      routes: (result[53] as List<Object?>?)?.cast<AudioRouteMessage>(),
-      errorCode: result[54] as String?,
+      endedLocally: result[13] as bool?,
+      digit: result[14] as String?,
+      localSdp: result[15] as String?,
+      remoteSdp: result[16] as String?,
+      negotiatedCodec: result[17] as String?,
+      negotiatedCrypto: result[18] as String?,
+      rejectedCodecs: (result[19] as List<Object?>?)?.cast<String>(),
+      warnings: (result[20] as List<Object?>?)?.cast<String>(),
+      direction: result[21] as int?,
+      transport: result[22] as String?,
+      remoteAddress: result[23] as String?,
+      rawMessage: result[24] as String?,
+      timestampUs: result[25] as int?,
+      stats: result[26] as MediaStatsMessage?,
+      referToUri: result[27] as String?,
+      isAttended: result[28] as bool?,
+      autoFollowed: result[29] as bool?,
+      messagesWaiting: result[30] as bool?,
+      newVoice: result[31] as int?,
+      oldVoice: result[32] as int?,
+      newUrgent: result[33] as int?,
+      oldUrgent: result[34] as int?,
+      rawBody: result[35] as String?,
+      body: result[36] as String?,
+      contentType: result[37] as String?,
+      targetUri: result[38] as String?,
+      status: result[39] as int?,
+      issue: result[40] as int?,
+      value: result[41] as double?,
+      threshold: result[42] as double?,
+      recovering: result[43] as bool?,
+      stage: result[44] as int?,
+      localAddress: result[45] as String?,
+      attempt: result[46] as int?,
+      maxAttempts: result[47] as int?,
+      elapsedMs: result[48] as int?,
+      ice: result[49] as bool?,
+      generation: result[50] as int?,
+      localType: result[51] as int?,
+      remoteType: result[52] as int?,
+      rttMs: result[53] as double?,
+      routes: (result[54] as List<Object?>?)?.cast<AudioRouteMessage>(),
+      errorCode: result[55] as String?,
     );
   }
 
@@ -1983,7 +1989,7 @@ class EventMessage {
     if (identical(this, other)) {
       return true;
     }
-    return _deepEquals(type, other.type) && _deepEquals(accountId, other.accountId) && _deepEquals(call, other.call) && _deepEquals(state, other.state) && _deepEquals(previousState, other.previousState) && _deepEquals(error, other.error) && _deepEquals(message, other.message) && _deepEquals(retryAttempt, other.retryAttempt) && _deepEquals(retryDelayMs, other.retryDelayMs) && _deepEquals(errorText, other.errorText) && _deepEquals(fromUri, other.fromUri) && _deepEquals(displayName, other.displayName) && _deepEquals(reason, other.reason) && _deepEquals(digit, other.digit) && _deepEquals(localSdp, other.localSdp) && _deepEquals(remoteSdp, other.remoteSdp) && _deepEquals(negotiatedCodec, other.negotiatedCodec) && _deepEquals(negotiatedCrypto, other.negotiatedCrypto) && _deepEquals(rejectedCodecs, other.rejectedCodecs) && _deepEquals(warnings, other.warnings) && _deepEquals(direction, other.direction) && _deepEquals(transport, other.transport) && _deepEquals(remoteAddress, other.remoteAddress) && _deepEquals(rawMessage, other.rawMessage) && _deepEquals(timestampUs, other.timestampUs) && _deepEquals(stats, other.stats) && _deepEquals(referToUri, other.referToUri) && _deepEquals(isAttended, other.isAttended) && _deepEquals(autoFollowed, other.autoFollowed) && _deepEquals(messagesWaiting, other.messagesWaiting) && _deepEquals(newVoice, other.newVoice) && _deepEquals(oldVoice, other.oldVoice) && _deepEquals(newUrgent, other.newUrgent) && _deepEquals(oldUrgent, other.oldUrgent) && _deepEquals(rawBody, other.rawBody) && _deepEquals(body, other.body) && _deepEquals(contentType, other.contentType) && _deepEquals(targetUri, other.targetUri) && _deepEquals(status, other.status) && _deepEquals(issue, other.issue) && _deepEquals(value, other.value) && _deepEquals(threshold, other.threshold) && _deepEquals(recovering, other.recovering) && _deepEquals(stage, other.stage) && _deepEquals(localAddress, other.localAddress) && _deepEquals(attempt, other.attempt) && _deepEquals(maxAttempts, other.maxAttempts) && _deepEquals(elapsedMs, other.elapsedMs) && _deepEquals(ice, other.ice) && _deepEquals(generation, other.generation) && _deepEquals(localType, other.localType) && _deepEquals(remoteType, other.remoteType) && _deepEquals(rttMs, other.rttMs) && _deepEquals(routes, other.routes) && _deepEquals(errorCode, other.errorCode);
+    return _deepEquals(type, other.type) && _deepEquals(accountId, other.accountId) && _deepEquals(call, other.call) && _deepEquals(state, other.state) && _deepEquals(previousState, other.previousState) && _deepEquals(error, other.error) && _deepEquals(message, other.message) && _deepEquals(retryAttempt, other.retryAttempt) && _deepEquals(retryDelayMs, other.retryDelayMs) && _deepEquals(errorText, other.errorText) && _deepEquals(fromUri, other.fromUri) && _deepEquals(displayName, other.displayName) && _deepEquals(reason, other.reason) && _deepEquals(endedLocally, other.endedLocally) && _deepEquals(digit, other.digit) && _deepEquals(localSdp, other.localSdp) && _deepEquals(remoteSdp, other.remoteSdp) && _deepEquals(negotiatedCodec, other.negotiatedCodec) && _deepEquals(negotiatedCrypto, other.negotiatedCrypto) && _deepEquals(rejectedCodecs, other.rejectedCodecs) && _deepEquals(warnings, other.warnings) && _deepEquals(direction, other.direction) && _deepEquals(transport, other.transport) && _deepEquals(remoteAddress, other.remoteAddress) && _deepEquals(rawMessage, other.rawMessage) && _deepEquals(timestampUs, other.timestampUs) && _deepEquals(stats, other.stats) && _deepEquals(referToUri, other.referToUri) && _deepEquals(isAttended, other.isAttended) && _deepEquals(autoFollowed, other.autoFollowed) && _deepEquals(messagesWaiting, other.messagesWaiting) && _deepEquals(newVoice, other.newVoice) && _deepEquals(oldVoice, other.oldVoice) && _deepEquals(newUrgent, other.newUrgent) && _deepEquals(oldUrgent, other.oldUrgent) && _deepEquals(rawBody, other.rawBody) && _deepEquals(body, other.body) && _deepEquals(contentType, other.contentType) && _deepEquals(targetUri, other.targetUri) && _deepEquals(status, other.status) && _deepEquals(issue, other.issue) && _deepEquals(value, other.value) && _deepEquals(threshold, other.threshold) && _deepEquals(recovering, other.recovering) && _deepEquals(stage, other.stage) && _deepEquals(localAddress, other.localAddress) && _deepEquals(attempt, other.attempt) && _deepEquals(maxAttempts, other.maxAttempts) && _deepEquals(elapsedMs, other.elapsedMs) && _deepEquals(ice, other.ice) && _deepEquals(generation, other.generation) && _deepEquals(localType, other.localType) && _deepEquals(remoteType, other.remoteType) && _deepEquals(rttMs, other.rttMs) && _deepEquals(routes, other.routes) && _deepEquals(errorCode, other.errorCode);
   }
 
   @override
@@ -1992,7 +1998,7 @@ class EventMessage {
 
   @override
   String toString() {
-    return 'EventMessage(type: $type, accountId: $accountId, call: $call, state: $state, previousState: $previousState, error: $error, message: $message, retryAttempt: $retryAttempt, retryDelayMs: $retryDelayMs, errorText: $errorText, fromUri: $fromUri, displayName: $displayName, reason: $reason, digit: $digit, localSdp: $localSdp, remoteSdp: $remoteSdp, negotiatedCodec: $negotiatedCodec, negotiatedCrypto: $negotiatedCrypto, rejectedCodecs: $rejectedCodecs, warnings: $warnings, direction: $direction, transport: $transport, remoteAddress: $remoteAddress, rawMessage: $rawMessage, timestampUs: $timestampUs, stats: $stats, referToUri: $referToUri, isAttended: $isAttended, autoFollowed: $autoFollowed, messagesWaiting: $messagesWaiting, newVoice: $newVoice, oldVoice: $oldVoice, newUrgent: $newUrgent, oldUrgent: $oldUrgent, rawBody: $rawBody, body: $body, contentType: $contentType, targetUri: $targetUri, status: $status, issue: $issue, value: $value, threshold: $threshold, recovering: $recovering, stage: $stage, localAddress: $localAddress, attempt: $attempt, maxAttempts: $maxAttempts, elapsedMs: $elapsedMs, ice: $ice, generation: $generation, localType: $localType, remoteType: $remoteType, rttMs: $rttMs, routes: $routes, errorCode: $errorCode)';
+    return 'EventMessage(type: $type, accountId: $accountId, call: $call, state: $state, previousState: $previousState, error: $error, message: $message, retryAttempt: $retryAttempt, retryDelayMs: $retryDelayMs, errorText: $errorText, fromUri: $fromUri, displayName: $displayName, reason: $reason, endedLocally: $endedLocally, digit: $digit, localSdp: $localSdp, remoteSdp: $remoteSdp, negotiatedCodec: $negotiatedCodec, negotiatedCrypto: $negotiatedCrypto, rejectedCodecs: $rejectedCodecs, warnings: $warnings, direction: $direction, transport: $transport, remoteAddress: $remoteAddress, rawMessage: $rawMessage, timestampUs: $timestampUs, stats: $stats, referToUri: $referToUri, isAttended: $isAttended, autoFollowed: $autoFollowed, messagesWaiting: $messagesWaiting, newVoice: $newVoice, oldVoice: $oldVoice, newUrgent: $newUrgent, oldUrgent: $oldUrgent, rawBody: $rawBody, body: $body, contentType: $contentType, targetUri: $targetUri, status: $status, issue: $issue, value: $value, threshold: $threshold, recovering: $recovering, stage: $stage, localAddress: $localAddress, attempt: $attempt, maxAttempts: $maxAttempts, elapsedMs: $elapsedMs, ice: $ice, generation: $generation, localType: $localType, remoteType: $remoteType, rttMs: $rttMs, routes: $routes, errorCode: $errorCode)';
   }
 }
 

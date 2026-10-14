@@ -33,6 +33,9 @@ MedutKit on iOS), which own the stack for the process lifetime.  Breaking:
   Dart runs, and `Medut.start()` then attaches and finds it in `accounts`.
   `Account.destroy(forget: true)`, `forgetAccount()` and
   `rememberedAccounts()` manage the store.
+- **`CallStateEvent.endedLocally`**: this side ended the call, including a
+  Decline from the system call UI, a Bluetooth headset or a watch, so call
+  history can tell a declined call from a missed one.
 
 ## 1.0.0
 

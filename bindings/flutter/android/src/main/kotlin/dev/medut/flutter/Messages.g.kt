@@ -1520,6 +1520,8 @@ data class EventMessage (
   val fromUri: String? = null,
   val displayName: String? = null,
   val reason: String? = null,
+  /** Call state: this side ended the call (see CallStateEvent.endedLocally). */
+  val endedLocally: Boolean? = null,
   val digit: String? = null,
   val localSdp: String? = null,
   val remoteSdp: String? = null,
@@ -1579,49 +1581,50 @@ data class EventMessage (
       val fromUri = pigeonVar_list[10] as String?
       val displayName = pigeonVar_list[11] as String?
       val reason = pigeonVar_list[12] as String?
-      val digit = pigeonVar_list[13] as String?
-      val localSdp = pigeonVar_list[14] as String?
-      val remoteSdp = pigeonVar_list[15] as String?
-      val negotiatedCodec = pigeonVar_list[16] as String?
-      val negotiatedCrypto = pigeonVar_list[17] as String?
-      val rejectedCodecs = pigeonVar_list[18] as List<String>?
-      val warnings = pigeonVar_list[19] as List<String>?
-      val direction = pigeonVar_list[20] as Long?
-      val transport = pigeonVar_list[21] as String?
-      val remoteAddress = pigeonVar_list[22] as String?
-      val rawMessage = pigeonVar_list[23] as String?
-      val timestampUs = pigeonVar_list[24] as Long?
-      val stats = pigeonVar_list[25] as MediaStatsMessage?
-      val referToUri = pigeonVar_list[26] as String?
-      val isAttended = pigeonVar_list[27] as Boolean?
-      val autoFollowed = pigeonVar_list[28] as Boolean?
-      val messagesWaiting = pigeonVar_list[29] as Boolean?
-      val newVoice = pigeonVar_list[30] as Long?
-      val oldVoice = pigeonVar_list[31] as Long?
-      val newUrgent = pigeonVar_list[32] as Long?
-      val oldUrgent = pigeonVar_list[33] as Long?
-      val rawBody = pigeonVar_list[34] as String?
-      val body = pigeonVar_list[35] as String?
-      val contentType = pigeonVar_list[36] as String?
-      val targetUri = pigeonVar_list[37] as String?
-      val status = pigeonVar_list[38] as Long?
-      val issue = pigeonVar_list[39] as Long?
-      val value = pigeonVar_list[40] as Double?
-      val threshold = pigeonVar_list[41] as Double?
-      val recovering = pigeonVar_list[42] as Boolean?
-      val stage = pigeonVar_list[43] as Long?
-      val localAddress = pigeonVar_list[44] as String?
-      val attempt = pigeonVar_list[45] as Long?
-      val maxAttempts = pigeonVar_list[46] as Long?
-      val elapsedMs = pigeonVar_list[47] as Long?
-      val ice = pigeonVar_list[48] as Boolean?
-      val generation = pigeonVar_list[49] as Long?
-      val localType = pigeonVar_list[50] as Long?
-      val remoteType = pigeonVar_list[51] as Long?
-      val rttMs = pigeonVar_list[52] as Double?
-      val routes = pigeonVar_list[53] as List<AudioRouteMessage>?
-      val errorCode = pigeonVar_list[54] as String?
-      return EventMessage(type, accountId, call, state, previousState, error, message, retryAttempt, retryDelayMs, errorText, fromUri, displayName, reason, digit, localSdp, remoteSdp, negotiatedCodec, negotiatedCrypto, rejectedCodecs, warnings, direction, transport, remoteAddress, rawMessage, timestampUs, stats, referToUri, isAttended, autoFollowed, messagesWaiting, newVoice, oldVoice, newUrgent, oldUrgent, rawBody, body, contentType, targetUri, status, issue, value, threshold, recovering, stage, localAddress, attempt, maxAttempts, elapsedMs, ice, generation, localType, remoteType, rttMs, routes, errorCode)
+      val endedLocally = pigeonVar_list[13] as Boolean?
+      val digit = pigeonVar_list[14] as String?
+      val localSdp = pigeonVar_list[15] as String?
+      val remoteSdp = pigeonVar_list[16] as String?
+      val negotiatedCodec = pigeonVar_list[17] as String?
+      val negotiatedCrypto = pigeonVar_list[18] as String?
+      val rejectedCodecs = pigeonVar_list[19] as List<String>?
+      val warnings = pigeonVar_list[20] as List<String>?
+      val direction = pigeonVar_list[21] as Long?
+      val transport = pigeonVar_list[22] as String?
+      val remoteAddress = pigeonVar_list[23] as String?
+      val rawMessage = pigeonVar_list[24] as String?
+      val timestampUs = pigeonVar_list[25] as Long?
+      val stats = pigeonVar_list[26] as MediaStatsMessage?
+      val referToUri = pigeonVar_list[27] as String?
+      val isAttended = pigeonVar_list[28] as Boolean?
+      val autoFollowed = pigeonVar_list[29] as Boolean?
+      val messagesWaiting = pigeonVar_list[30] as Boolean?
+      val newVoice = pigeonVar_list[31] as Long?
+      val oldVoice = pigeonVar_list[32] as Long?
+      val newUrgent = pigeonVar_list[33] as Long?
+      val oldUrgent = pigeonVar_list[34] as Long?
+      val rawBody = pigeonVar_list[35] as String?
+      val body = pigeonVar_list[36] as String?
+      val contentType = pigeonVar_list[37] as String?
+      val targetUri = pigeonVar_list[38] as String?
+      val status = pigeonVar_list[39] as Long?
+      val issue = pigeonVar_list[40] as Long?
+      val value = pigeonVar_list[41] as Double?
+      val threshold = pigeonVar_list[42] as Double?
+      val recovering = pigeonVar_list[43] as Boolean?
+      val stage = pigeonVar_list[44] as Long?
+      val localAddress = pigeonVar_list[45] as String?
+      val attempt = pigeonVar_list[46] as Long?
+      val maxAttempts = pigeonVar_list[47] as Long?
+      val elapsedMs = pigeonVar_list[48] as Long?
+      val ice = pigeonVar_list[49] as Boolean?
+      val generation = pigeonVar_list[50] as Long?
+      val localType = pigeonVar_list[51] as Long?
+      val remoteType = pigeonVar_list[52] as Long?
+      val rttMs = pigeonVar_list[53] as Double?
+      val routes = pigeonVar_list[54] as List<AudioRouteMessage>?
+      val errorCode = pigeonVar_list[55] as String?
+      return EventMessage(type, accountId, call, state, previousState, error, message, retryAttempt, retryDelayMs, errorText, fromUri, displayName, reason, endedLocally, digit, localSdp, remoteSdp, negotiatedCodec, negotiatedCrypto, rejectedCodecs, warnings, direction, transport, remoteAddress, rawMessage, timestampUs, stats, referToUri, isAttended, autoFollowed, messagesWaiting, newVoice, oldVoice, newUrgent, oldUrgent, rawBody, body, contentType, targetUri, status, issue, value, threshold, recovering, stage, localAddress, attempt, maxAttempts, elapsedMs, ice, generation, localType, remoteType, rttMs, routes, errorCode)
     }
   }
   fun toList(): List<Any?> {
@@ -1639,6 +1642,7 @@ data class EventMessage (
       fromUri,
       displayName,
       reason,
+      endedLocally,
       digit,
       localSdp,
       remoteSdp,
@@ -1691,7 +1695,7 @@ data class EventMessage (
       return true
     }
     val other = other as EventMessage
-    return MessagesPigeonUtils.deepEquals(this.type, other.type) && MessagesPigeonUtils.deepEquals(this.accountId, other.accountId) && MessagesPigeonUtils.deepEquals(this.call, other.call) && MessagesPigeonUtils.deepEquals(this.state, other.state) && MessagesPigeonUtils.deepEquals(this.previousState, other.previousState) && MessagesPigeonUtils.deepEquals(this.error, other.error) && MessagesPigeonUtils.deepEquals(this.message, other.message) && MessagesPigeonUtils.deepEquals(this.retryAttempt, other.retryAttempt) && MessagesPigeonUtils.deepEquals(this.retryDelayMs, other.retryDelayMs) && MessagesPigeonUtils.deepEquals(this.errorText, other.errorText) && MessagesPigeonUtils.deepEquals(this.fromUri, other.fromUri) && MessagesPigeonUtils.deepEquals(this.displayName, other.displayName) && MessagesPigeonUtils.deepEquals(this.reason, other.reason) && MessagesPigeonUtils.deepEquals(this.digit, other.digit) && MessagesPigeonUtils.deepEquals(this.localSdp, other.localSdp) && MessagesPigeonUtils.deepEquals(this.remoteSdp, other.remoteSdp) && MessagesPigeonUtils.deepEquals(this.negotiatedCodec, other.negotiatedCodec) && MessagesPigeonUtils.deepEquals(this.negotiatedCrypto, other.negotiatedCrypto) && MessagesPigeonUtils.deepEquals(this.rejectedCodecs, other.rejectedCodecs) && MessagesPigeonUtils.deepEquals(this.warnings, other.warnings) && MessagesPigeonUtils.deepEquals(this.direction, other.direction) && MessagesPigeonUtils.deepEquals(this.transport, other.transport) && MessagesPigeonUtils.deepEquals(this.remoteAddress, other.remoteAddress) && MessagesPigeonUtils.deepEquals(this.rawMessage, other.rawMessage) && MessagesPigeonUtils.deepEquals(this.timestampUs, other.timestampUs) && MessagesPigeonUtils.deepEquals(this.stats, other.stats) && MessagesPigeonUtils.deepEquals(this.referToUri, other.referToUri) && MessagesPigeonUtils.deepEquals(this.isAttended, other.isAttended) && MessagesPigeonUtils.deepEquals(this.autoFollowed, other.autoFollowed) && MessagesPigeonUtils.deepEquals(this.messagesWaiting, other.messagesWaiting) && MessagesPigeonUtils.deepEquals(this.newVoice, other.newVoice) && MessagesPigeonUtils.deepEquals(this.oldVoice, other.oldVoice) && MessagesPigeonUtils.deepEquals(this.newUrgent, other.newUrgent) && MessagesPigeonUtils.deepEquals(this.oldUrgent, other.oldUrgent) && MessagesPigeonUtils.deepEquals(this.rawBody, other.rawBody) && MessagesPigeonUtils.deepEquals(this.body, other.body) && MessagesPigeonUtils.deepEquals(this.contentType, other.contentType) && MessagesPigeonUtils.deepEquals(this.targetUri, other.targetUri) && MessagesPigeonUtils.deepEquals(this.status, other.status) && MessagesPigeonUtils.deepEquals(this.issue, other.issue) && MessagesPigeonUtils.deepEquals(this.value, other.value) && MessagesPigeonUtils.deepEquals(this.threshold, other.threshold) && MessagesPigeonUtils.deepEquals(this.recovering, other.recovering) && MessagesPigeonUtils.deepEquals(this.stage, other.stage) && MessagesPigeonUtils.deepEquals(this.localAddress, other.localAddress) && MessagesPigeonUtils.deepEquals(this.attempt, other.attempt) && MessagesPigeonUtils.deepEquals(this.maxAttempts, other.maxAttempts) && MessagesPigeonUtils.deepEquals(this.elapsedMs, other.elapsedMs) && MessagesPigeonUtils.deepEquals(this.ice, other.ice) && MessagesPigeonUtils.deepEquals(this.generation, other.generation) && MessagesPigeonUtils.deepEquals(this.localType, other.localType) && MessagesPigeonUtils.deepEquals(this.remoteType, other.remoteType) && MessagesPigeonUtils.deepEquals(this.rttMs, other.rttMs) && MessagesPigeonUtils.deepEquals(this.routes, other.routes) && MessagesPigeonUtils.deepEquals(this.errorCode, other.errorCode)
+    return MessagesPigeonUtils.deepEquals(this.type, other.type) && MessagesPigeonUtils.deepEquals(this.accountId, other.accountId) && MessagesPigeonUtils.deepEquals(this.call, other.call) && MessagesPigeonUtils.deepEquals(this.state, other.state) && MessagesPigeonUtils.deepEquals(this.previousState, other.previousState) && MessagesPigeonUtils.deepEquals(this.error, other.error) && MessagesPigeonUtils.deepEquals(this.message, other.message) && MessagesPigeonUtils.deepEquals(this.retryAttempt, other.retryAttempt) && MessagesPigeonUtils.deepEquals(this.retryDelayMs, other.retryDelayMs) && MessagesPigeonUtils.deepEquals(this.errorText, other.errorText) && MessagesPigeonUtils.deepEquals(this.fromUri, other.fromUri) && MessagesPigeonUtils.deepEquals(this.displayName, other.displayName) && MessagesPigeonUtils.deepEquals(this.reason, other.reason) && MessagesPigeonUtils.deepEquals(this.endedLocally, other.endedLocally) && MessagesPigeonUtils.deepEquals(this.digit, other.digit) && MessagesPigeonUtils.deepEquals(this.localSdp, other.localSdp) && MessagesPigeonUtils.deepEquals(this.remoteSdp, other.remoteSdp) && MessagesPigeonUtils.deepEquals(this.negotiatedCodec, other.negotiatedCodec) && MessagesPigeonUtils.deepEquals(this.negotiatedCrypto, other.negotiatedCrypto) && MessagesPigeonUtils.deepEquals(this.rejectedCodecs, other.rejectedCodecs) && MessagesPigeonUtils.deepEquals(this.warnings, other.warnings) && MessagesPigeonUtils.deepEquals(this.direction, other.direction) && MessagesPigeonUtils.deepEquals(this.transport, other.transport) && MessagesPigeonUtils.deepEquals(this.remoteAddress, other.remoteAddress) && MessagesPigeonUtils.deepEquals(this.rawMessage, other.rawMessage) && MessagesPigeonUtils.deepEquals(this.timestampUs, other.timestampUs) && MessagesPigeonUtils.deepEquals(this.stats, other.stats) && MessagesPigeonUtils.deepEquals(this.referToUri, other.referToUri) && MessagesPigeonUtils.deepEquals(this.isAttended, other.isAttended) && MessagesPigeonUtils.deepEquals(this.autoFollowed, other.autoFollowed) && MessagesPigeonUtils.deepEquals(this.messagesWaiting, other.messagesWaiting) && MessagesPigeonUtils.deepEquals(this.newVoice, other.newVoice) && MessagesPigeonUtils.deepEquals(this.oldVoice, other.oldVoice) && MessagesPigeonUtils.deepEquals(this.newUrgent, other.newUrgent) && MessagesPigeonUtils.deepEquals(this.oldUrgent, other.oldUrgent) && MessagesPigeonUtils.deepEquals(this.rawBody, other.rawBody) && MessagesPigeonUtils.deepEquals(this.body, other.body) && MessagesPigeonUtils.deepEquals(this.contentType, other.contentType) && MessagesPigeonUtils.deepEquals(this.targetUri, other.targetUri) && MessagesPigeonUtils.deepEquals(this.status, other.status) && MessagesPigeonUtils.deepEquals(this.issue, other.issue) && MessagesPigeonUtils.deepEquals(this.value, other.value) && MessagesPigeonUtils.deepEquals(this.threshold, other.threshold) && MessagesPigeonUtils.deepEquals(this.recovering, other.recovering) && MessagesPigeonUtils.deepEquals(this.stage, other.stage) && MessagesPigeonUtils.deepEquals(this.localAddress, other.localAddress) && MessagesPigeonUtils.deepEquals(this.attempt, other.attempt) && MessagesPigeonUtils.deepEquals(this.maxAttempts, other.maxAttempts) && MessagesPigeonUtils.deepEquals(this.elapsedMs, other.elapsedMs) && MessagesPigeonUtils.deepEquals(this.ice, other.ice) && MessagesPigeonUtils.deepEquals(this.generation, other.generation) && MessagesPigeonUtils.deepEquals(this.localType, other.localType) && MessagesPigeonUtils.deepEquals(this.remoteType, other.remoteType) && MessagesPigeonUtils.deepEquals(this.rttMs, other.rttMs) && MessagesPigeonUtils.deepEquals(this.routes, other.routes) && MessagesPigeonUtils.deepEquals(this.errorCode, other.errorCode)
   }
 
   override fun hashCode(): Int {
@@ -1709,6 +1713,7 @@ data class EventMessage (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.fromUri)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.displayName)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.reason)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.endedLocally)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.digit)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.localSdp)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.remoteSdp)
@@ -1754,7 +1759,7 @@ data class EventMessage (
     return result
   }
   override fun toString(): String {
-    return "EventMessage(type=$type, accountId=$accountId, call=$call, state=$state, previousState=$previousState, error=$error, message=$message, retryAttempt=$retryAttempt, retryDelayMs=$retryDelayMs, errorText=$errorText, fromUri=$fromUri, displayName=$displayName, reason=$reason, digit=$digit, localSdp=$localSdp, remoteSdp=$remoteSdp, negotiatedCodec=$negotiatedCodec, negotiatedCrypto=$negotiatedCrypto, rejectedCodecs=$rejectedCodecs, warnings=$warnings, direction=$direction, transport=$transport, remoteAddress=$remoteAddress, rawMessage=$rawMessage, timestampUs=$timestampUs, stats=$stats, referToUri=$referToUri, isAttended=$isAttended, autoFollowed=$autoFollowed, messagesWaiting=$messagesWaiting, newVoice=$newVoice, oldVoice=$oldVoice, newUrgent=$newUrgent, oldUrgent=$oldUrgent, rawBody=$rawBody, body=$body, contentType=$contentType, targetUri=$targetUri, status=$status, issue=$issue, value=$value, threshold=$threshold, recovering=$recovering, stage=$stage, localAddress=$localAddress, attempt=$attempt, maxAttempts=$maxAttempts, elapsedMs=$elapsedMs, ice=$ice, generation=$generation, localType=$localType, remoteType=$remoteType, rttMs=$rttMs, routes=$routes, errorCode=$errorCode)"
+    return "EventMessage(type=$type, accountId=$accountId, call=$call, state=$state, previousState=$previousState, error=$error, message=$message, retryAttempt=$retryAttempt, retryDelayMs=$retryDelayMs, errorText=$errorText, fromUri=$fromUri, displayName=$displayName, reason=$reason, endedLocally=$endedLocally, digit=$digit, localSdp=$localSdp, remoteSdp=$remoteSdp, negotiatedCodec=$negotiatedCodec, negotiatedCrypto=$negotiatedCrypto, rejectedCodecs=$rejectedCodecs, warnings=$warnings, direction=$direction, transport=$transport, remoteAddress=$remoteAddress, rawMessage=$rawMessage, timestampUs=$timestampUs, stats=$stats, referToUri=$referToUri, isAttended=$isAttended, autoFollowed=$autoFollowed, messagesWaiting=$messagesWaiting, newVoice=$newVoice, oldVoice=$oldVoice, newUrgent=$newUrgent, oldUrgent=$oldUrgent, rawBody=$rawBody, body=$body, contentType=$contentType, targetUri=$targetUri, status=$status, issue=$issue, value=$value, threshold=$threshold, recovering=$recovering, stage=$stage, localAddress=$localAddress, attempt=$attempt, maxAttempts=$maxAttempts, elapsedMs=$elapsedMs, ice=$ice, generation=$generation, localType=$localType, remoteType=$remoteType, rttMs=$rttMs, routes=$routes, errorCode=$errorCode)"
   }
 }
 private open class MessagesPigeonCodec : StandardMessageCodec() {

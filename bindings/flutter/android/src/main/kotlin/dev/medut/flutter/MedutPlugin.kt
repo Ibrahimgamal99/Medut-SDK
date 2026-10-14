@@ -636,7 +636,8 @@ private fun MedutEvent.toMessage(): EventMessage {
         is MedutEvent.IncomingCall -> EventMessage(type = 2, accountId = acct, call = callMsg,
             fromUri = fromUri, displayName = displayName)
         is MedutEvent.CallStateChanged -> EventMessage(type = 3, accountId = acct, call = callMsg,
-            state = state.value.toLong(), error = error?.rawValue?.toLong(), reason = reason)
+            state = state.value.toLong(), error = error?.rawValue?.toLong(), reason = reason,
+            endedLocally = endedLocally)
         is MedutEvent.Dtmf -> EventMessage(type = 4, call = callMsg, digit = digit.toString())
         is MedutEvent.SdpNegotiation -> EventMessage(type = 5, call = callMsg, localSdp = localSdp,
             remoteSdp = remoteSdp, negotiatedCodec = negotiatedCodec,

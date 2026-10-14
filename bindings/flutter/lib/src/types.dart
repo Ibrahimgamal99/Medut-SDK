@@ -26,7 +26,15 @@ class CallStateEvent extends MedutEvent {
   final CallState state;
   final MedutError error;
   final String? reason;
-  CallStateEvent(this.call, this.state, this.error, this.reason);
+
+  /// On a terminal state: this side ended the call ([Call.hangup] /
+  /// [Call.reject]), from the app or from the system: a Decline in the
+  /// system call UI (Telecom, CallKit), a Bluetooth headset or a watch.  An
+  /// incoming call that ends unanswered with this set was declined, not
+  /// missed.  False on non-terminal states.
+  final bool endedLocally;
+  CallStateEvent(this.call, this.state, this.error, this.reason,
+      {this.endedLocally = false});
 }
 
 class CallDtmfEvent extends MedutEvent {

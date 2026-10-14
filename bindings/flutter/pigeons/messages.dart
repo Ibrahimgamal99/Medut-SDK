@@ -439,6 +439,8 @@ class EventMessage {
   String? fromUri;
   String? displayName;
   String? reason;
+  /// Call state: this side ended the call (see CallStateEvent.endedLocally).
+  bool? endedLocally;
   String? digit;
   String? localSdp;
   String? remoteSdp;

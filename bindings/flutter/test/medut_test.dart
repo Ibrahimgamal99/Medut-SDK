@@ -161,9 +161,28 @@ void main() {
     expect(incoming.fromUri, 'sip:bob@pbx');
     expect(ended.call, same(incoming.call), reason: 'one Dart object per call');
     expect(ended.reason, 'Remote hangup');
+    expect(ended.endedLocally, isFalse, reason: 'absent means the far end');
     expect(incoming.call.state, CallState.ended);
     expect(sdk.calls, isEmpty, reason: 'ended calls leave the live list');
     expect(scoped, hasLength(3), reason: 'account-scoped events reach the account');
+  });
+
+  test('a call declined from the system UI arrives as ended locally', () async {
+    final (sdk, _) = await startWithAccount();
+    final all = <CallStateEvent>[];
+    sdk.events.listen((e) {
+      if (e is CallStateEvent) all.add(e);
+    });
+
+    await native.push(EventMessage(
+        type: 2, accountId: 'a1', call: _call('c1', CallState.ringing),
+        fromUri: 'sip:bob@pbx'));
+    await native.push(EventMessage(
+        type: 3, accountId: 'a1', call: _call('c1', CallState.ended),
+        state: CallState.ended.raw, endedLocally: true));
+    await pumpEventQueue();
+
+    expect(all.single.endedLocally, isTrue);
   });
 
   test('call methods address the native call by id', () async {

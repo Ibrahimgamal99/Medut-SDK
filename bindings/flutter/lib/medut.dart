@@ -673,7 +673,8 @@ class Medut {
       case _EventType.incomingCall:
         event = IncomingCallEvent(call!, m.fromUri ?? '', m.displayName);
       case _EventType.callState:
-        event = CallStateEvent(call!, CallState.fromRaw(m.state ?? 0), error, m.reason);
+        event = CallStateEvent(call!, CallState.fromRaw(m.state ?? 0), error, m.reason,
+            endedLocally: m.endedLocally ?? false);
       case _EventType.dtmf:
         event = CallDtmfEvent(call!, m.digit ?? '');
       case _EventType.sdpNegotiation:

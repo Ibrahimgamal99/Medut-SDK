@@ -1663,6 +1663,8 @@ struct EventMessage: Hashable, CustomStringConvertible {
   var fromUri: String? = nil
   var displayName: String? = nil
   var reason: String? = nil
+  /// Call state: this side ended the call (see CallStateEvent.endedLocally).
+  var endedLocally: Bool? = nil
   var digit: String? = nil
   var localSdp: String? = nil
   var remoteSdp: String? = nil
@@ -1722,48 +1724,49 @@ struct EventMessage: Hashable, CustomStringConvertible {
     let fromUri: String? = nilOrValue(pigeonVar_list[10])
     let displayName: String? = nilOrValue(pigeonVar_list[11])
     let reason: String? = nilOrValue(pigeonVar_list[12])
-    let digit: String? = nilOrValue(pigeonVar_list[13])
-    let localSdp: String? = nilOrValue(pigeonVar_list[14])
-    let remoteSdp: String? = nilOrValue(pigeonVar_list[15])
-    let negotiatedCodec: String? = nilOrValue(pigeonVar_list[16])
-    let negotiatedCrypto: String? = nilOrValue(pigeonVar_list[17])
-    let rejectedCodecs: [String]? = nilOrValue(pigeonVar_list[18])
-    let warnings: [String]? = nilOrValue(pigeonVar_list[19])
-    let direction: Int64? = nilOrValue(pigeonVar_list[20])
-    let transport: String? = nilOrValue(pigeonVar_list[21])
-    let remoteAddress: String? = nilOrValue(pigeonVar_list[22])
-    let rawMessage: String? = nilOrValue(pigeonVar_list[23])
-    let timestampUs: Int64? = nilOrValue(pigeonVar_list[24])
-    let stats: MediaStatsMessage? = nilOrValue(pigeonVar_list[25])
-    let referToUri: String? = nilOrValue(pigeonVar_list[26])
-    let isAttended: Bool? = nilOrValue(pigeonVar_list[27])
-    let autoFollowed: Bool? = nilOrValue(pigeonVar_list[28])
-    let messagesWaiting: Bool? = nilOrValue(pigeonVar_list[29])
-    let newVoice: Int64? = nilOrValue(pigeonVar_list[30])
-    let oldVoice: Int64? = nilOrValue(pigeonVar_list[31])
-    let newUrgent: Int64? = nilOrValue(pigeonVar_list[32])
-    let oldUrgent: Int64? = nilOrValue(pigeonVar_list[33])
-    let rawBody: String? = nilOrValue(pigeonVar_list[34])
-    let body: String? = nilOrValue(pigeonVar_list[35])
-    let contentType: String? = nilOrValue(pigeonVar_list[36])
-    let targetUri: String? = nilOrValue(pigeonVar_list[37])
-    let status: Int64? = nilOrValue(pigeonVar_list[38])
-    let issue: Int64? = nilOrValue(pigeonVar_list[39])
-    let value: Double? = nilOrValue(pigeonVar_list[40])
-    let threshold: Double? = nilOrValue(pigeonVar_list[41])
-    let recovering: Bool? = nilOrValue(pigeonVar_list[42])
-    let stage: Int64? = nilOrValue(pigeonVar_list[43])
-    let localAddress: String? = nilOrValue(pigeonVar_list[44])
-    let attempt: Int64? = nilOrValue(pigeonVar_list[45])
-    let maxAttempts: Int64? = nilOrValue(pigeonVar_list[46])
-    let elapsedMs: Int64? = nilOrValue(pigeonVar_list[47])
-    let ice: Bool? = nilOrValue(pigeonVar_list[48])
-    let generation: Int64? = nilOrValue(pigeonVar_list[49])
-    let localType: Int64? = nilOrValue(pigeonVar_list[50])
-    let remoteType: Int64? = nilOrValue(pigeonVar_list[51])
-    let rttMs: Double? = nilOrValue(pigeonVar_list[52])
-    let routes: [AudioRouteMessage]? = nilOrValue(pigeonVar_list[53])
-    let errorCode: String? = nilOrValue(pigeonVar_list[54])
+    let endedLocally: Bool? = nilOrValue(pigeonVar_list[13])
+    let digit: String? = nilOrValue(pigeonVar_list[14])
+    let localSdp: String? = nilOrValue(pigeonVar_list[15])
+    let remoteSdp: String? = nilOrValue(pigeonVar_list[16])
+    let negotiatedCodec: String? = nilOrValue(pigeonVar_list[17])
+    let negotiatedCrypto: String? = nilOrValue(pigeonVar_list[18])
+    let rejectedCodecs: [String]? = nilOrValue(pigeonVar_list[19])
+    let warnings: [String]? = nilOrValue(pigeonVar_list[20])
+    let direction: Int64? = nilOrValue(pigeonVar_list[21])
+    let transport: String? = nilOrValue(pigeonVar_list[22])
+    let remoteAddress: String? = nilOrValue(pigeonVar_list[23])
+    let rawMessage: String? = nilOrValue(pigeonVar_list[24])
+    let timestampUs: Int64? = nilOrValue(pigeonVar_list[25])
+    let stats: MediaStatsMessage? = nilOrValue(pigeonVar_list[26])
+    let referToUri: String? = nilOrValue(pigeonVar_list[27])
+    let isAttended: Bool? = nilOrValue(pigeonVar_list[28])
+    let autoFollowed: Bool? = nilOrValue(pigeonVar_list[29])
+    let messagesWaiting: Bool? = nilOrValue(pigeonVar_list[30])
+    let newVoice: Int64? = nilOrValue(pigeonVar_list[31])
+    let oldVoice: Int64? = nilOrValue(pigeonVar_list[32])
+    let newUrgent: Int64? = nilOrValue(pigeonVar_list[33])
+    let oldUrgent: Int64? = nilOrValue(pigeonVar_list[34])
+    let rawBody: String? = nilOrValue(pigeonVar_list[35])
+    let body: String? = nilOrValue(pigeonVar_list[36])
+    let contentType: String? = nilOrValue(pigeonVar_list[37])
+    let targetUri: String? = nilOrValue(pigeonVar_list[38])
+    let status: Int64? = nilOrValue(pigeonVar_list[39])
+    let issue: Int64? = nilOrValue(pigeonVar_list[40])
+    let value: Double? = nilOrValue(pigeonVar_list[41])
+    let threshold: Double? = nilOrValue(pigeonVar_list[42])
+    let recovering: Bool? = nilOrValue(pigeonVar_list[43])
+    let stage: Int64? = nilOrValue(pigeonVar_list[44])
+    let localAddress: String? = nilOrValue(pigeonVar_list[45])
+    let attempt: Int64? = nilOrValue(pigeonVar_list[46])
+    let maxAttempts: Int64? = nilOrValue(pigeonVar_list[47])
+    let elapsedMs: Int64? = nilOrValue(pigeonVar_list[48])
+    let ice: Bool? = nilOrValue(pigeonVar_list[49])
+    let generation: Int64? = nilOrValue(pigeonVar_list[50])
+    let localType: Int64? = nilOrValue(pigeonVar_list[51])
+    let remoteType: Int64? = nilOrValue(pigeonVar_list[52])
+    let rttMs: Double? = nilOrValue(pigeonVar_list[53])
+    let routes: [AudioRouteMessage]? = nilOrValue(pigeonVar_list[54])
+    let errorCode: String? = nilOrValue(pigeonVar_list[55])
 
     return EventMessage(
       type: type,
@@ -1779,6 +1782,7 @@ struct EventMessage: Hashable, CustomStringConvertible {
       fromUri: fromUri,
       displayName: displayName,
       reason: reason,
+      endedLocally: endedLocally,
       digit: digit,
       localSdp: localSdp,
       remoteSdp: remoteSdp,
@@ -1838,6 +1842,7 @@ struct EventMessage: Hashable, CustomStringConvertible {
       fromUri,
       displayName,
       reason,
+      endedLocally,
       digit,
       localSdp,
       remoteSdp,
@@ -1886,7 +1891,7 @@ struct EventMessage: Hashable, CustomStringConvertible {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return MessagesPigeonInternal.deepEquals(lhs.type, rhs.type) && MessagesPigeonInternal.deepEquals(lhs.accountId, rhs.accountId) && MessagesPigeonInternal.deepEquals(lhs.call, rhs.call) && MessagesPigeonInternal.deepEquals(lhs.state, rhs.state) && MessagesPigeonInternal.deepEquals(lhs.previousState, rhs.previousState) && MessagesPigeonInternal.deepEquals(lhs.error, rhs.error) && MessagesPigeonInternal.deepEquals(lhs.message, rhs.message) && MessagesPigeonInternal.deepEquals(lhs.retryAttempt, rhs.retryAttempt) && MessagesPigeonInternal.deepEquals(lhs.retryDelayMs, rhs.retryDelayMs) && MessagesPigeonInternal.deepEquals(lhs.errorText, rhs.errorText) && MessagesPigeonInternal.deepEquals(lhs.fromUri, rhs.fromUri) && MessagesPigeonInternal.deepEquals(lhs.displayName, rhs.displayName) && MessagesPigeonInternal.deepEquals(lhs.reason, rhs.reason) && MessagesPigeonInternal.deepEquals(lhs.digit, rhs.digit) && MessagesPigeonInternal.deepEquals(lhs.localSdp, rhs.localSdp) && MessagesPigeonInternal.deepEquals(lhs.remoteSdp, rhs.remoteSdp) && MessagesPigeonInternal.deepEquals(lhs.negotiatedCodec, rhs.negotiatedCodec) && MessagesPigeonInternal.deepEquals(lhs.negotiatedCrypto, rhs.negotiatedCrypto) && MessagesPigeonInternal.deepEquals(lhs.rejectedCodecs, rhs.rejectedCodecs) && MessagesPigeonInternal.deepEquals(lhs.warnings, rhs.warnings) && MessagesPigeonInternal.deepEquals(lhs.direction, rhs.direction) && MessagesPigeonInternal.deepEquals(lhs.transport, rhs.transport) && MessagesPigeonInternal.deepEquals(lhs.remoteAddress, rhs.remoteAddress) && MessagesPigeonInternal.deepEquals(lhs.rawMessage, rhs.rawMessage) && MessagesPigeonInternal.deepEquals(lhs.timestampUs, rhs.timestampUs) && MessagesPigeonInternal.deepEquals(lhs.stats, rhs.stats) && MessagesPigeonInternal.deepEquals(lhs.referToUri, rhs.referToUri) && MessagesPigeonInternal.deepEquals(lhs.isAttended, rhs.isAttended) && MessagesPigeonInternal.deepEquals(lhs.autoFollowed, rhs.autoFollowed) && MessagesPigeonInternal.deepEquals(lhs.messagesWaiting, rhs.messagesWaiting) && MessagesPigeonInternal.deepEquals(lhs.newVoice, rhs.newVoice) && MessagesPigeonInternal.deepEquals(lhs.oldVoice, rhs.oldVoice) && MessagesPigeonInternal.deepEquals(lhs.newUrgent, rhs.newUrgent) && MessagesPigeonInternal.deepEquals(lhs.oldUrgent, rhs.oldUrgent) && MessagesPigeonInternal.deepEquals(lhs.rawBody, rhs.rawBody) && MessagesPigeonInternal.deepEquals(lhs.body, rhs.body) && MessagesPigeonInternal.deepEquals(lhs.contentType, rhs.contentType) && MessagesPigeonInternal.deepEquals(lhs.targetUri, rhs.targetUri) && MessagesPigeonInternal.deepEquals(lhs.status, rhs.status) && MessagesPigeonInternal.deepEquals(lhs.issue, rhs.issue) && MessagesPigeonInternal.deepEquals(lhs.value, rhs.value) && MessagesPigeonInternal.deepEquals(lhs.threshold, rhs.threshold) && MessagesPigeonInternal.deepEquals(lhs.recovering, rhs.recovering) && MessagesPigeonInternal.deepEquals(lhs.stage, rhs.stage) && MessagesPigeonInternal.deepEquals(lhs.localAddress, rhs.localAddress) && MessagesPigeonInternal.deepEquals(lhs.attempt, rhs.attempt) && MessagesPigeonInternal.deepEquals(lhs.maxAttempts, rhs.maxAttempts) && MessagesPigeonInternal.deepEquals(lhs.elapsedMs, rhs.elapsedMs) && MessagesPigeonInternal.deepEquals(lhs.ice, rhs.ice) && MessagesPigeonInternal.deepEquals(lhs.generation, rhs.generation) && MessagesPigeonInternal.deepEquals(lhs.localType, rhs.localType) && MessagesPigeonInternal.deepEquals(lhs.remoteType, rhs.remoteType) && MessagesPigeonInternal.deepEquals(lhs.rttMs, rhs.rttMs) && MessagesPigeonInternal.deepEquals(lhs.routes, rhs.routes) && MessagesPigeonInternal.deepEquals(lhs.errorCode, rhs.errorCode)
+    return MessagesPigeonInternal.deepEquals(lhs.type, rhs.type) && MessagesPigeonInternal.deepEquals(lhs.accountId, rhs.accountId) && MessagesPigeonInternal.deepEquals(lhs.call, rhs.call) && MessagesPigeonInternal.deepEquals(lhs.state, rhs.state) && MessagesPigeonInternal.deepEquals(lhs.previousState, rhs.previousState) && MessagesPigeonInternal.deepEquals(lhs.error, rhs.error) && MessagesPigeonInternal.deepEquals(lhs.message, rhs.message) && MessagesPigeonInternal.deepEquals(lhs.retryAttempt, rhs.retryAttempt) && MessagesPigeonInternal.deepEquals(lhs.retryDelayMs, rhs.retryDelayMs) && MessagesPigeonInternal.deepEquals(lhs.errorText, rhs.errorText) && MessagesPigeonInternal.deepEquals(lhs.fromUri, rhs.fromUri) && MessagesPigeonInternal.deepEquals(lhs.displayName, rhs.displayName) && MessagesPigeonInternal.deepEquals(lhs.reason, rhs.reason) && MessagesPigeonInternal.deepEquals(lhs.endedLocally, rhs.endedLocally) && MessagesPigeonInternal.deepEquals(lhs.digit, rhs.digit) && MessagesPigeonInternal.deepEquals(lhs.localSdp, rhs.localSdp) && MessagesPigeonInternal.deepEquals(lhs.remoteSdp, rhs.remoteSdp) && MessagesPigeonInternal.deepEquals(lhs.negotiatedCodec, rhs.negotiatedCodec) && MessagesPigeonInternal.deepEquals(lhs.negotiatedCrypto, rhs.negotiatedCrypto) && MessagesPigeonInternal.deepEquals(lhs.rejectedCodecs, rhs.rejectedCodecs) && MessagesPigeonInternal.deepEquals(lhs.warnings, rhs.warnings) && MessagesPigeonInternal.deepEquals(lhs.direction, rhs.direction) && MessagesPigeonInternal.deepEquals(lhs.transport, rhs.transport) && MessagesPigeonInternal.deepEquals(lhs.remoteAddress, rhs.remoteAddress) && MessagesPigeonInternal.deepEquals(lhs.rawMessage, rhs.rawMessage) && MessagesPigeonInternal.deepEquals(lhs.timestampUs, rhs.timestampUs) && MessagesPigeonInternal.deepEquals(lhs.stats, rhs.stats) && MessagesPigeonInternal.deepEquals(lhs.referToUri, rhs.referToUri) && MessagesPigeonInternal.deepEquals(lhs.isAttended, rhs.isAttended) && MessagesPigeonInternal.deepEquals(lhs.autoFollowed, rhs.autoFollowed) && MessagesPigeonInternal.deepEquals(lhs.messagesWaiting, rhs.messagesWaiting) && MessagesPigeonInternal.deepEquals(lhs.newVoice, rhs.newVoice) && MessagesPigeonInternal.deepEquals(lhs.oldVoice, rhs.oldVoice) && MessagesPigeonInternal.deepEquals(lhs.newUrgent, rhs.newUrgent) && MessagesPigeonInternal.deepEquals(lhs.oldUrgent, rhs.oldUrgent) && MessagesPigeonInternal.deepEquals(lhs.rawBody, rhs.rawBody) && MessagesPigeonInternal.deepEquals(lhs.body, rhs.body) && MessagesPigeonInternal.deepEquals(lhs.contentType, rhs.contentType) && MessagesPigeonInternal.deepEquals(lhs.targetUri, rhs.targetUri) && MessagesPigeonInternal.deepEquals(lhs.status, rhs.status) && MessagesPigeonInternal.deepEquals(lhs.issue, rhs.issue) && MessagesPigeonInternal.deepEquals(lhs.value, rhs.value) && MessagesPigeonInternal.deepEquals(lhs.threshold, rhs.threshold) && MessagesPigeonInternal.deepEquals(lhs.recovering, rhs.recovering) && MessagesPigeonInternal.deepEquals(lhs.stage, rhs.stage) && MessagesPigeonInternal.deepEquals(lhs.localAddress, rhs.localAddress) && MessagesPigeonInternal.deepEquals(lhs.attempt, rhs.attempt) && MessagesPigeonInternal.deepEquals(lhs.maxAttempts, rhs.maxAttempts) && MessagesPigeonInternal.deepEquals(lhs.elapsedMs, rhs.elapsedMs) && MessagesPigeonInternal.deepEquals(lhs.ice, rhs.ice) && MessagesPigeonInternal.deepEquals(lhs.generation, rhs.generation) && MessagesPigeonInternal.deepEquals(lhs.localType, rhs.localType) && MessagesPigeonInternal.deepEquals(lhs.remoteType, rhs.remoteType) && MessagesPigeonInternal.deepEquals(lhs.rttMs, rhs.rttMs) && MessagesPigeonInternal.deepEquals(lhs.routes, rhs.routes) && MessagesPigeonInternal.deepEquals(lhs.errorCode, rhs.errorCode)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -1904,6 +1909,7 @@ struct EventMessage: Hashable, CustomStringConvertible {
     MessagesPigeonInternal.deepHash(value: fromUri, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: displayName, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: reason, hasher: &hasher)
+    MessagesPigeonInternal.deepHash(value: endedLocally, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: digit, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: localSdp, hasher: &hasher)
     MessagesPigeonInternal.deepHash(value: remoteSdp, hasher: &hasher)
@@ -1949,7 +1955,7 @@ struct EventMessage: Hashable, CustomStringConvertible {
   }
 
   public var description: String {
-    return "EventMessage(type: \(String(describing: type)), accountId: \(String(describing: accountId)), call: \(String(describing: call)), state: \(String(describing: state)), previousState: \(String(describing: previousState)), error: \(String(describing: error)), message: \(String(describing: message)), retryAttempt: \(String(describing: retryAttempt)), retryDelayMs: \(String(describing: retryDelayMs)), errorText: \(String(describing: errorText)), fromUri: \(String(describing: fromUri)), displayName: \(String(describing: displayName)), reason: \(String(describing: reason)), digit: \(String(describing: digit)), localSdp: \(String(describing: localSdp)), remoteSdp: \(String(describing: remoteSdp)), negotiatedCodec: \(String(describing: negotiatedCodec)), negotiatedCrypto: \(String(describing: negotiatedCrypto)), rejectedCodecs: \(String(describing: rejectedCodecs)), warnings: \(String(describing: warnings)), direction: \(String(describing: direction)), transport: \(String(describing: transport)), remoteAddress: \(String(describing: remoteAddress)), rawMessage: \(String(describing: rawMessage)), timestampUs: \(String(describing: timestampUs)), stats: \(String(describing: stats)), referToUri: \(String(describing: referToUri)), isAttended: \(String(describing: isAttended)), autoFollowed: \(String(describing: autoFollowed)), messagesWaiting: \(String(describing: messagesWaiting)), newVoice: \(String(describing: newVoice)), oldVoice: \(String(describing: oldVoice)), newUrgent: \(String(describing: newUrgent)), oldUrgent: \(String(describing: oldUrgent)), rawBody: \(String(describing: rawBody)), body: \(String(describing: body)), contentType: \(String(describing: contentType)), targetUri: \(String(describing: targetUri)), status: \(String(describing: status)), issue: \(String(describing: issue)), value: \(String(describing: value)), threshold: \(String(describing: threshold)), recovering: \(String(describing: recovering)), stage: \(String(describing: stage)), localAddress: \(String(describing: localAddress)), attempt: \(String(describing: attempt)), maxAttempts: \(String(describing: maxAttempts)), elapsedMs: \(String(describing: elapsedMs)), ice: \(String(describing: ice)), generation: \(String(describing: generation)), localType: \(String(describing: localType)), remoteType: \(String(describing: remoteType)), rttMs: \(String(describing: rttMs)), routes: \(String(describing: routes)), errorCode: \(String(describing: errorCode)))"
+    return "EventMessage(type: \(String(describing: type)), accountId: \(String(describing: accountId)), call: \(String(describing: call)), state: \(String(describing: state)), previousState: \(String(describing: previousState)), error: \(String(describing: error)), message: \(String(describing: message)), retryAttempt: \(String(describing: retryAttempt)), retryDelayMs: \(String(describing: retryDelayMs)), errorText: \(String(describing: errorText)), fromUri: \(String(describing: fromUri)), displayName: \(String(describing: displayName)), reason: \(String(describing: reason)), endedLocally: \(String(describing: endedLocally)), digit: \(String(describing: digit)), localSdp: \(String(describing: localSdp)), remoteSdp: \(String(describing: remoteSdp)), negotiatedCodec: \(String(describing: negotiatedCodec)), negotiatedCrypto: \(String(describing: negotiatedCrypto)), rejectedCodecs: \(String(describing: rejectedCodecs)), warnings: \(String(describing: warnings)), direction: \(String(describing: direction)), transport: \(String(describing: transport)), remoteAddress: \(String(describing: remoteAddress)), rawMessage: \(String(describing: rawMessage)), timestampUs: \(String(describing: timestampUs)), stats: \(String(describing: stats)), referToUri: \(String(describing: referToUri)), isAttended: \(String(describing: isAttended)), autoFollowed: \(String(describing: autoFollowed)), messagesWaiting: \(String(describing: messagesWaiting)), newVoice: \(String(describing: newVoice)), oldVoice: \(String(describing: oldVoice)), newUrgent: \(String(describing: newUrgent)), oldUrgent: \(String(describing: oldUrgent)), rawBody: \(String(describing: rawBody)), body: \(String(describing: body)), contentType: \(String(describing: contentType)), targetUri: \(String(describing: targetUri)), status: \(String(describing: status)), issue: \(String(describing: issue)), value: \(String(describing: value)), threshold: \(String(describing: threshold)), recovering: \(String(describing: recovering)), stage: \(String(describing: stage)), localAddress: \(String(describing: localAddress)), attempt: \(String(describing: attempt)), maxAttempts: \(String(describing: maxAttempts)), elapsedMs: \(String(describing: elapsedMs)), ice: \(String(describing: ice)), generation: \(String(describing: generation)), localType: \(String(describing: localType)), remoteType: \(String(describing: remoteType)), rttMs: \(String(describing: rttMs)), routes: \(String(describing: routes)), errorCode: \(String(describing: errorCode)))"
   }
 }
 
