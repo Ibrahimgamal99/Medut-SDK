@@ -25,6 +25,16 @@ All notable changes to Medut are documented here.
   binding refresh.
 - **A refreshed push token is saved** with the remembered accounts (Kotlin,
   Swift, Flutter), so a process a later push starts registers with it.
+- **Kotlin in minified builds:** `MedutAndroid.start` failed with
+  `NoSuchFieldError` once R8 renamed the enum and config types the JNI reads
+  fields by. The consumer rules keep them.
+- **Kotlin mute:** a Telecom route change no longer un-mutes a call the app
+  muted itself.
+- **Kotlin notification Answer** opens an activity directly, as Android 12+
+  blocks one started from a notification's broadcast receiver; the ringtone
+  loops (`FLAG_INSISTENT`).
+- **Flutter plugin** forwards events and sets `onAppOwnedAudioError` only
+  after Dart's `start()`, and chains to the host app's handler.
 
 ### Changed
 
@@ -54,6 +64,16 @@ All notable changes to Medut are documented here.
   `PushPayload.parse`, `MedutTelecom.onShowPushIncomingCallUi`,
   `AccountStore.updatePushToken`.
 - **Push guide** with the server contract and an OpenSIPS configuration.
+- **Incoming-call filter** (`MedutTelecom.incomingCallFilter`,
+  `MedutCallKit.incomingCallFilter`): reject before the system rings.
+- **System-side state callbacks:** `MedutTelecom.onCallAudioStateChanged`;
+  `MedutCallKit.onCallMutedChanged`, `onCallHeldChanged`.
+- `MedutCallKit.update(options:)`; `MedutTelecom.answerPushRing` /
+  `declinePushRing` and the ring key on `onShowPushIncomingCallUi`;
+  `TelecomOptions.callActivity`; public `EXTRA_CALL_ID` / `ACTION_ANSWER` /
+  `ACTION_DECLINE`.
+- `AccountConfig.headers` / `registerHeaders`, saved by the account stores.
+- `MedutAndroid.setStartOnBoot()`: opt-in registration after a reboot.
 
 - **Kotlin SDK:** Telecom integration through a self-managed
   ConnectionService (system call UI, Telecom-owned audio and routes, a
