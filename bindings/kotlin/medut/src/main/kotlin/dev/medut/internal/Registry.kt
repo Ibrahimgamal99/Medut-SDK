@@ -33,6 +33,10 @@ internal class Registry {
     @Synchronized
     fun account(handle: Long): Account? = if (handle == 0L) null else accounts[handle]
 
+    /** The wrapper for a live call handle, if one is tracked.  Lookup only. */
+    @Synchronized
+    fun call(handle: Long): Call? = if (handle == 0L) null else calls[handle]
+
     /** The wrapper for a live call handle, creating it on first sight.  The
      *  handle must be valid now (being delivered, or just returned by C). */
     @Synchronized

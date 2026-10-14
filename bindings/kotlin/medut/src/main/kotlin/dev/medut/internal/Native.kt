@@ -67,6 +67,7 @@ internal object Native {
     @JvmStatic external fun callIceState(call: Long): Int
     @JvmStatic external fun callGetInfo(call: Long, out: RawCallInfo): Int
     @JvmStatic external fun callGetStats(call: Long, out: RawStats): Int
+    @JvmStatic external fun callSetMediaTap(call: Long, on: Boolean): Int
     @JvmStatic external fun callSetDscpRtp(call: Long, dscp: Int): Int
     @JvmStatic external fun callSetRtpTimeout(call: Long, seconds: Int): Int
     @JvmStatic external fun callSetBitrate(call: Long, bps: Int): Int

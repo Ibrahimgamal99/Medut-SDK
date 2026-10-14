@@ -47,6 +47,13 @@ class Call internal constructor(
 
     private var holdsTerminalEvent = false
 
+    /** The installed media tap; read on the audio thread (MediaTapSink). */
+    @Volatile internal var mediaTap: MediaTapListener? = null
+
+    /** This side asked to end the call ([hangup] / [reject]), so a terminal
+     *  state is local, not the far end's doing.  Telecom reports it so. */
+    @Volatile internal var endRequestedLocally = false
+
     override fun toString() = "Call($remoteUri, $state)"
 
     internal fun update(newState: CallState) {
@@ -80,14 +87,17 @@ class Call internal constructor(
      *  call that already ended. */
     fun hangup() {
         if (isEnded) return
+        endRequestedLocally = true
         perform("medut_call_hangup") { Native.callHangup(it) }
     }
 
     /** End with a SIP status: for an unanswered incoming call this is the
      *  final response, e.g. 486 Busy Here or 603 Decline. */
     @JvmOverloads
-    fun reject(statusCode: Int = 486, reason: String? = null) =
+    fun reject(statusCode: Int = 486, reason: String? = null) {
+        endRequestedLocally = true
         perform("medut_call_reject") { Native.callReject(it, statusCode, reason) }
+    }
 
     fun hold() = perform("medut_call_hold") { Native.callHold(it) }
 
@@ -155,6 +165,21 @@ class Call internal constructor(
     /** Silence the far end's audio for this call. */
     fun setReceiveMuted(muted: Boolean) =
         perform("medut_audio_mute_rx") { Native.audioMuteRx(it, muted) }
+
+    /**
+     * Tap this call's PCM in both directions, or remove the tap with null.
+     * See [MediaTapListener] for the threading rules.  The tap goes away
+     * with the call.
+     */
+    fun setMediaTap(listener: MediaTapListener?) {
+        mediaTap = listener
+        try {
+            perform("medut_call_set_media_tap") { Native.callSetMediaTap(it, listener != null) }
+        } catch (e: MedutException) {
+            mediaTap = null
+            throw e
+        }
+    }
 
     /** Record both directions, mixed, to a WAV file. */
     fun startRecording(path: String) =

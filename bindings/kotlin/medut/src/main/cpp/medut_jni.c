@@ -51,6 +51,8 @@ static jclass    s_raw_stats_cls;
 static jmethodID s_raw_stats_ctor;
 static jclass    s_sink_cls;
 static jmethodID s_sink_on_event;    /* static boolean onEvent(RawEvent, long) */
+static jclass    s_tap_cls;
+static jmethodID s_tap_on_frame;     /* static void onFrame(long, int, ByteBuffer, int, int, int, long) */
 
 /* ── Strings ──────────────────────────────────────────────────────────────── */
 
@@ -835,6 +837,36 @@ static void on_event(const medut_event_t *ev, void *userdata)
 		medut_event_release(ev);
 }
 
+/* ── Media tap ────────────────────────────────────────────────────────────── */
+
+/* Audio thread.  The PCM is handed to Kotlin as a direct ByteBuffer over the
+ * SDK's own memory, valid only for the duration of the call: no copy here, so
+ * the audio thread allocates nothing but the two local refs the frame holds.
+ * The thread attaches on first use like the event thread. */
+static void on_media_tap(medut_call_handle_t call, medut_media_dir_t dir,
+			 const int16_t *pcm, size_t samples,
+			 uint32_t sample_rate, uint8_t channels,
+			 uint64_t timestamp_us, void *userdata)
+{
+	(void)userdata;
+
+	JNIEnv *env = thread_env();
+	if (!env || (*env)->PushLocalFrame(env, 4) != 0)
+		return;
+
+	jobject buf = (*env)->NewDirectByteBuffer(env, (void *)pcm,
+				(jlong)(samples * sizeof(int16_t)));
+	if (buf)
+		(*env)->CallStaticVoidMethod(env, s_tap_cls, s_tap_on_frame,
+			J(call), (jint)dir, buf, (jint)samples,
+			(jint)sample_rate, (jint)channels, (jlong)timestamp_us);
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionDescribe(env);
+		(*env)->ExceptionClear(env);
+	}
+	(*env)->PopLocalFrame(env, NULL);
+}
+
 /* ── Load ─────────────────────────────────────────────────────────────────── */
 
 static jclass global_class(JNIEnv *env, const char *name)
@@ -893,9 +925,14 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved)
 	s_raw_stats_ctor = (*env)->GetMethodID(env, s_raw_stats_cls, "<init>", "()V");
 	s_sink_on_event  = (*env)->GetStaticMethodID(env, s_sink_cls, "onEvent",
 				"(Ldev/medut/internal/RawEvent;J)Z");
+	s_tap_cls = global_class(env, "dev/medut/internal/MediaTapSink");
+	if (!s_tap_cls)
+		return JNI_ERR;
+	s_tap_on_frame = (*env)->GetStaticMethodID(env, s_tap_cls, "onFrame",
+				"(JILjava/nio/ByteBuffer;IIIJ)V");
 	if (!s_string_ctor || !s_string_getbytes || !s_list_size || !s_list_get ||
 	    !s_boolean_value || !s_raw_event_ctor || !s_raw_stats_ctor ||
-	    !s_sink_on_event)
+	    !s_sink_on_event || !s_tap_on_frame)
 		return JNI_ERR;
 
 	return JNI_VERSION_1_6;
@@ -1299,6 +1336,12 @@ JNIEXPORT jint FN(callGetStats)(JNIEnv *env, jclass cls, jlong c, jobject out)
 	if (err == 0)
 		fill_raw_stats(env, out, &s);
 	return err;
+}
+
+JNIEXPORT jint FN(callSetMediaTap)(JNIEnv *env, jclass cls, jlong c, jboolean on)
+{
+	(void)env; (void)cls;
+	return medut_call_set_media_tap(H(c), on ? on_media_tap : NULL, NULL);
 }
 
 JNIEXPORT jint FN(callSetDscpRtp)(JNIEnv *env, jclass cls, jlong c, jint dscp)
