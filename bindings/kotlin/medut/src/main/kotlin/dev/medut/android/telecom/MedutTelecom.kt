@@ -87,13 +87,38 @@ object MedutTelecom {
     /**
      * The same, for a call a push announced ([dev.medut.android.MedutPush.wake])
      * that is ringing before its INVITE has arrived: there is no [Call] yet,
-     * only what the push said.  Main thread.  Null shows the built-in
-     * notification when it is on.  When the INVITE arrives,
+     * only what the push said, and the ring's key.  Answer or decline it
+     * with [answerPushRing] / [declinePushRing]; [callFor] resolves the key
+     * to the call once the INVITE is in.  Main thread.  Null shows the
+     * built-in notification when it is on.  When the INVITE arrives,
      * [onShowIncomingCallUi] is called with the call.
      */
     @JvmStatic
     @Volatile
-    var onShowPushIncomingCallUi: ((PushPayload) -> Unit)? = null
+    var onShowPushIncomingCallUi: ((key: String, payload: PushPayload) -> Unit)? = null
+
+    /**
+     * Answer the push ring with this key, as the system's Answer would: at
+     * once if its INVITE is in, otherwise as soon as it arrives.  Returns
+     * false when no such ring is up.  Any thread.
+     */
+    @JvmStatic
+    fun answerPushRing(key: String): Boolean = onRing(key) { it.onAnswer() }
+
+    /**
+     * Decline the push ring with this key: the ring ends, and its INVITE is
+     * rejected with 603, now or when it arrives.  Returns false when no such
+     * ring is up.  Any thread.
+     */
+    @JvmStatic
+    fun declinePushRing(key: String): Boolean = onRing(key) { it.onReject() }
+
+    private fun onRing(key: String, action: (MedutConnection) -> Unit): Boolean {
+        val connection = bridge?.ringConnection(key) ?: return false
+        if (Looper.myLooper() == Looper.getMainLooper()) action(connection)
+        else Handler(Looper.getMainLooper()).post { action(connection) }
+        return true
+    }
 
     /**
      * Decide on an incoming call before Telecom hears of it: return a SIP
@@ -491,7 +516,7 @@ internal class TelecomBridge(
     fun showIncomingUi(connection: MedutConnection) {
         val call = connection.call
         val custom = if (call != null) MedutTelecom.onShowIncomingCallUi?.let { { it(call) } }
-            else MedutTelecom.onShowPushIncomingCallUi?.let { { it(connection.ring!!.payload) } }
+            else MedutTelecom.onShowPushIncomingCallUi?.let { { it(connection.key, connection.ring!!.payload) } }
         when {
             custom != null -> custom()
             options.incomingCallNotification -> notifier.show(connection.key, connection.title)

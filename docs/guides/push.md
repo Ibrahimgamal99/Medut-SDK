@@ -141,7 +141,9 @@ MedutAndroid.accountStore.save(cfg)
 
 1. **`call`.** With Telecom on, the phone rings at once with the caller from
    the payload. This is a self-managed connection, with the built-in
-   notification or `MedutTelecom.onShowPushIncomingCallUi`.
+   notification or the app's own screen: `MedutTelecom.onShowPushIncomingCallUi`
+   gets the ring's key and the payload, and the screen answers or declines
+   with `MedutTelecom.answerPushRing(key)` / `declinePushRing(key)`.
    - Every account refreshes its registration (`Account.refreshRegistration()`).
    - When the INVITE arrives, it takes over the ringing call. An Answer the
      user already tapped is carried out. A Decline sends 603 to the INVITE
