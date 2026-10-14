@@ -78,7 +78,10 @@ case MEDUT_EV_SIP_TRACE: {
 
 ## Pcap capture
 
-Write packets to a file for Wireshark analysis:
+Write SIP messages to a file for Wireshark analysis. Media (RTP, STUN,
+DTLS) is not in the file; for a media problem, capture on the network or on
+the PBX. On Android a relative `pcapPath` in `MedutConfig` lands in the
+app's cache directory (`adb shell run-as <package> cat cache/<name>`).
 
 ```c
 medut_pcap_start("/tmp/debug.pcap");

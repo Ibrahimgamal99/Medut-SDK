@@ -367,9 +367,10 @@ which on LTE is where the 2 s of the 4–5 s audio gap went. Ports on the extra
 interface are carried from one ICE generation to the next with the reflexive
 mapping they learned, and the offer goes out as soon as a port on the
 signalling interface has gathered rather than waiting for every interface. On
-Android the plugin keeps a cellular network requested while the SDK is started
-(the modem stays attached next to Wi-Fi, at some battery and data cost), and
-the host app needs `CHANGE_NETWORK_STATE`, merged in from the plugin manifest.
+Android the Kotlin SDK keeps a cellular network requested while the stack
+runs (the modem stays attached next to Wi-Fi, at some battery and data cost),
+and the host app needs `CHANGE_NETWORK_STATE`, merged in from the SDK's
+manifest.
 
 Status (2026-10-11): verified on Linux (a second interface is gathered on,
 checked, carried across restarts and offered at once). On the one Android

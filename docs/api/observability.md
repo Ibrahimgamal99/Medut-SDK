@@ -231,7 +231,9 @@ The event payload includes the negotiated codec, media encryption, rejected code
 
 ## Pcap capture
 
-Write SIP and RTP packets to a Wireshark-compatible pcap file:
+Write SIP packets to a Wireshark-compatible pcap file. RTP, STUN and DTLS
+are not captured (the media sockets have no tap yet); for those, capture on
+the network or on the PBX.
 
 ```c
 // Start capture
@@ -243,7 +245,7 @@ medut_pcap_start("/tmp/capture.pcap");
 medut_pcap_stop();
 ```
 
-The pcap file contains synthetic Ethernet/IP/UDP headers around each packet so Wireshark can decode the SIP and RTP layers without a network interface capture.
+The pcap file contains synthetic Ethernet/IP/UDP headers around each SIP message so Wireshark can decode the SIP layer without a network interface capture.
 
 **Workflow:**
 

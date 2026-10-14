@@ -30,8 +30,8 @@ everything app-specific is configuration you pass in.
 | Linux | x86_64 | OpenSSL (embedded) | `dist/linux/x86_64/medut.so` |
 | macOS | x86_64 + arm64 (universal) | OpenSSL (embedded) | `dist/macos/universal/medut.dylib` |
 | Windows | x64 | OpenSSL (embedded via vcpkg) | `dist\windows\x64\medut.dll` |
-| Android | arm64-v8a, armeabi-v7a, x86_64 | mbedTLS (embedded) | `dist/android/<ABI>/medut.so` |
-| iOS | device + simulator | mbedTLS (embedded) | `dist/ios/Medut.xcframework` |
+| Android | arm64-v8a, armeabi-v7a, x86_64 | OpenSSL (embedded, built from source) | `dist/android/<ABI>/medut.so` |
+| iOS | device + simulator | OpenSSL (embedded, built from source) | `dist/ios/Medut.xcframework` |
 
 Each platform build script produces both the static archive (`medut.a` / `bare.lib`) and the shared library in one step. Shared libraries are **fully self-contained** — consumers need no extra packages at runtime.
 
@@ -43,9 +43,13 @@ Each platform build script produces both the static archive (`medut.a` / `bare.l
 |---|---|---|
 | C / C++ | Header-only RAII wrapper | `bindings/cpp/medut.hpp` |
 | Python | cffi | `bindings/python/` |
-| Kotlin (Android) | JNI | `bindings/kotlin/` |
-| Swift (iOS) | Swift package over the C module | `bindings/swift/` |
-| Flutter | Pigeon over the Kotlin and Swift SDKs | `bindings/flutter/` |
+| Kotlin (Android) | JNI, plus Telecom, push wake-up and an account store | `bindings/kotlin/` |
+| Swift (iOS) | Swift package over the C module, plus CallKit, PushKit wake-up and an account store | `bindings/swift/` |
+| Flutter | Pigeon over the Kotlin and Swift SDKs, for the app's screens | `bindings/flutter/` |
+
+On mobile the native SDK owns the stack for the life of the process: it can
+start at launch or from a push and ring a call with no UI up. The Flutter
+plugin attaches to that stack.
 
 ---
 
@@ -53,6 +57,8 @@ Each platform build script produces both the static archive (`medut.a` / `bare.l
 
 - [C / C++](quickstart/c.md)
 - [Python](quickstart/python.md)
+- [Kotlin (Android)](../bindings/kotlin/README.md)
+- [Swift (iOS)](../bindings/swift/README.md)
 - [Flutter / Dart](quickstart/flutter.md)
 
 ---

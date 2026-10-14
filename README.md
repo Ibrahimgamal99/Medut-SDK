@@ -69,10 +69,12 @@ The same flow in C++ and Dart is in [Quick start](#quick-start) below.
 | **Reliability** | PRACK / 100rel (RFC 3262) |
 | **Mobility** | Network handover (Wi-Fi ↔ 4G/5G) — transport rebind · re-REGISTER · call re-INVITE with media verification · `RECONNECTING` registration state for the whole recovery |
 | **Degraded links** | Media-stall alerts · RTP timeout · SIP OPTIONS keepalive · DNS SRV failover · adaptive Opus bitrate |
-| **Push notifications** | RFC 8599 Contact URI params (APNs · FCM) · REGISTER-only custom headers |
+| **Push notifications** | RFC 8599 Contact URI params (APNs · FCM) · REGISTER-only custom headers · push wake-up that re-registers and rings before the INVITE lands (Kotlin, Swift) |
+| **System call UI** | Telecom self-managed ConnectionService (Android) · CallKit provider (iOS) · answer, hold, mute and hang up from the system side · incoming calls ring with the app closed |
+| **Accounts across restarts** | Keystore-encrypted store (Android) · Keychain (iOS) · restored and registered at every start, including one triggered by a push |
 | **Custom headers** | Per-account and per-dialog (call) SIP headers |
 | **Media** | Opus · G.711 · G.722 · G.726 · PCM tap · WAV recording · TX/RX mute · device enumerate + hot-switch · mic/speaker gain · AEC (half-duplex or WebRTC full-duplex) · NS · AGC · app-owned audio device |
-| **Observability** | SIP trace · SDP diff · pcap · RTCP/MOS stats · quality alerts · jitter buffer · audio level · bandwidth |
+| **Observability** | SIP trace · SDP diff · SIP pcap · RTCP/MOS stats · quality alerts · jitter buffer · audio level · bandwidth · logcat / unified log output from the mobile SDKs |
 | **Multi-account** | Any number of accounts per stack |
 
 ---
@@ -104,8 +106,8 @@ common deployments is in [TLS and WSS](docs/guides/tls_wss.md) and
 | Linux x86_64 | `dist/linux/x86_64/medut.so` | `medut.a` | OpenSSL (embedded) |
 | macOS universal | `dist/macos/universal/medut.dylib` | `medut.a` | OpenSSL (embedded) |
 | Windows x64 | `dist\windows\x64\medut.dll` | `bare.lib` | OpenSSL (embedded via vcpkg) |
-| Android arm64-v8a · armeabi-v7a · x86_64 | `dist/android/<ABI>/medut.so` | `medut.a` | mbedTLS (bundled) |
-| iOS device + simulator | `dist/ios/Medut.xcframework` | — | mbedTLS (bundled) |
+| Android arm64-v8a · armeabi-v7a · x86_64 | `dist/android/<ABI>/medut.so` | `medut.a` | OpenSSL (embedded, built from source) |
+| iOS device + simulator | `dist/ios/Medut.xcframework` | — | OpenSSL (embedded, built from source) |
 
 Shared libraries are **fully self-contained** — OpenSSL, zlib, and the audio
 dependencies are baked in, so nothing extra is needed at runtime.
@@ -117,26 +119,28 @@ dependencies are baked in, so nothing extra is needed at runtime.
 | C | `include/medut.h` | the entire API surface |
 | C++ | `bindings/cpp/medut.hpp` | header-only RAII wrapper |
 | Python | `bindings/python/` | cffi + event decorators |
-| Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API, AAR |
-| Swift (iOS) | `bindings/swift/` | Swift package, async event stream |
-| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs |
+| Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API; Telecom, FCM wake-up, encrypted account store |
+| Swift (iOS) | `bindings/swift/` | Swift package, async event stream; CallKit, PushKit wake-up, Keychain account store |
+| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs, for the app's screens |
+
+On mobile the native SDK owns the stack for the life of the process: started
+at launch or by a push, it registers the remembered accounts and rings an
+incoming call through the system call UI with no app UI up. The Flutter
+plugin attaches to that running stack.
 
 ---
 
 ## Getting the source
 
 ```bash
-git clone --recurse-submodules https://github.com/Ibrahimgamal99/Medut-SDK.git
+git clone https://github.com/Ibrahimgamal99/Medut-SDK.git
 cd Medut-SDK
 ```
 
-Already cloned without submodules:
-
-```bash
-git submodule update --init --recursive third_party/re third_party/baresip
-# mobile only:
-git submodule update --init --recursive third_party/mbedtls
-```
+`third_party/` is not in git. The platform build scripts fetch libre,
+baresip and Opus at the pinned revisions (and OpenSSL for Android and iOS)
+through [`scripts/fetch-third-party.sh`](scripts/fetch-third-party.sh) on
+first use, and move an existing checkout to the pin when it changes.
 
 ---
 
@@ -207,9 +211,14 @@ dependencies:
 ```
 
 ```dart
-final sdk = await Medut.start(config: const MedutConfig(statsIntervalMs: 5000));
+// telecom: calls go through Telecom / CallKit, so they ring with the app closed.
+final sdk = await Medut.start(
+    telecom: true, config: const MedutConfig(statsIntervalMs: 5000));
 
+// remember: the native SDK keeps the account and registers it on every
+// start, including one triggered by a push.
 final account = await sdk.createAccount('alice@pbx.example.com', 'secret',
+    remember: true,
     config: const AccountConfig(
       serverUrl: 'wss://pbx.example.com:8089/ws',
       mediaEnc: MediaEncryption.dtlsSrtp,
@@ -222,7 +231,7 @@ account.events.listen((ev) {
 });
 ```
 
-Platform setup (permissions, `Info.plist`, xcframework):
+Platform setup (permissions, `Info.plist`, the native start at launch, push):
 [bindings/flutter/README.md](bindings/flutter/README.md) ·
 [docs/quickstart/flutter.md](docs/quickstart/flutter.md).  Native apps use the
 SDKs directly: [Kotlin](bindings/kotlin/README.md) ·
@@ -307,6 +316,6 @@ Everything lives in [`docs/`](docs/index.md):
 Medut is released under the [BSD 3-Clause License](LICENSE).
 
 The shipped libraries statically link baresip, libre and Opus (all BSD-3-Clause)
-and — on Android/iOS — Mbed TLS (Apache-2.0). Each dependency's own licence text
-is in `third_party/<name>/` after
+and OpenSSL (Apache-2.0), which is built from source on Android and iOS. Each
+dependency's own licence text is in `third_party/<name>/` after
 [`scripts/fetch-third-party.sh`](scripts/fetch-third-party.sh) runs.

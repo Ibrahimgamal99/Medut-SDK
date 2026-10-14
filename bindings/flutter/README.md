@@ -18,8 +18,8 @@ flow.
 
 | | |
 |---|---|
-| **Android** | `minSdk` 24; arm64-v8a, armeabi-v7a and x86_64. Built on the Kotlin SDK (`bindings/kotlin`), which handles audio mode and focus, call-audio routes, network callbacks, and an optional app-owned audio device. |
-| **iOS** | 13.0+, device and simulator. Built on MedutKit (`bindings/swift`), which handles `AVAudioSession`, routes, `NWPathMonitor`, and the optional VoiceProcessingIO app-owned device. |
+| **Android** | `minSdk` 24; arm64-v8a, armeabi-v7a and x86_64. Built on the Kotlin SDK (`bindings/kotlin`): Telecom integration (API 26+), FCM wake-up, an encrypted account store, audio mode and focus, call-audio routes, network callbacks, and an optional app-owned audio device. |
+| **iOS** | 13.0+, device and simulator. Built on MedutKit (`bindings/swift`): CallKit integration, PushKit wake-up, a Keychain account store, `AVAudioSession`, routes, `NWPathMonitor`, and the optional VoiceProcessingIO app-owned device. |
 
 Because native code owns the stack, it can start the stack at launch or from
 a push, and receive and answer calls with no Flutter engine running.

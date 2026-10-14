@@ -1342,7 +1342,7 @@ typedef struct {
 	 * interfaces are never used).  A handover then offers candidates that
 	 * already exist instead of waiting on a fresh gather.  On Android the
 	 * extra interface must be known through
-	 * medut_network_set_interface_handle(); the Flutter plugin does that
+	 * medut_network_set_interface_handle(); the Kotlin SDK does that
 	 * when MedutConfig.iceMultipath is set.  Experimental: verified on
 	 * Linux; on Android the pinned socket got no replies on the device it
 	 * was tried on (docs/guides/network_handover.md).  Default false.
@@ -2346,8 +2346,10 @@ MEDUT_EXPORT bool medut_network_is_up(void);
 /* ── pcap ─────────────────────────────────────────────────────────────────── */
 
 /**
- * Start capturing SIP + RTP to a Wireshark-compatible pcap file.
- * Writes synthetic Ethernet/IP/UDP headers around each SIP message.
+ * Start capturing SIP to a Wireshark-compatible pcap file.
+ * Writes synthetic Ethernet/IP/UDP headers around each SIP message.  RTP,
+ * STUN and DTLS are not captured (the media sockets have no tap yet); for
+ * those, capture on the network.
  */
 MEDUT_EXPORT int medut_pcap_start(const char *path);
 
