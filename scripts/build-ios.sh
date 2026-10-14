@@ -2,18 +2,17 @@
 # Build Medut for iOS as a DYNAMIC xcframework (macOS + Xcode required).
 #
 # Output:
-#   dist/ios/Medut.xcframework    device (arm64) + simulator (arm64, x86_64)
-#   dist/ios/device/medut.a       static archive (for non-Flutter consumers)
+#   dist/ios/Medut.xcframework    device (arm64) + simulator (arm64, x86_64),
+#                                 with medut.h and a module map
+#   dist/ios/device/medut.a       static archive (for non-Swift consumers)
 #   dist/ios/simulator/medut.a    fat static archive (arm64 + x86_64)
 #   dist/ios/include/               public headers
-# Also refreshes the Flutter plugin's vendored copy in
-# bindings/flutter/ios/Frameworks/ — no second command to run.
+# Also refreshes the copy the Swift package (and through it the Flutter
+# plugin) vendors, bindings/swift/Frameworks/Medut.xcframework — no second
+# command to run.
 #
-# A dynamic framework (not a static lib) is what the Flutter plugin vendors:
-# with a static archive, symbols reached only via dart:ffi dlsym() are
-# dead-stripped from Release app binaries; a dylib's exported symbols are
-# always visible to DynamicLibrary.process(). CocoaPods embeds vendored
-# dynamic frameworks automatically.
+# A dynamic framework rather than a static lib: one copy of the core however
+# many targets link it, and SwiftPM and CocoaPods both embed it automatically.
 #
 # TLS is OpenSSL, cross-built from source per slice (Phase 0.5 in
 # CMakeLists.txt): libre implements TLS/DTLS only over OpenSSL, so an mbedTLS
@@ -133,8 +132,16 @@ link_dylib() {
 make_framework() {
   local DYLIB="$1"; local FW_DIR="$2"
   rm -rf "${FW_DIR}"
-  mkdir -p "${FW_DIR}"
+  mkdir -p "${FW_DIR}/Headers" "${FW_DIR}/Modules"
   cp "${DYLIB}" "${FW_DIR}/Medut"
+  # Header + module map so Swift can `import Medut` (MedutKit).
+  cp "${ROOT}/include/medut.h" "${FW_DIR}/Headers/"
+  cat > "${FW_DIR}/Modules/module.modulemap" <<'MODMAP'
+framework module Medut {
+  umbrella header "medut.h"
+  export *
+}
+MODMAP
   cat > "${FW_DIR}/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -185,7 +192,7 @@ lipo -create \
   "${DIST}/sim-arm64/medut.dylib" \
   "${DIST}/sim-x86_64/medut.dylib" \
   -output "${DIST}/simulator/medut.dylib"
-# Fat static archive for non-Flutter consumers, same layout as before.
+# Fat static archive for non-Swift consumers, same layout as before.
 lipo -create \
   "${DIST}/sim-arm64/medut.a" \
   "${DIST}/sim-x86_64/medut.a" \
@@ -234,23 +241,21 @@ for SLICE in device simulator; do
     echo "ERROR: ${SLICE}: OpenSSL missing from the binary — this build has no TLS/WSS/DTLS-SRTP" >&2
     exit 1
   fi
-  # The external-audio entry points are the ONLY symbols the Flutter plugin
-  # resolves at link time — MedutExternalAudio.m calls them from the VPIO
-  # render callback, while everything else reaches the SDK through dlsym
-  # (lib/src/sdk.dart opens Medut.framework/Medut at runtime). A count of
-  # exported medut_* symbols does not cover them, and their absence surfaces
-  # only much later as "Undefined symbol: _medut_audio_external_push" when
-  # the example app links. Name them explicitly.
+  # The external-audio entry points are called by name from the VPIO render
+  # callback (MedutAudioEngine.m, declared locally rather than imported). A
+  # count of exported medut_* symbols does not cover them, and their absence
+  # surfaces only much later as "Undefined symbol:
+  # _medut_audio_external_push" when an app links. Name them explicitly.
   for SYM in _medut_audio_external_push \
              _medut_audio_external_pull \
              _medut_audio_external_format \
              _medut_audio_external_is_active; do
     if ! grep -q " ${SYM}$" <<<"${GLOBALS}"; then
-      echo "ERROR: ${SLICE}: ${SYM} not exported — the Flutter plugin cannot link against this framework" >&2
+      echo "ERROR: ${SLICE}: ${SYM} not exported — MedutAudioEngine cannot link against this framework" >&2
       exit 1
     fi
   done
-  # The plugin looks this one up with dlsym (so it still links against an
+  # The engine looks this one up with dlsym (so it still links against an
   # older framework), which means a missing export fails silently at run
   # time: the SDK's NS/AGC back on top of VoiceProcessingIO.
   if ! grep -q " _medut_audio_external_set_voice_path$" <<<"${GLOBALS}"; then
@@ -274,14 +279,15 @@ echo "Done. Output: ${DIST}/Medut.xcframework"
 plutil -p "${DIST}/Medut.xcframework/Info.plist" | grep -E "(Identifier|Library)" || true
 
 # ---------------------------------------------------------------------------
-# Stage into the Flutter plugin, where the podspec vendors it.
+# Stage into the Swift package, where MedutKit and the Flutter plugin (through
+# a symlink) vendor it.
 # ---------------------------------------------------------------------------
-PLUGIN_FRAMEWORKS="${ROOT}/bindings/flutter/ios/Frameworks"
-mkdir -p "${PLUGIN_FRAMEWORKS}"
-rm -rf "${PLUGIN_FRAMEWORKS}/Medut.xcframework"
-cp -R "${DIST}/Medut.xcframework" "${PLUGIN_FRAMEWORKS}/Medut.xcframework"
+SWIFT_FRAMEWORKS="${ROOT}/bindings/swift/Frameworks"
+mkdir -p "${SWIFT_FRAMEWORKS}"
+rm -rf "${SWIFT_FRAMEWORKS}/Medut.xcframework"
+cp -R "${DIST}/Medut.xcframework" "${SWIFT_FRAMEWORKS}/Medut.xcframework"
 
 echo ""
-echo "Flutter plugin xcframework refreshed (commit it alongside the C change —"
+echo "Swift package xcframework refreshed (commit it alongside the C change —"
 echo "apps pin a git SHA, so an uncommitted rebuild never reaches consumers):"
-du -sh "${PLUGIN_FRAMEWORKS}/Medut.xcframework"
+du -sh "${SWIFT_FRAMEWORKS}/Medut.xcframework"

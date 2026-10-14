@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Download the prebuilt iOS xcframework from a build-mobile CI run into the
-# Flutter plugin, where the podspec vendors it.
+# Swift package, where MedutKit and (through a symlink) the Flutter plugin
+# vendor it.
 #
 #   scripts/fetch-prebuilt.sh                 latest successful run on main
 #   scripts/fetch-prebuilt.sh --wait          wait for the newest run, then sync
@@ -10,13 +11,13 @@
 # iOS only. Android has no CI job any more (see .github/workflows/
 # build-mobile.yml) — build its jniLibs locally with scripts/build-android.sh.
 #
-# Why this exists: the plugin ships *prebuilt* binaries, so a consumer adding
-# it as a git dependency gets whatever is committed — not whatever CI last
+# Why this exists: the bindings ship *prebuilt* binaries, so a consumer adding
+# them as a git dependency gets whatever is committed — not whatever CI last
 # built. CI uploads the xcframework as an artifact, but nothing commits it
 # back, so the two drift silently. That drift has already shipped once: the
-# committed libmedut.so predated the baresdk_* -> medut_* rename and
-# exported none of the symbols ffi_bindings.dart looks up, so apps built,
-# installed, and then failed at the first SDK call.
+# committed libmedut.so predated the baresdk_* -> medut_* rename and exported
+# none of the medut_* symbols, so apps built, installed, and then failed at the
+# first SDK call.
 #
 # Nothing here is committed for you — review, then `git add` the path printed
 # at the end.
@@ -33,7 +34,7 @@ RUN_ID=""
 WAIT=0
 EXPLICIT=0
 
-IOS_DEST="${ROOT}/bindings/flutter/ios/Frameworks/Medut.xcframework"
+IOS_DEST="${ROOT}/bindings/swift/Frameworks/Medut.xcframework"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -134,8 +135,8 @@ find "${IOS_DEST}" -name Medut -type f | while read -r BIN; do
 done
 
 # ---------------------------------------------------------------------------
-# Verify the symbols the Dart side actually looks up. This is the check that
-# would have caught the baresdk_* blobs before they shipped.
+# Verify the core exports the medut_* API. This is the check that would have
+# caught the baresdk_* blobs before they shipped.
 #
 # nm reads Mach-O only on macOS; elsewhere fall back to probing the string
 # table, which is enough to catch an empty or wrong-project binary.
@@ -157,5 +158,5 @@ done < <(find "${IOS_DEST}" -name Medut -type f)
 
 echo ""
 echo "Synced from run ${RUN_ID} (${SHA:0:12}). Review and commit:"
-echo "  git add bindings/flutter/ios/Frameworks"
+echo "  git add bindings/swift/Frameworks"
 echo "(Android jniLibs are not fetched — build them with scripts/build-android.sh)"
