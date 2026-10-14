@@ -441,15 +441,25 @@ int medut_call_answer(medut_call_handle_t call)
 static void hangup_fn(void *arg)
 {
 	struct medut_call *lc = arg;
-	if (!lc->bc) return;
-	ua_hangup(lc->acct->ua, lc->bc, 0, NULL);
-	lc->state = MEDUT_CALL_ENDED;
+	if (lc->bc) {
+		ua_hangup(lc->acct->ua, lc->bc, 0, NULL);
+		lc->state = MEDUT_CALL_ENDED;
+	}
+	mem_deref(lc);
 }
 
 int medut_call_hangup(medut_call_handle_t call)
 {
 	if (!call) return MEDUT_ERR_INVAL;
-	return bsdk_dispatch(hangup_fn, call);
+	/* Fire-and-forget, so the queued work holds its own reference.  A
+	 * remote BYE can end the call on re_main while hangup_fn is still
+	 * queued; the terminal CALL_STATE event then owns the wrapper, and a
+	 * consumer that releases that event frees it before hangup_fn runs. */
+	mem_ref(call);
+	int err = bsdk_dispatch(hangup_fn, call);
+	if (err)
+		mem_deref(call);
+	return err;
 }
 
 /* ── medut_call_reject ─────────────────────────────────────────────────── */
@@ -459,6 +469,12 @@ typedef struct {
 	uint16_t             scode;
 	char                 reason[128];
 } reject_ctx_t;
+
+static void reject_ctx_destructor(void *arg)
+{
+	reject_ctx_t *ctx = arg;
+	mem_deref(ctx->lc);
+}
 
 static void reject_fn(void *arg)
 {
@@ -476,10 +492,12 @@ int medut_call_reject(medut_call_handle_t call,
 {
 	if (!call) return MEDUT_ERR_INVAL;
 
-	reject_ctx_t *ctx = mem_alloc(sizeof(*ctx), NULL);
+	reject_ctx_t *ctx = mem_alloc(sizeof(*ctx), reject_ctx_destructor);
 	if (!ctx) return MEDUT_ERR_NOMEM;
 	memset(ctx, 0, sizeof(*ctx));
-	ctx->lc    = call;
+	/* Same reason as medut_call_hangup(): the queued work keeps the
+	 * wrapper alive until it has run.  Released by the ctx destructor. */
+	ctx->lc    = mem_ref(call);
 	ctx->scode = scode;
 	if (reason)
 		str_ncpy(ctx->reason, reason, sizeof(ctx->reason));
