@@ -58,3 +58,8 @@ kotlin {
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
+
+dependencies {
+    // @RequiresApi on the Telecom classes; compile-time only.
+    compileOnly("androidx.annotation:annotation:1.7.1")
+}

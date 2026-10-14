@@ -97,11 +97,80 @@ MedutAndroid.audioRoutes.setSpeakerphone(true)
 - **App-owned audio.** `MedutAndroid.useAppOwnedAudio(true)` hands the
   microphone and speaker to an `AudioRecord`/`AudioTrack` engine that captures
   through `VOICE_COMMUNICATION`. Its streams open only once the audio mode is
-  in force. Under `TELECOM` or `MANUAL`, report call audio with
-  `MedutAndroid.setCallAudioActive()`.
+  in force. Under `MANUAL`, or `TELECOM` with your own ConnectionService,
+  report call audio with `MedutAndroid.setCallAudioActive()`; the SDK's own
+  Telecom integration does that itself.
+- **ICE multipath.** With `MedutConfig(iceMultipath = true)` the SDK keeps a
+  cellular network requested next to Wi-Fi while the stack runs and pins its
+  extra ICE sockets to it, so a handover offers candidates that already
+  exist. Costs battery and data; needs `CHANGE_NETWORK_STATE` (declared).
+
+## Telecom
+
+```kotlin
+MedutAndroid.start(this, MedutConfig(), AndroidOptions(telecom = TelecomOptions()))
+```
+
+Every call is then also a self-managed Telecom connection (API 26+): it
+shows in the system call UI and on Bluetooth, Android Auto and Wear; a
+cellular call and a SIP call never fight for audio; Telecom owns the audio
+mode and the route, and `MedutAndroid.audioRoutes` selects routes through
+the active connection. Nothing else changes: `account.call()` places a call,
+`call.answer()` answers one, and the SDK tells Telecom; answering, holding
+and hanging up from the system side drive the call back.
+
+An incoming call with no app UI up gets the built-in incoming-call
+notification: a ringing `CallStyle` notification (API 31+) with Answer and
+Decline, whose full-screen intent opens the app's launch activity with the
+call id in `MedutTelecom.EXTRA_CALL_ID` (`MedutTelecom.callFor(intent)`).
+Request `POST_NOTIFICATIONS` on API 33+. To show your own UI instead, set
+`MedutTelecom.onShowIncomingCallUi`. `MedutTelecom.onOutgoingCallRefused`
+reports an outgoing call Telecom would not create (another call has the
+line).
+
+## Push wake-up (FCM)
+
+The SDK carries no Firebase dependency. Give the server the RFC 8599 push
+parameters through `AccountConfig(pushProvider = PushProvider.FCM, pushToken
+= token, pushParam = packageName)`, update the token with
+`account.setPushToken()`, and handle the push in your messaging service:
+
+```kotlin
+class PushService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        // Application.onCreate started the stack and re-created the accounts.
+        val call = MedutPush.wake(this)       // re-registers, waits for the INVITE
+        // With Telecom on, the system is already ringing; otherwise show `call`.
+    }
+
+    override fun onNewToken(token: String) {
+        Medut.accounts.forEach { it.setPushToken(token) }
+    }
+}
+```
+
+`MedutPush.wake` holds a wake lock, makes every account reachable again (a
+keepalive probe on a registered account, a retry on one that is reconnecting
+or failed, a REGISTER on one that is not registered), and returns the
+incoming call, or null after the timeout. Send the push as a high-priority
+data message so Android starts the process. `MedutPush.reachAccounts()` is
+the same recovery without the wait, for a foreground return.
+
+## Media tap
+
+```kotlin
+call.setMediaTap { call, direction, pcm, samples, sampleRate, channels, timestampMicros ->
+    // Audio thread: copy `pcm` (a ShortBuffer over the SDK's frame) and go.
+}
+```
+
+Both directions, every frame, on the SDK's audio thread; the buffer is valid
+only for the duration of the callback. `setMediaTap(null)` removes it.
 
 The Flutter plugin (`bindings/flutter`) is a Pigeon layer over this SDK and
-compiles it in from source.
+compiles it in from source. Telecom reaches Dart as `Medut.start(telecom:
+true)`; push handling and the media tap are native-only, since they have no
+UI and no Dart isolate to wait for.
 
-Not yet in this module: ConnectionService / Core-Telecom and FCM integration,
-the media tap, and the cellular network request for ICE multipath.
+Not yet in this module: Core-Telecom (`androidx.core.telecom`) as an
+alternative to the ConnectionService.

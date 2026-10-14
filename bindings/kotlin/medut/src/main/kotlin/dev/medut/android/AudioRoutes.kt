@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.telecom.CallAudioState
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** A place call audio can go. */
@@ -42,9 +43,20 @@ class AudioRoutes internal constructor(context: Context) {
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
 
     /** Report-only mode: routes are listed and changes reported, but
-     *  selection does nothing.  On under AudioModePolicy.TELECOM, where
-     *  Telecom owns the route and overrides anything set here. */
+     *  selection does nothing.  On under AudioModePolicy.TELECOM with the
+     *  app's own ConnectionService, where Telecom owns the route and
+     *  overrides anything set here. */
     @Volatile var externalRouting = false
+
+    /** The SDK's own Telecom integration: it knows the route Telecom has
+     *  chosen, and selection goes through the active connection. */
+    internal interface TelecomRouter {
+        val audioState: CallAudioState?
+        /** False when no connection can take the request. */
+        fun select(route: AudioRoute): Boolean
+    }
+
+    @Volatile internal var telecomRouter: TelecomRouter? = null
 
     // Pre-31 SCO bookkeeping: `scoRequested` is our intent, `scoConnected`
     // the platform's confirmation.  Only the latter makes Bluetooth active.
@@ -63,7 +75,7 @@ class AudioRoutes internal constructor(context: Context) {
     fun addListener(listener: () -> Unit) { listeners.add(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
 
-    private fun notifyChanged() {
+    internal fun notifyChanged() {
         main.post { listeners.forEach { it() } }
     }
 
@@ -116,8 +128,24 @@ class AudioRoutes internal constructor(context: Context) {
 
     // ── Listing ──────────────────────────────────────────────────────────
 
-    fun list(): List<AudioRoute> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) list31() else listLegacy()
+    fun list(): List<AudioRoute> {
+        val routes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) list31() else listLegacy()
+        // Under the SDK's Telecom integration the active route is Telecom's
+        // word, not AudioManager's: Telecom moves it and reports it.
+        val state = telecomRouter?.audioState ?: return routes
+        val active = when (state.route) {
+            CallAudioState.ROUTE_SPEAKER -> AudioRoute.Kind.SPEAKER
+            CallAudioState.ROUTE_BLUETOOTH -> AudioRoute.Kind.BLUETOOTH
+            CallAudioState.ROUTE_WIRED_HEADSET -> AudioRoute.Kind.WIRED_HEADSET
+            else -> AudioRoute.Kind.EARPIECE
+        }
+        var marked = false
+        return routes.map { r ->
+            val isActive = r.kind == active && !marked
+            if (isActive) marked = true
+            r.copy(isActive = isActive)
+        }
+    }
 
     private fun kindOf(type: Int): AudioRoute.Kind? = when (type) {
         AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> AudioRoute.Kind.EARPIECE
@@ -210,7 +238,10 @@ class AudioRoutes internal constructor(context: Context) {
      *  platform default.  Ignored while [externalRouting].  Returns the
      *  refreshed list: selection can fail, or complete asynchronously. */
     fun select(id: String): List<AudioRoute> {
-        if (!externalRouting) {
+        val telecom = telecomRouter
+        if (telecom != null) {
+            list().firstOrNull { it.id == id }?.let { telecom.select(it) }
+        } else if (!externalRouting) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) select31(id) else selectLegacy(id)
         }
         return list()
@@ -219,7 +250,7 @@ class AudioRoutes internal constructor(context: Context) {
     /** Speaker on, or back to the best other route (Bluetooth, wired,
      *  earpiece) rather than blindly to the earpiece. */
     fun setSpeakerphone(on: Boolean) {
-        if (externalRouting) return
+        if (externalRouting && telecomRouter == null) return
         if (on) {
             select("speaker")
             return
@@ -233,7 +264,7 @@ class AudioRoutes internal constructor(context: Context) {
 
     /** Undo any selection, as the last call ends. */
     internal fun resetToDefault() {
-        if (externalRouting) return
+        if (externalRouting || telecomRouter != null) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             am.clearCommunicationDevice()
         } else {

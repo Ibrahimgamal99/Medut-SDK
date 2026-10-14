@@ -84,14 +84,18 @@ class Account internal constructor(
 
     /** Place a call.  Progress arrives as [MedutEvent.CallStateChanged]. */
     fun call(uri: String): Call {
-        Medut.platform?.onCallStarting()
-        return withHandle("medut_call_invite") { h ->
+        val platform = Medut.platform
+        platform?.onCallPlacing()
+        platform?.onCallStarting()
+        val call = withHandle("medut_call_invite") { h ->
             val out = LongArray(1)
             check(Native.callInvite(h, uri, out), "medut_call_invite")
             if (out[0] == 0L) throw MedutException(MedutError.fromRaw(-2)!!, "medut_call_invite")
             Medut.registry.trackCall(out[0], this, CallState.CALLING, isOutgoing = true,
                 remoteUri = uri, remoteDisplayName = null)
         }
+        platform?.onCallPlaced(call)
+        return call
     }
 
     /** Send a SIP MESSAGE.  [contentType] null means "text/plain". */

@@ -28,8 +28,13 @@ class MedutSubscription internal constructor(private val onCancel: () -> Unit) {
  * event-thread callbacks must not block.
  */
 internal interface PlatformHooks {
+    /** A call is about to be placed.  May throw to refuse it (the platform
+     *  call framework has another call up). */
+    fun onCallPlacing() {}
     /** A call is being placed or answered: make audio ready.  May block. */
     fun onCallStarting()
+    /** An outgoing call was created. */
+    fun onCallPlaced(call: Call) {}
     /** A call reported a live state.  Event thread. */
     fun onCallLive(call: Call)
     /** A call ended; [noCallsLeft] when it was the last.  Event thread. */

@@ -3,8 +3,11 @@ package dev.medut.android
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import dev.medut.Medut
 import dev.medut.MedutConfig
+import dev.medut.android.telecom.MedutTelecom
+import dev.medut.android.telecom.TelecomOptions
 
 /** Who owns the audio mode and audio focus around calls. */
 enum class AudioModePolicy {
@@ -28,6 +31,10 @@ data class AndroidOptions(
     val audioMode: AudioModePolicy = AudioModePolicy.AUTOMATIC,
     /** Deliver listener callbacks on the main thread by default. */
     val listenOnMainThread: Boolean = true,
+    /** Register every call with Telecom through the SDK's own self-managed
+     *  ConnectionService ([dev.medut.android.telecom.MedutTelecom]).  Forces
+     *  [audioMode] to TELECOM.  Needs API 26; ignored below. */
+    val telecom: TelecomOptions? = null,
 )
 
 /**
@@ -40,6 +47,8 @@ data class AndroidOptions(
  * involved.  Everything else goes through [Medut].
  */
 object MedutAndroid {
+    private const val TAG = "MedutAndroid"
+
     @Volatile private var platform: AndroidPlatform? = null
 
     /** Call-audio routes (earpiece, speaker, Bluetooth, wired).  Available
@@ -62,8 +71,16 @@ object MedutAndroid {
             netMonitorIntervalSeconds =
                 if (options.monitorNetwork) 0 else config.netMonitorIntervalSeconds,
         )
+        val effectiveOptions = when {
+            options.telecom == null -> options
+            MedutTelecom.isSupported -> options.copy(audioMode = AudioModePolicy.TELECOM)
+            else -> {
+                Log.w(TAG, "Telecom integration needs API 26; using ${options.audioMode}")
+                options.copy(telecom = null)
+            }
+        }
 
-        val p = AndroidPlatform(app, options)
+        val p = AndroidPlatform(app, effectiveOptions)
         Medut.platform = p
         try {
             Medut.start(effective)
@@ -73,8 +90,12 @@ object MedutAndroid {
             throw t
         }
         platform = p
-        p.started(reattached = Medut.reattached)
+        p.started(reattached = Medut.reattached, iceMultipath = effective.iceMultipath)
     }
+
+    /** True when the SDK's Telecom integration is on for this stack. */
+    @JvmStatic
+    val isTelecomEnabled: Boolean get() = platform?.telecom != null
 
     /**
      * Take the microphone and speaker over from the SDK: an AudioRecord /

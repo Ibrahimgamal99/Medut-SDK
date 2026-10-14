@@ -8,4 +8,28 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- ConnectivityManager default-network callback (drives handover) -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- requestNetwork(TRANSPORT_CELLULAR) for ICE multipath -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- MedutPush.wake holds a partial wake lock while a push is handled -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Self-managed ConnectionService (AndroidOptions.telecom) -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <!-- The built-in incoming-call notification.  POST_NOTIFICATIONS is a
+         runtime permission on API 33+: request it before the first call. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <application>
+        <service
+            android:name="dev.medut.android.telecom.MedutConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name="dev.medut.android.telecom.MedutCallActionReceiver"
+            android:exported="false" />
+    </application>
 </manifest>

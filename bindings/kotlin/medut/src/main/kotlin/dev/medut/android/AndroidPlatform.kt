@@ -10,6 +10,7 @@ import android.os.Looper
 import dev.medut.Call
 import dev.medut.Medut
 import dev.medut.PlatformHooks
+import dev.medut.android.telecom.TelecomBridge
 
 /**
  * Audio mode and focus around calls, network monitoring and audio routes.
@@ -45,8 +46,16 @@ internal class AndroidPlatform(
         }
     }
 
+    /** The SDK's own Telecom integration, when asked for (API 26+). */
+    val telecom: TelecomBridge? =
+        options.telecom?.takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.O }
+            ?.let { TelecomBridge(context, it, this) }
+
     val routes = AudioRoutes(context).apply {
-        externalRouting = options.audioMode == AudioModePolicy.TELECOM
+        // Report-only when something else owns Telecom; with the SDK's own
+        // bridge, selection goes through the active connection instead.
+        externalRouting = options.audioMode == AudioModePolicy.TELECOM && telecom == null
+        telecomRouter = telecom
         onRouteSettled = { if (synchronized(lock) { appOwnedAudio }) engine.restartStreams() }
         start()
     }
@@ -55,11 +64,17 @@ internal class AndroidPlatform(
         if (options.monitorNetwork) NetworkMonitor(context) { runCatching { Medut.network.changed() } }
         else null
 
-    fun started(reattached: Boolean) {
+    private val cellular = CellularMultipath(context)
+
+    fun started(reattached: Boolean, iceMultipath: Boolean) {
         network?.start(reportInitialPath = reattached)
+        if (iceMultipath) cellular.start()
+        telecom?.start()
     }
 
     fun release() {
+        telecom?.stop()
+        cellular.stop()
         network?.stop()
         engine.disarm()
         routes.stop()
@@ -91,6 +106,14 @@ internal class AndroidPlatform(
     // starts.  A mode set that lands late gives a call the user cannot hear.
     override fun onCallStarting() {
         if (options.audioMode == AudioModePolicy.AUTOMATIC) activate()
+    }
+
+    override fun onCallPlacing() {
+        telecom?.checkOutgoingPermitted()
+    }
+
+    override fun onCallPlaced(call: Call) {
+        telecom?.onCallPlaced(call)
     }
 
     override fun onCallLive(call: Call) {
