@@ -30,13 +30,29 @@ concurrency:
 
 jobs:
   xcframework:
-    runs-on: macos-14
+    runs-on: macos-15
     name: Medut.xcframework · MedutKit · example app
     steps:
       - uses: actions/checkout@v4
 
-      - name: Xcode version
-        run: xcodebuild -version
+      # Flutter's own plugins now ship Swift 6.1 syntax (shared_preferences_
+      # foundation 2.6+: a trailing comma in a parameter list), which an
+      # older Xcode rejects with "Unexpected ',' separator".  Take the newest
+      # stable Xcode 16.x (16.3 or later), else the newest stable one, and
+      # stop early if its Swift is older than 6.1.
+      - name: Select Xcode (Swift 6.1 or later)
+        run: |
+          stable() { grep -v -i -E 'beta|release_candidate|_rc'; }
+          XC=$(ls -d /Applications/Xcode_16.*.app 2>/dev/null | stable | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode_*.app | stable | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          SV=$(xcrun swift -version 2>&1 | sed -n 's/.*Swift version \([0-9]*\.[0-9]*\).*/\1/p' | head -1)
+          echo "Swift $SV from $XC"
+          if [ "$(printf '%s\n6.1\n' "$SV" | sort -V | head -1)" != "6.1" ]; then
+            echo "::error::Swift $SV is older than 6.1; the example app's plugins need Xcode 16.3+"
+            exit 1
+          fi
 
       # Fetches third_party at the pinned revisions, builds the core for the
       # three slices, verifies the exported symbols, and stages the result in
