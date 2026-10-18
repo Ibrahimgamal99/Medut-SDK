@@ -2508,6 +2508,13 @@ public:
         detail::check(medut_account_register(h_), "register_account");
     }
 
+    /** Refresh the registration in place: what to call when a push wakes
+     *  the app (see medut_account_refresh_registration()). */
+    void refresh_registration() {
+        detail::check(medut_account_refresh_registration(h_),
+                      "refresh_registration");
+    }
+
     void unregister() { medut_account_unregister(h_); }
 
     Call call(const std::string& uri) {

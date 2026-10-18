@@ -79,7 +79,7 @@ class Call internal constructor(
     /** Answer an incoming call.  With Telecom, call it from
      *  `Connection.onAnswer`, once Telecom has set the audio mode. */
     fun answer() {
-        Medut.platform?.onCallStarting()
+        Medut.platform?.onCallStarting(this)
         perform("medut_call_answer") { Native.callAnswer(it) }
     }
 

@@ -12,3 +12,10 @@
     <fields>;
 }
 -keep enum dev.medut.** { *; }
+
+# libmedut.so exports Java_dev_medut_ExternalAudio_*: the class and its
+# native methods must keep their names even in apps that do not use the
+# default proguard-android*.txt (which keeps native method names).
+-keepclasseswithmembernames class dev.medut.ExternalAudio {
+    native <methods>;
+}

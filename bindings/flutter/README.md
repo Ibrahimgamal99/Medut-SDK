@@ -1,8 +1,9 @@
 # Medut SDK
 
-SIP softphone SDK for Flutter on Android and iOS: a thin Pigeon layer over
-the native Medut SDKs, which own a self-contained SIP stack (baresip/libre)
-for the whole process lifetime.
+SIP softphone SDK for Flutter. On Android and iOS it is a thin Pigeon layer
+over the native Medut SDKs, which own a self-contained SIP stack
+(baresip/libre) for the whole process lifetime. On Linux, macOS and Windows
+the same Dart API calls the C library over `dart:ffi`.
 
 Drop it into any Flutter app. It covers:
 - registration over UDP/TCP/TLS/WS/WSS,
@@ -113,6 +114,24 @@ See [`example/`](example/) for a runnable app and
 [`docs/quickstart/flutter.md`](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md)
 for the full walkthrough: CallKit/Telecom, transfer, presence, recording,
 handover and stats.
+
+## Desktop (Linux, macOS, Windows)
+
+The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
+implements the plugin's host API by calling the C library directly, so
+`Medut.start`, accounts, calls, events and errors behave as on mobile. Build
+the library with `scripts/build-linux.sh`, `scripts/build-macos.sh` or
+`scripts/build-windows.ps1`, and ship it with the app (`medut.so`,
+`medut.dylib`, `medut.dll` on the library search path), or pass its location:
+
+```dart
+final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
+```
+
+Mobile-only features do nothing there: `telecom` and `audioSession` are
+ignored, `remember` is ignored and `rememberedAccounts()` is empty, and the
+audio route list is empty. The plugin does not declare desktop platforms in
+`pubspec.yaml`, so Flutter does not bundle the library for you.
 
 ## Development
 

@@ -1,3 +1,4 @@
+import Medut
 import Flutter
 import UIKit
 
@@ -176,6 +177,10 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
     }
 
     func accountRegister(accountId: String) throws { try sdk { try account(accountId).register() } }
+
+    func accountRefreshRegistration(accountId: String) throws {
+        try sdk { try account(accountId).refreshRegistration() }
+    }
     func accountUnregister(accountId: String) throws { try sdk { try account(accountId).unregister() } }
 
     func accountRegistrationState(accountId: String) throws -> Int64 {
@@ -419,6 +424,25 @@ public class MedutPlugin: NSObject, FlutterPlugin, MedutHostApi {
     func startPcap(path: String) throws { try sdk { try Medut.shared.startPcap(path: path) } }
     func stopPcap() throws { try sdk { try Medut.shared.stopPcap() } }
 
+    func strerror(code: Int64) throws -> String {
+        String(cString: medut_strerror(Int32(clamping: code)))
+    }
+
+    // ── Push ─────────────────────────────────────────────────────────────
+
+    /// PushKit has to reach MedutPush natively: iOS requires the call to be
+    /// reported to CallKit before the PushKit handler returns, which a hop
+    /// through Dart cannot promise.  See the example AppDelegate.
+    func pushWake(data: [String: String], waitForCallMs: Int64) async throws -> Bool {
+        throw PigeonError(code: "UNSUPPORTED",
+                          message: "pushWake: on iOS, hand PushKit pushes to MedutPush.wake natively",
+                          details: 0)
+    }
+
+    func pushNewToken(token: String) throws {
+        MedutPush.updatePushToken(hex: token)
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private func account(_ id: String) throws -> Account {
@@ -575,7 +599,9 @@ private extension ConfigMessage {
         if let v = traceSip { c.traceSIP = v }
         if let v = traceSdpDiff { c.traceSDPDiff = v }
         if let v = pcapPath { c.pcapPath = v }
-        if let v = logLevel { c.logLevel = try enumValue(v) }
+        // The C library takes any int (-1 = no log events, above 3 = like 3);
+        // LogLevel has 0...3, so clamp rather than refuse.
+        if let v = logLevel { c.logLevel = try enumValue(min(max(v, 0), 3)) }
         return c
     }
 }

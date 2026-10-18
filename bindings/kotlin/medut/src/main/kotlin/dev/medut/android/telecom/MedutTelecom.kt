@@ -186,7 +186,14 @@ object MedutTelecom {
         // A push ring answers and declines through its connection, which
         // carries the choice over to an INVITE still on its way.
         val ring = bridge?.ringConnection(key)
-        val call = if (ring == null) callFor(intent) ?: return else null
+        val call = if (ring == null) {
+            callFor(intent) ?: run {
+                // The call is gone (ended, or the stack restarted): nothing to
+                // answer or decline, but the notification must not linger.
+                bridge?.notifier?.cancel(key)
+                return
+            }
+        } else null
         when (intent.action) {
             ACTION_ANSWER -> {
                 if (ring != null) ring.onAnswer()
@@ -287,8 +294,16 @@ internal class TelecomBridge(
     private fun onEvent(event: MedutEvent) {
         when (event) {
             is MedutEvent.IncomingCall -> onIncoming(event.call)
-            is MedutEvent.CallStateChanged ->
-                connections[event.call]?.sync(event.state, event.error, event.reason)
+            is MedutEvent.CallStateChanged -> {
+                val connection = connections[event.call]
+                if (connection != null) {
+                    connection.sync(event.state, event.error, event.reason)
+                } else if (event.state != CallState.RINGING && event.state != CallState.CALLING) {
+                    // A call Telecom refused rings through the notification
+                    // alone (showIncomingUi(call)); nothing else takes it down.
+                    notifier.cancel(event.call.id.toString())
+                }
+            }
             else -> {}
         }
     }
@@ -315,9 +330,11 @@ internal class TelecomBridge(
             tm.placeCall(addressOf(call), extras)
         } catch (e: SecurityException) {
             // MANAGE_OWN_CALLS missing or the account disabled: the call
-            // goes on without Telecom.
+            // goes on without Telecom, so nothing sets the audio mode for
+            // it unless the SDK does.
             pending.remove(id)
-            Log.w(TAG, "placeCall: $e")
+            Log.w(TAG, "placeCall: $e; the call goes on without Telecom")
+            platform.useAutomaticAudio(call, activateNow = true)
         }
     }
 
@@ -341,8 +358,12 @@ internal class TelecomBridge(
         try {
             tm.addNewIncomingCall(handle, extras)
         } catch (e: SecurityException) {
+            // No connection will exist for this call, so under
+            // AudioModePolicy.TELECOM nobody would set MODE_IN_COMMUNICATION:
+            // the SDK activates call audio itself when it is answered.
             pending.remove(id)
-            Log.w(TAG, "addNewIncomingCall: $e")
+            Log.w(TAG, "addNewIncomingCall: $e; the call rings without Telecom")
+            platform.useAutomaticAudio(call, activateNow = false)
             showIncomingUi(call)
         }
     }
@@ -578,6 +599,10 @@ internal class TelecomBridge(
 
     // ── Routes ───────────────────────────────────────────────────────────
 
+    // setAudioRoute is deprecated in API 34 for requestCallEndpointChange,
+    // which needs the CallEndpoint objects onAvailableCallEndpointsChanged
+    // reports; setAudioRoute still works on every API level.
+    @Suppress("DEPRECATION")
     override fun select(route: AudioRoute): Boolean {
         val connection = connections.values.firstOrNull { it.state == Connection.STATE_ACTIVE }
             ?: connections.values.firstOrNull { it.state != Connection.STATE_DISCONNECTED }

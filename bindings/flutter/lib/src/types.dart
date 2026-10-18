@@ -413,7 +413,8 @@ class TransferFailedEvent extends MedutEvent {
   TransferFailedEvent(this.call, this.reason);
 }
 
-/// Non-fatal registrar warning.
+/// Non-fatal registrar warning.  Carries no account, so like [LogEvent] it
+/// is delivered to [Medut.events] and to every [Account.events].
 class RegistrarWarningEvent extends MedutEvent {
   final String message;
   RegistrarWarningEvent(this.message);
@@ -426,9 +427,20 @@ class SdpNegotiationEvent extends MedutEvent {
   final String? localSdp;
   final String? remoteSdp;
   final String? negotiatedCodec;
+
+  /// "NONE", "SDES" or "DTLS-SRTP".
   final String? negotiatedCrypto;
+
+  /// Codecs offered that the negotiation dropped.  Empty when none were, and
+  /// always empty with today's native library, which does not fill it yet.
+  final List<String> rejectedCodecs;
+
+  /// Negotiation warnings.  Empty when there were none (and, like
+  /// [rejectedCodecs], with today's native library).
+  final List<String> warnings;
   SdpNegotiationEvent(this.call, this.localSdp, this.remoteSdp,
-      this.negotiatedCodec, this.negotiatedCrypto);
+      this.negotiatedCodec, this.negotiatedCrypto,
+      {this.rejectedCodecs = const [], this.warnings = const []});
 }
 
 /// Message-waiting indication (voicemail).
@@ -443,6 +455,9 @@ class MwiEvent extends MedutEvent {
       this.oldUrgent, this.rawBody);
 }
 
+/// A log line from the native library, at or below
+/// [MedutConfig.logLevel].  Delivered to [Medut.events] and to every
+/// [Account.events].
 class LogEvent extends MedutEvent {
   final String message;
   LogEvent(this.message);

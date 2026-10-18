@@ -1,5 +1,8 @@
-// Pigeon schema for the Flutter plugin: Dart talks to the native SDKs
-// (bindings/kotlin, bindings/swift), which own the stack.
+// Pigeon schema for the Flutter plugin: on Android and iOS, Dart talks to
+// the native SDKs (bindings/kotlin/medut, ios/MedutKit), which own the
+// stack.  On Linux / macOS / Windows the same MedutHostApi surface is
+// implemented in Dart over dart:ffi (lib/src/ffi_backend.dart), so one Dart
+// API sits on both.
 //
 // Regenerate after editing:
 //   dart run pigeon --input pigeons/messages.dart
@@ -12,7 +15,10 @@
 //  - Accounts and calls are referenced by the native objects' `id` (UUID).
 //  - Failures arrive as PlatformException with `code` = the MedutError code
 //    name (e.g. NOT_RUNNING, CALL_ENDED, AUTHENTICATION) and `details` = the
-//    raw C return value.
+//    raw C return value.  The plugin adds UNSUPPORTED for a feature the
+//    platform does not have (pushWake on iOS and desktop).
+//  - Integers that name a mode (StartOptionsMessage.audioMode, ...) are
+//    explicit raw values, never a Dart enum's .index.
 import 'package:pigeon/pigeon.dart';
 
 @ConfigurePigeon(PigeonOptions(
@@ -507,6 +513,10 @@ abstract class MedutHostApi {
   List<String> rememberedAccounts();
   void forgetAccount(String uri);
   void accountRegister(String accountId);
+
+  /// Refresh the registration in place (same Call-ID and Contact): what a
+  /// push wake-up sends.  medut_account_refresh_registration().
+  void accountRefreshRegistration(String accountId);
   void accountUnregister(String accountId);
   int accountRegistrationState(String accountId);
   void accountSetRetryPolicy(
@@ -596,6 +606,24 @@ abstract class MedutHostApi {
   bool networkIsUp();
   void startPcap(String path);
   void stopPcap();
+
+  /// medut_strerror(): the C library's text for an error code.
+  String strerror(int code);
+
+  // Push
+  /// A push arrived in Dart (e.g. firebase_messaging): Android hands the
+  /// data to MedutPush.wake() on a background thread, which re-registers
+  /// every account and waits up to [waitForCallMs] for the INVITE.  True
+  /// when the incoming call arrived.  Needs the stack running (started from
+  /// Application.onCreate).  iOS: UNSUPPORTED, PushKit must reach
+  /// MedutPush natively.
+  @async
+  bool pushWake(Map<String, String> data, int waitForCallMs);
+
+  /// A new push token: every account with a push provider sends it, and the
+  /// remembered accounts keep it (MedutPush.onNewToken on Android,
+  /// MedutPush.updatePushToken(hex:) on iOS).
+  void pushNewToken(String token);
 }
 
 @FlutterApi()

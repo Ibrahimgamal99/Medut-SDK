@@ -24,14 +24,23 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
     /// Stable identity for this call: the CallKit call UUID under the SDK's
     /// CallKit integration.  A call announced by a push takes over the id
     /// CallKit already knows, before any event about it is delivered.
-    public private(set) var id = UUID()
+    public var id: UUID { lock.locked { _id } }
 
     /// This side asked to end the call (`hangup` / `reject`), so a terminal
     /// state is local, not the far end's doing.
-    public private(set) var endRequestedLocally = false
+    public var endRequestedLocally: Bool { lock.locked { _endRequestedLocally } }
+
+    // Written on the SDK's event thread (adopt) and by app calls, read
+    // anywhere: both live behind `lock`.
+    private var _id = UUID()
+    private var _endRequestedLocally = false
 
     func adopt(id newID: UUID) {
-        lock.locked { id = newID }
+        lock.locked { _id = newID }
+    }
+
+    private func markEndRequestedLocally() {
+        lock.locked { _endRequestedLocally = true }
     }
     public let account: Account?
     public let isOutgoing: Bool
@@ -130,7 +139,7 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
     /// A no-op on a call that already ended.
     public func hangup() throws {
         if isEnded { return }
-        lock.locked { endRequestedLocally = true }
+        markEndRequestedLocally()
         #if os(iOS)
         if MedutCallKit.shared.manages(self) {
             MedutCallKit.shared.requestEnd(self, rejectCode: nil)
@@ -143,7 +152,7 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
     /// End with a SIP status: for an unanswered incoming call this is the
     /// final response, e.g. 486 Busy Here or 603 Decline.
     public func reject(statusCode: UInt16 = 486, reason: String? = nil) throws {
-        lock.locked { endRequestedLocally = true }
+        markEndRequestedLocally()
         #if os(iOS)
         if MedutCallKit.shared.manages(self) {
             MedutCallKit.shared.requestEnd(self, rejectCode: statusCode)
@@ -182,13 +191,29 @@ public final class Call: @unchecked Sendable, Hashable, Identifiable, CustomStri
 
     func hangupNow() throws {
         if isEnded { return }
-        lock.locked { endRequestedLocally = true }
+        markEndRequestedLocally()
         try perform("medut_call_hangup") { medut_call_hangup($0) }
     }
 
-    func rejectNow(statusCode: UInt16, reason: String?) throws {
-        lock.locked { endRequestedLocally = true }
+    /// `endedLocally: false` when the SDK refuses the call on the system's
+    /// behalf (CallKit would not show it), so the app does not see it as a
+    /// decline the user made.
+    func rejectNow(statusCode: UInt16, reason: String?, endedLocally: Bool = true) throws {
+        if endedLocally { markEndRequestedLocally() }
         try perform("medut_call_reject") { medut_call_reject($0, statusCode, reason) }
+    }
+
+    /// The SIP Call-ID, read without the stack gate, for the SDK's event
+    /// thread (which must never take the gate: shutdown holds its write side
+    /// while joining that thread).  Only valid while `handle` is known to be
+    /// alive, i.e. while the event that carries it is being delivered.  The
+    /// C call hops to the SIP thread, which is still running whenever the
+    /// event thread is (shutdown joins the event thread first).
+    func sipCallIDDuringDelivery() -> String? {
+        var c = medut_call_info_t()
+        guard medut_call_get_info(handle, &c) == 0 else { return nil }
+        let callID = fixedCString(c.call_id)
+        return callID.isEmpty ? nil : callID
     }
 
     func holdNow() throws {

@@ -18,15 +18,20 @@ cd bindings/kotlin
 ```
 
 Use `-Pmedut.jniLibsDir=../../dist/android` to package an unstripped core
-instead.
+instead. The build needs a full JDK 17 or later (with `javac`); a JRE alone
+fails in `compileReleaseJavaWithJavac`. Point `JAVA_HOME` at one if `java` on
+the PATH is a JRE.
 
 The core API also runs on a desktop JVM against the Linux build, which is how
 it is tested without a device:
 
 ```sh
 scripts/build-linux.sh
-bindings/kotlin/desktop-test/run.sh   # needs kotlinc, or KOTLINC_CP
+bindings/kotlin/desktop-test/run.sh   # kotlinc, KOTLINC_CP, or the Gradle cache
 ```
+
+Without `kotlinc` or `KOTLINC_CP`, `run.sh` uses the Kotlin compiler that an
+Android build of this module left in the Gradle cache.
 
 ## Use
 
@@ -100,6 +105,13 @@ MedutAndroid.audioRoutes.setSpeakerphone(true)
   in force. Under `MANUAL`, or `TELECOM` with your own ConnectionService,
   report call audio with `MedutAndroid.setCallAudioActive()`; the SDK's own
   Telecom integration does that itself.
+- **Audio routes.** `MedutAndroid.audioRoutes` lists and selects routes.
+  Route listeners (`audioRoutes.addListener`, or
+  `MedutAndroid.addAudioRouteListener`, which also works before `start`)
+  are kept across `MedutAndroid.shutdown()` / `start()`.
+- **Listeners can't crash delivery.** An exception thrown by a
+  `MedutListener` is caught and logged; the other listeners still get the
+  event.
 - **ICE multipath.** With `MedutConfig(iceMultipath = true)` the SDK keeps a
   cellular network requested next to Wi-Fi while the stack runs and pins its
   extra ICE sockets to it, so a handover offers candidates that already
@@ -129,6 +141,32 @@ first and opens it with `MedutTelecom.ACTION_ANSWER`. Request
 `MedutTelecom.onShowIncomingCallUi`. `MedutTelecom.onOutgoingCallRefused`
 reports an outgoing call Telecom would not create (another call has the
 line).
+
+The notification degrades instead of failing:
+
+- **Notifications off.** Without `POST_NOTIFICATIONS` (API 33+), or with
+  notifications turned off, nothing is posted, and a warning is logged under
+  `MedutTelecom`. Check `MedutAndroid.notificationsEnabled(context)`
+  before the first call.
+- **No full-screen intent.** On API 34+ `USE_FULL_SCREEN_INTENT` can be
+  denied. Check `MedutAndroid.fullScreenIntentAllowed(context)`, and send the
+  user to `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` if it is false.
+- **Plain notification.** Without a full-screen intent, or without a call
+  screen to open, the notification is a plain high-priority one with the same
+  Answer and Decline actions. `CallStyle` needs a full-screen intent or a
+  foreground service.
+
+If Telecom refuses a call (`addNewIncomingCall` or `placeCall` throws
+`SecurityException`, for example because the PhoneAccount is disabled), the
+call goes on without Telecom. The SDK then sets the audio mode and focus for
+that call itself, as under `AudioModePolicy.AUTOMATIC`, and routes it through
+`AudioManager`.
+
+**Known limitation: no foreground service.** The SDK does not run a
+foreground service of type `phoneCall` or `microphone`. On API 34+ the
+microphone may be cut when a call outlives the app's visible activity, unless
+Telecom is active. Your app must run a foreground service of its own for
+calls that continue in the background without Telecom.
 
 ## Push wake-up (FCM)
 
@@ -187,6 +225,15 @@ account.register()
 
 MedutAndroid.accountStore.remove(cfg.uri) // on logout
 ```
+
+The file lives in `Context.noBackupFilesDir`, so Auto Backup and
+device-to-device transfer leave it out. Its Keystore key never leaves the
+device, so a restored copy could not be decrypted anyway. Builds that kept it
+in `filesDir` have it moved on first use. Host apps need no
+`dataExtractionRules` or `fullBackupContent` entry for it. If the Keystore
+fails, for example because the key was invalidated or a vendor Keystore
+throws, the store logs the failure and does not throw. A read then returns no
+accounts, and the next write recreates the key.
 
 `MedutAndroid.start` re-creates and registers every saved account on a fresh
 start (`AndroidOptions.restoreAccounts`, on by default), so

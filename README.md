@@ -121,7 +121,7 @@ dependencies are baked in, so nothing extra is needed at runtime.
 | Python | `bindings/python/` | cffi + event decorators |
 | Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API; Telecom, FCM wake-up, encrypted account store |
 | Swift (iOS) | `bindings/swift/` | Swift package, async event stream; CallKit, PushKit wake-up, Keychain account store |
-| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs, for the app's screens |
+| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs on mobile; `dart:ffi` on desktop |
 
 On mobile the native SDK owns the stack for the life of the process: started
 at launch or by a push, it registers the remembered accounts and rings an

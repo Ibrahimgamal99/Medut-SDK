@@ -4,6 +4,9 @@ import os.log
 /// Writes the stack's log and call events to the unified log (subsystem
 /// `dev.medut`), so a process woken by a push with no UI attached still
 /// leaves a trace in Console.  `StartOptions.logToSystemLog`.
+///
+/// Registration and call lines are public; the stack's own log lines are
+/// private and at debug level (they may hold SIP with credentials).
 enum SystemLog {
     private static let log = OSLog(subsystem: "dev.medut", category: "stack")
     private static let queue = DispatchQueue(label: "dev.medut.syslog")
@@ -16,7 +19,11 @@ enum SystemLog {
             subscription = Medut.shared.addEventHandler(queue: queue) { event in
                 switch event {
                 case .log(let message):
-                    os_log("%{public}@", log: log, type: .info,
+                    // The stack's log can carry whole SIP messages (with
+                    // Authorization / digest headers) when SIP tracing is
+                    // on: private, and at debug level so it is not
+                    // persisted by default.
+                    os_log("%{private}@", log: log, type: .debug,
                            message.trimmingCharacters(in: .newlines))
                 case .registration(let e):
                     os_log("registration %{public}@: %{public}@%{public}@", log: log, type: .info,

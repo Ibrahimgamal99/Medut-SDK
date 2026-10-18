@@ -45,6 +45,21 @@ public final class Account: @unchecked Sendable, Hashable, Identifiable, CustomS
         try perform("medut_account_register") { medut_account_register($0) }
     }
 
+    /// Refresh the registration in place: what to call when a push wakes the
+    /// app.  On a registered account the REGISTER goes out from the client
+    /// that holds the binding (same Call-ID, next CSeq, same Contact), so the
+    /// registrar sees the binding refreshed, which is what RFC 8599 servers
+    /// wait for before they release a held INVITE (s4.1.3).  `register()`
+    /// starts a new client instead, and over UDP/TCP/TLS un-REGISTERs the old
+    /// binding first, which some servers (OpenSIPS) see as a binding removed
+    /// and forward nothing.  On an account that is not registered this is
+    /// `register()`.  Progress arrives as `.registration` events.
+    public func refreshRegistration() throws {
+        try perform("medut_account_refresh_registration") {
+            medut_account_refresh_registration($0)
+        }
+    }
+
     /// Unregister (REGISTER with Expires: 0).
     public func unregister() throws {
         try perform("medut_account_unregister") { medut_account_unregister($0) }
@@ -75,10 +90,11 @@ public final class Account: @unchecked Sendable, Hashable, Identifiable, CustomS
         try perform("medut_account_keepalive_now") { medut_account_keepalive_now($0) }
     }
 
-    /// Update the push token, e.g. when PushKit rotates it.  nil clears the
-    /// push parameters.  The account must have been created with a
-    /// `pushProvider`.
+    /// Update the push token, e.g. when PushKit rotates it.  nil (or an empty
+    /// string) clears the push parameters.  The account must have been
+    /// created with a `pushProvider`.
     public func setPushToken(_ token: String?) throws {
+        let token = (token?.isEmpty ?? true) ? nil : token
         try perform("medut_account_set_push_token") { medut_account_set_push_token($0, token) }
     }
 

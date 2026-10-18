@@ -181,16 +181,28 @@ adb shell am broadcast -n dev.medut.medut/.FakePushReceiver --es type cancel
 ## iOS
 
 `MedutPush.wake(payload:completion:)` is called from PushKit's
-`didReceiveIncomingPushWith`. It reports the call to CallKit at once (iOS ends
-an app that does not) with `caller_name` / `caller_uri` from the payload, and
-re-registers the accounts. A new client with the same push params hands the
-binding over without removing it, so the server sees it refreshed. `MedutPush.updatePushToken(_:)` is called from
-`didUpdate pushCredentials`, and it updates the account store too. Use
-`apns-sandbox` for debug and TestFlight builds and `apns` for the App Store; a
-mismatch fails silently at APNs.
+`didReceiveIncomingPushWith`. It reports a call to CallKit for every push,
+before it returns: iOS 13+ ends an app that does not, and stops delivering
+VoIP pushes to one that keeps missing.
 
-Not on iOS yet: `call_id` matching and `cancel` pushes. iOS is the next step
-after Android.
+1. **`call`.** The call is reported at once with `caller_name` / `caller_uri`
+   from the payload, and every account refreshes its registration in place
+   (`Account.refreshRegistration()`), which is what an RFC 8599 server waits
+   for before it releases the held INVITE. The INVITE whose SIP Call-ID
+   matches `call_id` takes over the CallKit call; without a `call_id`, the
+   oldest waiting one does. When the INVITE arrived first, the push re-reports
+   that call instead of adding a second one.
+2. **`cancel`.** Ends the CallKit call its `call_id` names (without one, the
+   oldest waiting one) as ended by the caller.
+3. **Nothing to ring.** When the stack is not running, it runs without
+   `StartOptions.callKit`, a cancel matches nothing, or the `type` is unknown,
+   `wake` still reports a call and ends it at once. Start the stack in
+   `didFinishLaunching` so a push finds it running.
+
+`MedutPush.updatePushToken(_:)` is called from `didUpdate pushCredentials`, and it
+updates the account store too. On `didInvalidatePushTokenFor`, call
+`MedutPush.clearPushToken()`. Use `apns-sandbox` for debug and TestFlight builds
+and `apns` for the App Store; a mismatch fails silently at APNs.
 
 ## What the server must do
 

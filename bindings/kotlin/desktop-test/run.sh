@@ -26,6 +26,24 @@ gcc -shared -fPIC -O1 -g -std=gnu11 -Wall -Wextra -Werror \
 
 echo "=== Kotlin (core sources only; android/ needs the SDK)"
 SRCS=$(find "${ROOT}/bindings/kotlin/medut/src/main/kotlin/dev/medut" -name '*.kt' -not -path '*/android/*')
+if ! command -v kotlinc >/dev/null && [ -z "${KOTLINC_CP:-}" ]; then
+  # The compiler the Android build downloaded, at the Kotlin plugin's version.
+  KV=$(sed -n 's/.*org.jetbrains.kotlin.android") version "\([^"]*\)".*/\1/p' "${HERE}/../settings.gradle.kts")
+  C="${GRADLE_USER_HOME:-${HOME}/.gradle}/caches/modules-2/files-2.1"
+  pick() { find "${C}/$1" -name "$2" -not -name '*-sources.jar' 2>/dev/null | sort -V | tail -1; }
+  KOTLINC_CP=""
+  for j in "$(pick org.jetbrains.kotlin/kotlin-compiler-embeddable "kotlin-compiler-embeddable-${KV}.jar")" \
+           "$(pick org.jetbrains.kotlin/kotlin-stdlib "kotlin-stdlib-${KV}.jar")" \
+           "$(pick org.jetbrains.kotlin/kotlin-script-runtime "kotlin-script-runtime-${KV}.jar")" \
+           "$(pick org.jetbrains.kotlin/kotlin-daemon-embeddable "kotlin-daemon-embeddable-${KV}.jar")" \
+           "$(pick org.jetbrains.kotlin/kotlin-reflect 'kotlin-reflect-*.jar')" \
+           "$(pick org.jetbrains.intellij.deps/trove4j 'trove4j-*.jar')" \
+           "$(pick org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm 'kotlinx-coroutines-core-jvm-*.jar')" \
+           "$(pick org.jetbrains/annotations 'annotations-*.jar')"; do
+    [ -n "${j}" ] && KOTLINC_CP="${KOTLINC_CP:+${KOTLINC_CP}:}${j}"
+  done
+  case "${KOTLINC_CP}" in *kotlin-compiler-embeddable*) ;; *) KOTLINC_CP="" ;; esac
+fi
 if command -v kotlinc >/dev/null; then
   kotlinc ${SRCS} "${HERE}/DesktopTest.kt" -jvm-target 17 -d "${OUT}/classes"
 else

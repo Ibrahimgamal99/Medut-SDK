@@ -45,7 +45,7 @@ Each platform build script produces both the static archive (`medut.a` / `bare.l
 | Python | cffi | `bindings/python/` |
 | Kotlin (Android) | JNI, plus Telecom, push wake-up and an account store | `bindings/kotlin/` |
 | Swift (iOS) | Swift package over the C module, plus CallKit, PushKit wake-up and an account store | `bindings/swift/` |
-| Flutter | Pigeon over the Kotlin and Swift SDKs, for the app's screens | `bindings/flutter/` |
+| Flutter | Pigeon over the Kotlin and Swift SDKs on mobile; `dart:ffi` on desktop | `bindings/flutter/` |
 
 On mobile the native SDK owns the stack for the life of the process: it can
 start at launch or from a push and ring a call with no UI up. The Flutter

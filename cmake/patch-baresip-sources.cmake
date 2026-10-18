@@ -210,8 +210,13 @@ if(NOT EXISTS "${DTLS_SRTP_C}")
   message(FATAL_ERROR "patch-baresip-sources: ${DTLS_SRTP_C} does not exist")
 endif()
 
+# The version in the recovery hunk is this job's marker.  A file patched by an
+# earlier version goes back to the pinned revision first (it also drops job 4,
+# which then re-applies below), so a hunk changed here reaches an existing tree.
+set(_DTLS_MARK "medut-patch dtls-recovery v2")
+bsdk_restore_if_stale("${DTLS_SRTP_C}" "${_DTLS_MARK}")
 file(READ "${DTLS_SRTP_C}" DCONTENT)
-string(FIND "${DCONTENT}" "Medut-patched" _DTLS_DONE)
+string(FIND "${DCONTENT}" "${_DTLS_MARK}" _DTLS_DONE)
 
 if(NOT _DTLS_DONE EQUAL -1)
   message(STATUS "patch-baresip-sources: ${DTLS_SRTP_C} already patched (dtls recovery)")
@@ -312,9 +317,10 @@ endif()
 # 0 on every DTLS call; the PBX gets no RTCP from us either, so its own QoS
 # has no RTT for the leg.  Upstream baresip main carries the same text.
 #
-# Own anchor check rather than a hunk in Job 2: that job is skipped wholesale
-# on any tree already carrying "Medut-patched", so a hunk added there would
-# never reach an existing checkout.
+# Own anchor check rather than a hunk in Job 2: that job was once skipped
+# wholesale on any tree already carrying "Medut-patched", and it still
+# restores the file when its version marker changes, so this job must find
+# its own text missing and re-apply.
 # ---------------------------------------------------------------------------
 
 file(READ "${DTLS_SRTP_C}" MCONTENT)

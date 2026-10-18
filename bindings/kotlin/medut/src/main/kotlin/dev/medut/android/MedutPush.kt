@@ -10,9 +10,9 @@ import dev.medut.MedutEvent
 import dev.medut.RegistrationState
 import dev.medut.android.telecom.MedutTelecom
 import org.json.JSONObject
-import java.util.concurrent.CountDownLatch
+import android.os.SystemClock
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Which data-message fields carry what, for [PushPayload.parse].  The
@@ -165,13 +165,14 @@ object MedutPush {
         val lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "medut:push")
         lock.acquire(waitForCallMs + 5_000)
         try {
-            val arrived = CountDownLatch(1)
-            val found = AtomicReference<Call?>()
+            // The listener runs inline on the SDK's event thread, which must
+            // never take the gate (shutdown holds it while joining that
+            // thread), and matches() reads the call's Call-ID through it.  So
+            // the listener only queues; the matching happens here, on the
+            // caller's thread.
+            val incoming = LinkedBlockingQueue<Call>()
             val subscription = Medut.addListener({ it.run() }) { event ->
-                if (event is MedutEvent.IncomingCall && matches(payload, event.call)) {
-                    found.set(event.call)
-                    arrived.countDown()
-                }
+                if (event is MedutEvent.IncomingCall) incoming.offer(event.call)
             }
             try {
                 // Already here: the device was reachable after all, or the
@@ -184,18 +185,24 @@ object MedutPush {
                     MedutTelecom.bridge?.ringForPush(payload, waitForCallMs)
                 }
                 reachAccounts()
-                arrived.await(waitForCallMs, TimeUnit.MILLISECONDS)
+                val deadline = SystemClock.elapsedRealtime() + waitForCallMs
+                while (true) {
+                    val left = deadline - SystemClock.elapsedRealtime()
+                    if (left <= 0) return null
+                    val call = incoming.poll(left, TimeUnit.MILLISECONDS) ?: return null
+                    if (matches(payload, call)) return call
+                }
             } finally {
                 subscription.cancel()
             }
-            return found.get()
         } finally {
             if (lock.isHeld) lock.release()
         }
     }
 
     /** Is [call] the one [payload] announced?  Without a Call-ID or AOR in
-     *  the payload, any incoming call is. */
+     *  the payload, any incoming call is.  Takes the gate (Call.info): never
+     *  call it on the SDK's event thread. */
     internal fun matches(payload: PushPayload?, call: Call): Boolean {
         if (payload == null) return true
         payload.aor?.let { aor ->

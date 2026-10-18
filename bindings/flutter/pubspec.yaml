@@ -1,6 +1,6 @@
 name: medut
 description: >-
-  Flutter SIP softphone SDK for Android and iOS (baresip-based): UDP/TCP/TLS/
+  Flutter SIP softphone SDK for Android, iOS and desktop (baresip-based): UDP/TCP/TLS/
   WS/WSS registration, calls, codec control, reconnection & network handover,
   media statistics and quality alerts.
 version: 1.0.0
@@ -14,6 +14,7 @@ topics:
   - softphone
   - webrtc
   - pigeon
+  - ffi
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
@@ -24,10 +25,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Desktop backend (lib/src/ffi_backend.dart).
+  ffi: ^2.1.0
 
 dev_dependencies:
+  # Desktop FFI bindings: dart run ffigen --config ffigen.yaml
+  ffigen: ^12.0.0
   flutter_test:
     sdk: flutter
+  # Mobile glue: dart run pigeon --input pigeons/messages.dart
   pigeon: ^29.0.8
 
 flutter:
@@ -40,3 +46,6 @@ flutter:
         pluginClass: MedutPlugin
       ios:
         pluginClass: MedutPlugin
+      # Linux, macOS and Windows are not declared: there the Dart side drives
+      # the C library over dart:ffi (lib/src/ffi_backend.dart), and the app
+      # ships medut.so / medut.dylib / medut.dll or passes Medut.start(libPath:).

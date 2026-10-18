@@ -1,10 +1,14 @@
-/// Typed Dart enums mirroring the Medut C enums.
+/// Typed Dart enums mirroring the Medut C enums (medut.h).
 ///
 /// Every enum carries its C integer as [raw] and can be decoded with
 /// `fromRaw()`. Unknown raw values map to a defined fallback rather than
 /// throwing, so newer native libraries never crash older Dart code.
+///
+/// The values are the C ones, written out: they cross the Pigeon channel as
+/// is on Android/iOS and go straight into the C structs on desktop, and
+/// test/medut_smoke_test.dart checks them against the generated FFI
+/// bindings.
 library;
-
 
 /// SIP transport protocol.
 enum Transport {
@@ -168,6 +172,24 @@ enum JitterBufferType {
 
   final int raw;
   const JitterBufferType(this.raw);
+}
+
+/// RFC 3262 reliable provisional responses (100rel / PRACK) for an account;
+/// see `Account.setReliableProvisional`.
+enum ReliableProvisionalMode {
+  /// Never send or require 100rel.
+  disabled(0),
+
+  /// Support 100rel when the peer offers it.
+  enabled(1),
+
+  /// Require 100rel; reject a peer that does not support it.
+  required(2);
+
+  final int raw;
+  const ReliableProvisionalMode(this.raw);
+  static ReliableProvisionalMode fromRaw(int raw) =>
+      values.firstWhere((v) => v.raw == raw, orElse: () => enabled);
 }
 
 /// Push notification provider (RFC 8599 pn-provider).

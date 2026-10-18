@@ -102,16 +102,17 @@ static void medut_handshake_deadline(void *arg)
 
 	++st->hs_restarts;
 
-	/* Medut-patched: as the server, a handshake that is under way is the
-	 * one thing a restart must not touch.  The peer's ClientHello has
-	 * arrived and dtls_accept() holds the association; its next flight is
-	 * on the peer's own retransmit schedule (1 s, 2 s, 4 s), and dropping
-	 * the listener now throws that away and leaves the peer mid-handshake
-	 * against a socket that no longer knows it.  Seen on-device
-	 * (2026-10-14, inbound from FreePBX over WSS): the ClientHello landed
-	 * 180 ms before the first deadline, the reset followed, and the call
-	 * never got audio.  Spend the attempt waiting instead; only a peer that
-	 * stays silent for the whole budget reaches the client-role fallback. */
+	/* Medut-patched (medut-patch dtls-recovery v2): as the server, a
+	 * handshake that is under way is the one thing a restart must not
+	 * touch.  The peer's ClientHello has arrived and dtls_accept() holds
+	 * the association; its next flight is on the peer's own retransmit
+	 * schedule (1 s, 2 s, 4 s), and dropping the listener now throws that
+	 * away and leaves the peer mid-handshake against a socket that no
+	 * longer knows it.  Seen on-device (2026-10-14, inbound from FreePBX
+	 * over WSS): the ClientHello landed 180 ms before the first deadline,
+	 * the reset followed, and the call never got audio.  Spend the attempt
+	 * waiting instead; only a peer that stays silent for the whole budget
+	 * reaches the client-role fallback. */
 	if (!st->active && st->compv[0].tls_conn &&
 	    st->hs_restarts < MEDUT_DTLS_MAX_RESTARTS) {
 		info("dtls_srtp: media=%s -- handshake in progress after %u ms,"

@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:medut/medut.dart';
 import 'package:flutter/material.dart';
@@ -108,9 +109,10 @@ class _PhonePageState extends State<PhonePage>
   bool _speaker = false;
   bool _appAudio = false;
 
-  /// Stack settings.  On Android the native side (MedutApplication) has
-  /// already started the stack with its own copy of these by the time Dart
-  /// runs, so [Medut.start] attaches and this config is not used there.
+  /// Stack settings.  On Android and iOS the native side
+  /// (MedutApplication.kt, AppDelegate.swift) has already started the stack
+  /// with its own copy of these by the time Dart runs, so [Medut.start]
+  /// attaches and this config is not used there.  On desktop it is.
   static const _sdkConfig = MedutConfig(
     logLevel: 3,
     // Experimental: gather on cellular next to Wi-Fi so a handover can
@@ -119,7 +121,8 @@ class _PhonePageState extends State<PhonePage>
     // replies (see docs/guides/network_handover.md).
     iceMultipath: false,
     // SIP capture for debugging; relative, so it lands in the app's cache
-    // dir (adb: run-as dev.medut.medut cat cache/medut.pcap).
+    // dir (adb: run-as dev.medut.medut cat cache/medut.pcap); on
+    // desktop it lands in the working directory.
     pcapPath: 'medut.pcap',
     traceSip: true,
     statsIntervalMs: 2000,
@@ -154,13 +157,15 @@ class _PhonePageState extends State<PhonePage>
   /// Register, re-created at launch or by a push with no Dart involved) and
   /// a call it already has up (a push-started call that is ringing).
   Future<Medut?> _attach() async {
-    if (_sdk == null) {
+    if (_sdk == null && _isMobile) {
       // The built-in incoming-call notification needs this on API 33+.
       await Permission.notification.request();
     }
     final Medut sdk;
     try {
-      sdk = _sdk ??= await Medut.start(telecom: true, config: _sdkConfig);
+      // Telecom / CallKit on mobile; desktop ignores it.
+      sdk = _sdk ??=
+          await Medut.start(telecom: _isMobile, config: _sdkConfig);
     } on MedutException catch (e) {
       _snack('start: ${e.message ?? e.code}');
       return null;
@@ -365,10 +370,12 @@ class _PhonePageState extends State<PhonePage>
     // and reports success — it just never delivers a buffer, so the call comes
     // up, the far end hears silence, and nothing anywhere says why. A denied
     // mic has to be said out loud.
-    final mic = await Permission.microphone.request();
-    if (!mic.isGranted) {
-      _snack('Microphone denied — calls will have no outgoing audio');
-      _logLine('microphone permission: $mic (calls will be one-way)');
+    if (_isMobile) {
+      final mic = await Permission.microphone.request();
+      if (!mic.isGranted) {
+        _snack('Microphone denied — calls will have no outgoing audio');
+        _logLine('microphone permission: $mic (calls will be one-way)');
+      }
     }
 
     if (await _attach() == null) return;
@@ -1034,3 +1041,7 @@ class _PhonePageState extends State<PhonePage>
     ]);
   }
 }
+
+/// Android and iOS: the native SDK runs the stack (Telecom/CallKit, push,
+/// runtime permissions).  Elsewhere the FFI backend does, with none of that.
+bool get _isMobile => Platform.isAndroid || Platform.isIOS;

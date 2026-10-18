@@ -1,10 +1,15 @@
-/// Medut — Flutter plugin over the native Medut SDKs.
+/// Medut — Flutter SIP softphone SDK.
 ///
-/// The stack lives in native code (the Kotlin SDK on Android, MedutKit on
-/// iOS), which owns it for the whole process lifetime: calls can be received
-/// and answered with no Flutter engine running.  This library talks to it
-/// over Pigeon; when the app already started the stack natively,
-/// [Medut.start] attaches to it.
+/// One Dart API over two backends:
+///
+///  - **Android and iOS:** the stack lives in native code (the Kotlin SDK on
+///    Android, MedutKit on iOS), which owns it for the whole process
+///    lifetime: calls can be received and answered with no Flutter engine
+///    running.  This library talks to it over Pigeon; when the app already
+///    started the stack natively, [Medut.start] attaches to it.
+///  - **Linux, macOS and Windows:** this library drives the C library
+///    directly over `dart:ffi` (`lib/src/ffi_backend.dart`), with the same
+///    methods, events and errors.
 ///
 /// Quick start:
 ///
@@ -35,10 +40,13 @@
 library medut;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'src/enums.dart';
+import 'src/ffi_backend.dart';
 import 'src/messages.g.dart';
 
 export 'src/enums.dart';
@@ -49,18 +57,23 @@ part 'src/types.dart';
 /// A failed SDK call.
 ///
 /// [code] is the SDK's error code name — `NOT_RUNNING`, `CALL_ENDED`,
-/// `ACCOUNT_DESTROYED`, `AUTHENTICATION`, `TIMEOUT`, `INVALID_ARGUMENT`, ...
-/// — and [rawValue] the C return value (a negative `MEDUT_ERR_*`, or a
-/// positive errno).
+/// `ACCOUNT_DESTROYED`, `AUTHENTICATION`, `TIMEOUT`, `INVALID_ARGUMENT`,
+/// `INVALID_STATE`, `SERVER_ERROR`, `WEBSOCKET_REJECTED`, `ALREADY`,
+/// `FORBIDDEN`, `DNS`, `TRANSPORT`, `OUT_OF_MEMORY`, `SYSTEM`, `UNKNOWN`, the
+/// same names on every platform — plus `UNSUPPORTED` for a feature the
+/// platform does not have (see [Medut.pushWake]).  [rawValue] is the C
+/// return value: a negative `MEDUT_ERR_*`, a positive errno, or 0 when the
+/// failure did not come from C.
 class MedutException implements Exception {
   final String code;
   final int rawValue;
   final String operation;
   final String? message;
 
-  const MedutException(this.code, this.rawValue, this.operation, this.message);
+  const MedutException(
+      this.code, this.rawValue, this.operation, this.message);
 
-  /// The C error as a [MedutError], when it is one.
+  /// The C error as an [MedutError], when it is one.
   MedutError? get error => rawValue < 0
       ? MedutError.values.where((e) => e.raw == rawValue).firstOrNull
       : null;
@@ -71,18 +84,24 @@ class MedutException implements Exception {
 }
 
 /// Who activates call audio (the audio session on iOS, audio mode and focus
-/// on Android).
+/// on Android).  Ignored on desktop, where nothing needs activating.
 enum AudioSessionMode {
   /// The SDK does, around each call.  For apps without CallKit / Telecom.
-  automatic,
+  automatic(0),
 
   /// The platform call framework does: CallKit on iOS, Telecom on Android.
-  /// Report its activations with [Medut.notifyCallKitAudioActive].  On iOS,
-  /// answer from `provider(_:didActivate:)`, not from `CXAnswerCallAction`.
-  callFramework,
+  /// Report its activations with [Medut.notifyCallKitAudioActive].  On
+  /// iOS, answer from `provider(_:didActivate:)`, not from
+  /// `CXAnswerCallAction`.
+  callFramework(1),
 
   /// The app does.
-  manual,
+  manual(2);
+
+  /// The value the native SDKs take (`StartOptionsMessage.audioMode`).
+  /// Explicit, so reordering the enum cannot change what is sent.
+  final int raw;
+  const AudioSessionMode(this.raw);
 }
 
 // ── Call ─────────────────────────────────────────────────────────────────────
@@ -91,7 +110,7 @@ enum AudioSessionMode {
 /// a handle to it by [id].
 ///
 /// Safe to keep after the call ends: the native side holds an ended call
-/// until this object is garbage-collected (or a cap of recent ended calls
+/// until this object is garbage-collected (or a cap of 32 recent ended calls
 /// evicts it, after which methods throw [MedutException] `CALL_ENDED`).
 class Call {
   /// The native call's stable id (UUID).
@@ -110,7 +129,14 @@ class Call {
   /// The state from the latest call-state event.
   CallState state;
 
-  static final Finalizer<void Function()> _release = Finalizer((f) => f());
+  // Lets the native side drop an ended call once nothing here refers to it.
+  // The SDK may be detached or shut down by then, so a failure, synchronous
+  // or not, is not news.
+  static final Finalizer<void Function()> _release = Finalizer((f) {
+    try {
+      f();
+    } catch (_) {}
+  });
 
   Call._(CallMessage m, this.account, this._sdk)
       : id = m.id,
@@ -176,9 +202,11 @@ class Call {
 
   /// Refuse an incoming REFER, leaving this call up.  Returns false if the
   /// refusal could not be sent (no transfer was pending).
-  Future<bool> transferReject({int scode = 603, String? reason = 'Declined'}) async {
+  Future<bool> transferReject(
+      {int scode = 603, String? reason = 'Declined'}) async {
     try {
-      await _run('transferReject', (a) => a.callRejectTransfer(id, scode, reason));
+      await _run(
+          'transferReject', (a) => a.callRejectTransfer(id, scode, reason));
       return true;
     } on MedutException {
       return false;
@@ -217,7 +245,8 @@ class Call {
   /// Record both call directions mixed into one WAV file (PCM S16LE).
   Future<void> recordStart(String path) =>
       _run('recordStart', (a) => a.callStartRecording(id, path));
-  Future<void> recordStop() => _run('recordStop', (a) => a.callStopRecording(id));
+  Future<void> recordStop() =>
+      _run('recordStop', (a) => a.callStopRecording(id));
 
   /// DSCP/TOS on the RTP socket (46 = EF voice, 0 = best effort).
   Future<void> setDscpRtp(int dscp) =>
@@ -258,7 +287,9 @@ class Account {
         aor = m.aor,
         regState = RegState.fromRaw(m.registrationState);
 
-  /// Account-scoped events (registration, this account's calls, ...).
+  /// Account-scoped events: registration, this account's calls, MWI,
+  /// messages, presence — plus every [LogEvent] and [RegistrarWarningEvent],
+  /// which belong to no account.
   Stream<MedutEvent> get events => _ctrl.stream;
 
   void _add(MedutEvent ev) {
@@ -269,7 +300,21 @@ class Account {
       _sdk._run(op, f);
 
   Future<void> register() => _run('register', (a) => a.accountRegister(id));
-  Future<void> unregister() => _run('unregister', (a) => a.accountUnregister(id));
+  Future<void> unregister() =>
+      _run('unregister', (a) => a.accountUnregister(id));
+
+  /// Refresh the registration now: what to send when a push wakes the app,
+  /// or when it returns to the foreground.
+  ///
+  /// A registered account re-sends its REGISTER in place — same Call-ID,
+  /// next CSeq, same Contact — so an RFC 8599 server sees the binding
+  /// refreshed and releases the INVITE it holds.  [register] starts a new
+  /// client instead, which such a server sees as a binding removed and
+  /// another added.  An account that is not registered just registers.
+  /// Progress arrives as [RegStateEvent]s; a successful refresh reports
+  /// [RegState.registered] again with no [RegState.registering] first.
+  Future<void> refreshRegistration() =>
+      _run('refreshRegistration', (a) => a.accountRefreshRegistration(id));
 
   /// Read the registration state from the native stack now.
   Future<RegState> refreshRegState() async {
@@ -289,26 +334,31 @@ class Account {
     required double backoff,
     int maxAttempts = 0,
   }) =>
-      _run('setRetryPolicy',
-          (a) => a.accountSetRetryPolicy(id, initialMs, maxMs, backoff, maxAttempts));
+      _run(
+          'setRetryPolicy',
+          (a) => a.accountSetRetryPolicy(
+              id, initialMs, maxMs, backoff, maxAttempts));
 
   /// Cancel a pending retry.  A reconnecting account reports
   /// [RegState.failed] and stays there until [register].
-  Future<void> cancelRetry() => _run('cancelRetry', (a) => a.accountCancelRetry(id));
+  Future<void> cancelRetry() =>
+      _run('cancelRetry', (a) => a.accountCancelRetry(id));
 
   /// Skip the backoff delay and re-register now.
   Future<void> retryNow() => _run('retryNow', (a) => a.accountRetryNow(id));
 
   /// Send a reachability probe (SIP OPTIONS) now, e.g. before placing a
   /// call.  Not what a push wake wants: RFC 8599 servers release a held
-  /// INVITE on a REGISTER ([register]).
+  /// INVITE on a REGISTER ([refreshRegistration]).
   Future<void> keepaliveNow() =>
       _run('keepaliveNow', (a) => a.accountKeepaliveNow(id));
 
   /// Update the RFC 8599 push token; null clears the push params.  A
   /// remembered account keeps the new token, so a push that starts the app
-  /// registers with it.  On Android, prefer `MedutPush.onNewToken` in the
-  /// app's FirebaseMessagingService: it needs no Dart running.
+  /// registers with it.  For a token refresh that should reach every
+  /// account, see [Medut.pushNewToken]; on Android, prefer
+  /// `MedutPush.onNewToken` in the app's FirebaseMessagingService: it
+  /// needs no Dart running.
   Future<void> setPushToken(String? token) =>
       _run('setPushToken', (a) => a.accountSetPushToken(id, token));
 
@@ -326,28 +376,43 @@ class Account {
       _run('addHeader', (a) => a.accountAddHeader(id, name, value));
 
   /// Header on REGISTER only (not leaked to call peers).
-  Future<void> addRegisterHeader(String name, String value) =>
-      _run('addRegisterHeader', (a) => a.accountAddRegisterHeader(id, name, value));
+  Future<void> addRegisterHeader(String name, String value) => _run(
+      'addRegisterHeader', (a) => a.accountAddRegisterHeader(id, name, value));
+
+  /// RFC 3262 reliable provisional responses (100rel / PRACK) for this
+  /// account's calls.
+  Future<void> setReliableProvisional(ReliableProvisionalMode mode) => _run(
+      'setReliableProvisional',
+      (a) => a.accountSetReliableProvisional(id, mode.raw));
 
   Future<void> sendMessage(String to, String body,
           {String contentType = 'text/plain'}) =>
-      _run('sendMessage', (a) => a.accountSendMessage(id, to, body, contentType));
+      _run('sendMessage',
+          (a) => a.accountSendMessage(id, to, body, contentType));
 
-  Future<void> subscribePresence(String targetUri) =>
-      _run('subscribePresence', (a) => a.accountSubscribePresence(id, targetUri));
+  Future<void> subscribePresence(String targetUri) => _run(
+      'subscribePresence', (a) => a.accountSubscribePresence(id, targetUri));
 
   Future<void> unsubscribePresence(String targetUri) => _run(
-      'unsubscribePresence', (a) => a.accountUnsubscribePresence(id, targetUri));
+      'unsubscribePresence',
+      (a) => a.accountUnsubscribePresence(id, targetUri));
 
   Future<void> publishPresence(PresenceStatus status) =>
       _run('publishPresence', (a) => a.accountPublishPresence(id, status.raw));
 
   /// Unregister and free the account, ending its calls.  [forget] also
   /// drops it from the native account store (see [Medut.createAccount]).
+  ///
+  /// Idempotent on every platform: destroying an account the native side no
+  /// longer has (destroyed already, or gone with an [Medut.shutdown]) does
+  /// nothing and does not throw.
   Future<void> destroy({bool forget = false}) async {
-    await _run('destroy', (a) => a.accountDestroy(id, forget));
-    _sdk._accounts.remove(id);
-    await _ctrl.close();
+    try {
+      await _run('destroy', (a) => a.accountDestroy(id, forget));
+    } finally {
+      _sdk._accounts.remove(id);
+      await _ctrl.close();
+    }
   }
 
   @override
@@ -358,11 +423,27 @@ class Account {
 
 class Medut {
   static Medut? _instance;
+  static Future<Medut>? _starting;
 
   /// The live instance, once [start] completed.
   static Medut? get instance => _instance;
 
+  /// Force the backend instead of choosing it by platform: true = the
+  /// desktop `dart:ffi` backend, false = Pigeon to the native SDKs.  For
+  /// tests, which run on the host but may want either.
+  @visibleForTesting
+  static bool? debugUseFfiBackend;
+
+  static bool get _useFfi =>
+      debugUseFfiBackend ?? !(Platform.isAndroid || Platform.isIOS);
+
   final MedutHostApi _api;
+
+  /// Non-null on desktop: [_api] itself, for what is not a host call (event
+  /// delivery, detach).
+  final FfiBackend? _ffi;
+  final ConfigMessage _startConfig;
+  final StartOptionsMessage _startOptions;
   final Map<String, Account> _accounts = {};
   final Map<String, Call> _calls = {};
   final StreamController<MedutEvent> _ctrl =
@@ -375,7 +456,7 @@ class Medut {
   bool _reattached = false;
   String _version = '';
 
-  Medut._(this._api);
+  Medut._(this._api, this._ffi, this._startConfig, this._startOptions);
 
   /// Every event from the stack, including the ones that belong to no
   /// account (network handover, log).  Account-scoped events also arrive on
@@ -383,8 +464,9 @@ class Medut {
   Stream<MedutEvent> get events => _ctrl.stream;
 
   /// True when the native stack was already running — started by the app at
-  /// launch or from a push — and this instance attached to it.  Its accounts
-  /// and calls are in [accounts] and [calls]; [start]'s config was not used.
+  /// launch or from a push, or left running by [detach] — and this instance
+  /// attached to it.  Its accounts and calls are in [accounts] and [calls];
+  /// [start]'s config was not used.
   bool get reattached => _reattached;
 
   /// Native library version.
@@ -399,7 +481,9 @@ class Medut {
   ///
   /// [audioSession] says who activates call audio (see [AudioSessionMode]).
   /// [monitorNetwork] lets the SDK drive network handover from the OS
-  /// connectivity callback.
+  /// connectivity callback (Android/iOS); on desktop, false turns the C
+  /// library's interface polling off unless
+  /// [MedutConfig.netMonitorIntervalSeconds] sets it.
   ///
   /// [telecom] (Android, API 26+) registers every call with Telecom through
   /// the SDK's own self-managed ConnectionService: calls show in the system
@@ -409,35 +493,79 @@ class Medut {
   /// activation itself, so [notifyCallKitAudioActive] is not needed.  Request
   /// the notification permission on API 33+ for the built-in incoming-call
   /// notification.  On iOS it is the SDK's CallKit integration, which does
-  /// the same through the system call UI.
+  /// the same through the system call UI.  Ignored on desktop.
+  ///
+  /// [libPath] (desktop only) loads the C library from this path instead of
+  /// the platform search path (`medut.so` / `medut.dylib` /
+  /// `medut.dll`).
+  ///
+  /// The stack is process-wide, and so is the instance: while one is
+  /// running, [start] returns it and the [config] and options passed here
+  /// are **not applied** (a debug-console warning says so when they
+  /// differ).  [shutdown] first to start with new ones.
   static Future<Medut> start({
     MedutConfig config = const MedutConfig(),
     AudioSessionMode audioSession = AudioSessionMode.automatic,
     bool monitorNetwork = true,
     bool telecom = false,
+    String? libPath,
   }) async {
-    final existing = _instance;
-    if (existing != null) return existing;
+    final configMessage = config._toMessage();
+    final options = StartOptionsMessage(
+      monitorNetwork: monitorNetwork,
+      audioMode:
+          telecom ? AudioSessionMode.callFramework.raw : audioSession.raw,
+      appOwnedAudio: config.appOwnedAudio,
+      telecom: telecom,
+    );
 
-    final sdk = Medut._(MedutHostApi());
+    // One start at a time: a second caller waits for the first and gets
+    // its instance.
+    final pending = _starting;
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {
+        // The first start failed; this one tries for itself below.
+      }
+    }
+    final existing = _instance;
+    if (existing != null) {
+      if (existing._startConfig != configMessage ||
+          existing._startOptions != options) {
+        debugPrint('Medut.start: the SDK is already running, so the config '
+            'and options passed to this start() are ignored; the running '
+            'instance keeps the ones it started with. Call shutdown() first '
+            'to apply new ones.');
+      }
+      return existing;
+    }
+
+    final starting = _start(configMessage, options, libPath);
+    _starting = starting;
+    try {
+      return await starting;
+    } finally {
+      if (identical(_starting, starting)) _starting = null;
+    }
+  }
+
+  static Future<Medut> _start(ConfigMessage configMessage,
+      StartOptionsMessage options, String? libPath) async {
+    final ffi = _useFfi ? FfiBackend(libPath: libPath) : null;
+    final sdk =
+        Medut._(ffi ?? MedutHostApi(), ffi, configMessage, options);
     // Listen first, so no event that fires while the stack starts is lost.
-    MedutEventsApi.setUp(_EventSink(sdk));
+    if (ffi != null) {
+      ffi.onEvent = sdk._onEvent;
+    } else {
+      MedutEventsApi.setUp(_EventSink(sdk));
+    }
     final StartResultMessage result;
     try {
-      result = await sdk._run(
-          'start',
-          (a) => a.start(
-              config._toMessage(),
-              StartOptionsMessage(
-                monitorNetwork: monitorNetwork,
-                audioMode: telecom
-                    ? AudioSessionMode.callFramework.index
-                    : audioSession.index,
-                appOwnedAudio: config.appOwnedAudio,
-                telecom: telecom,
-              )));
+      result = await sdk._run('start', (a) => a.start(configMessage, options));
     } catch (_) {
-      MedutEventsApi.setUp(null);
+      sdk._stopListening();
       rethrow;
     }
     sdk._reattached = result.reattached;
@@ -455,7 +583,8 @@ class Medut {
   /// Stop listening, leaving the native stack running (registered, calls
   /// up).  The next [start] attaches again.
   void detach() {
-    MedutEventsApi.setUp(null);
+    _ffi?.detach();
+    _stopListening();
     _close();
   }
 
@@ -464,8 +593,17 @@ class Medut {
     try {
       await _run('shutdown', (a) => a.shutdown());
     } finally {
-      MedutEventsApi.setUp(null);
+      _stopListening();
       _close();
+    }
+  }
+
+  void _stopListening() {
+    final ffi = _ffi;
+    if (ffi != null) {
+      ffi.onEvent = null;
+    } else {
+      MedutEventsApi.setUp(null);
     }
   }
 
@@ -485,24 +623,77 @@ class Medut {
   ///
   /// With [remember], the native SDK keeps the config (encrypted, on the
   /// device) and re-creates and registers the account whenever the stack
-  /// starts without Dart: at app launch from `Application.onCreate`, or
-  /// from a push.  After such a start this instance finds it in [accounts]
-  /// with [reattached] set.  [Account.destroy] with `forget` or
-  /// [forgetAccount] removes it again.
+  /// starts without Dart: at app launch from `Application.onCreate` /
+  /// `application(_:didFinishLaunchingWithOptions:)`, or from a push.  After
+  /// such a start this instance finds it in [accounts] with [reattached]
+  /// set.  [Account.destroy] with `forget` or [forgetAccount] removes it
+  /// again.  Android and iOS only: on desktop nothing starts the stack but
+  /// Dart, so [remember] is ignored there and [rememberedAccounts] is empty.
   Future<Account> createAccount(String uri, String password,
-      {AccountConfig config = const AccountConfig(), bool remember = false}) async {
+      {AccountConfig config = const AccountConfig(),
+      bool remember = false}) async {
     final m = await _run('createAccount',
         (a) => a.createAccount(config._toMessage(uri, password), remember));
     return _trackAccount(m);
   }
 
-  /// URIs the native account store holds (see [createAccount]).
+  /// URIs the native account store holds (see [createAccount]); always
+  /// empty on desktop.
   Future<List<String>> rememberedAccounts() =>
       _run('rememberedAccounts', (a) => a.rememberedAccounts());
 
-  /// Drop an account from the native store without touching a live one.
+  /// Drop an account from the native store without touching a live one; a
+  /// no-op on desktop.
   Future<void> forgetAccount(String uri) =>
       _run('forgetAccount', (a) => a.forgetAccount(uri));
+
+  /// Human-readable text for an `MEDUT_ERR_*` code (or errno) from the C
+  /// library.
+  Future<String> strerror(int code) =>
+      _run('strerror', (a) => a.strerror(code));
+
+  // ── Push ────────────────────────────────────────────────────────────────
+
+  /// Hand a push the app received in Dart (e.g. from firebase_messaging's
+  /// `onBackgroundMessage`) to the native wake-up path.  Android only.
+  ///
+  /// Runs `MedutPush.wake(context, data)` on a background thread: every
+  /// account refreshes its registration, and with Telecom on the phone rings
+  /// at once for a call push.  Completes with true when the announced INVITE
+  /// arrived within [wait]; false for a cancel push, a plain wake-up, or no
+  /// INVITE in time.  The stack must be running — start it from
+  /// `Application.onCreate` — or this throws `NOT_RUNNING`; no [Medut]
+  /// instance is needed in the calling isolate.
+  ///
+  /// Prefer calling `MedutPush.wake()` from your own
+  /// FirebaseMessagingService (see the README): it needs no Flutter engine.
+  /// Throws `UNSUPPORTED` on iOS (PushKit must reach `MedutPush`
+  /// natively, see the example AppDelegate) and on desktop.
+  static Future<bool> pushWake(Map<String, String> data,
+      {Duration wait = const Duration(seconds: 10)}) {
+    if (_useFfi) {
+      return Future.error(const MedutException('UNSUPPORTED', 0, 'pushWake',
+          'push wake-up is Android-only; desktop has no push'));
+    }
+    return _runStatic('pushWake',
+        () => MedutHostApi().pushWake(data, wait.inMilliseconds));
+  }
+
+  /// A new push token (FCM `onNewToken`, PushKit `didUpdate`): every account
+  /// with a push provider sends it, and the remembered accounts keep it, so
+  /// a process a later push starts registers with it.  No [Medut] instance
+  /// is needed in the calling isolate.  On iOS pass the token as hex.  On
+  /// desktop it sets the token on the running instance's accounts, if any.
+  static Future<void> pushNewToken(String token) {
+    if (_useFfi) {
+      final ffi = _instance?._ffi;
+      return ffi == null
+          ? Future.value()
+          : _runStatic('pushNewToken', () => ffi.pushNewToken(token));
+    }
+    return _runStatic(
+        'pushNewToken', () => MedutHostApi().pushNewToken(token));
+  }
 
   // ── Audio processing and devices ────────────────────────────────────────
 
@@ -524,8 +715,10 @@ class Medut {
       _run('setJitterBuffer', (a) => a.setJitterBuffer(minMs, maxMs));
   Future<void> setJitterBufferType(JitterBufferType type) =>
       _run('setJitterBufferType', (a) => a.setJitterBufferType(type.raw));
-  Future<void> setAdaptiveBitrate(bool enabled, {int minBps = 0, int maxBps = 0}) =>
-      _run('setAdaptiveBitrate', (a) => a.setAdaptiveBitrate(enabled, minBps, maxBps));
+  Future<void> setAdaptiveBitrate(bool enabled,
+          {int minBps = 0, int maxBps = 0}) =>
+      _run('setAdaptiveBitrate',
+          (a) => a.setAdaptiveBitrate(enabled, minBps, maxBps));
 
   Future<List<AudioDevice>> listInputDevices() => _run('listInputDevices',
       (a) async => (await a.inputDevices()).map(_device).toList());
@@ -540,16 +733,24 @@ class Medut {
       _run('setOutputDevice', (a) => a.setOutputDevice(name));
 
   // ── Call-audio routes ───────────────────────────────────────────────────
+  //
+  // Android and iOS.  Desktop has no routes: the lists are empty, selecting
+  // does nothing and [audioRoutes] never emits; pick a device with
+  // [setOutputDevice] there.
 
   /// Routes call audio can take (earpiece / speaker / Bluetooth / wired).
-  Future<List<AudioRoute>> listAudioRoutes() => _run('listAudioRoutes',
-      (a) async => (await a.audioRoutes()).map(AudioRoute._fromMessage).toList());
+  Future<List<AudioRoute>> listAudioRoutes() => _run(
+      'listAudioRoutes',
+      (a) async =>
+          (await a.audioRoutes()).map(AudioRoute._fromMessage).toList());
 
   /// Route call audio to [id] from [listAudioRoutes]; returns the routes as
   /// they are now (Bluetooth may become active a moment later, reported on
   /// [audioRoutes]).
-  Future<List<AudioRoute>> setAudioRoute(String id) => _run('setAudioRoute',
-      (a) async => (await a.selectAudioRoute(id)).map(AudioRoute._fromMessage).toList());
+  Future<List<AudioRoute>> setAudioRoute(String id) => _run(
+      'setAudioRoute',
+      (a) async =>
+          (await a.selectAudioRoute(id)).map(AudioRoute._fromMessage).toList());
 
   /// Loudspeaker on, or back to the best other route.
   Future<void> setSpeakerphone(bool on) =>
@@ -570,12 +771,13 @@ class Medut {
   /// Hand the microphone and speaker to the SDK's app-owned engine
   /// (VoiceProcessingIO on iOS, AudioRecord/AudioTrack through
   /// VOICE_COMMUNICATION on Android), which opens only once call audio is
-  /// active.
+  /// active.  On desktop this only switches the C library to the external
+  /// device; feeding it is the app's business.
   Future<void> useAppOwnedAudio(bool enable) =>
       _run('useAppOwnedAudio', (a) => a.useAppOwnedAudio(enable));
 
   /// Diagnostics for the app-owned engine: armed, running, format, frame
-  /// counters, last error.
+  /// counters, last error.  Empty on desktop.
   Future<Map<String, Object?>> appOwnedAudioStatus() =>
       _run('appOwnedAudioStatus', (a) => a.appOwnedAudioStatus());
 
@@ -593,7 +795,8 @@ class Medut {
             : ExternalAudioFormat(f.sampleRate, f.channels, f.ptimeMs);
       });
 
-  /// Failures of the app-owned engine, which the SDK cannot see.
+  /// Failures of the app-owned engine, which the SDK cannot see.  Never
+  /// emits on desktop.
   Stream<AppOwnedAudioError> get appOwnedAudioErrors =>
       _appOwnedAudioErrors.stream;
 
@@ -601,16 +804,18 @@ class Medut {
   /// `provider(_:didActivate:)` / `didDeactivate` on iOS, Telecom making the
   /// call active / inactive on Android.  Needed with
   /// [AudioSessionMode.callFramework], where the SDK does not activate audio
-  /// itself.
-  Future<void> notifyCallKitAudioActive(bool active) =>
-      _run('notifyCallKitAudioActive', (a) => a.platformCallAudioActive(active));
+  /// itself.  A no-op on desktop.
+  Future<void> notifyCallKitAudioActive(bool active) => _run(
+      'notifyCallKitAudioActive', (a) => a.platformCallAudioActive(active));
 
   // ── Network and capture ─────────────────────────────────────────────────
 
-  Future<void> networkChanged() => _run('networkChanged', (a) => a.networkChanged());
-  Future<void> networkSetMonitorInterval(int seconds) =>
-      _run('networkSetMonitorInterval', (a) => a.networkSetMonitorInterval(seconds));
-  Future<void> networkSetHandoverPolicy(bool reinviteCalls, bool hangupOnFailure) =>
+  Future<void> networkChanged() =>
+      _run('networkChanged', (a) => a.networkChanged());
+  Future<void> networkSetMonitorInterval(int seconds) => _run(
+      'networkSetMonitorInterval', (a) => a.networkSetMonitorInterval(seconds));
+  Future<void> networkSetHandoverPolicy(
+          bool reinviteCalls, bool hangupOnFailure) =>
       _run('networkSetHandoverPolicy',
           (a) => a.networkSetHandoverPolicy(reinviteCalls, hangupOnFailure));
 
@@ -621,14 +826,18 @@ class Medut {
 
   /// Capture SIP to a Wireshark-readable pcap file.  RTP, STUN and DTLS are
   /// not captured; for those, capture on the network.
-  Future<void> pcapStart(String path) => _run('pcapStart', (a) => a.startPcap(path));
+  Future<void> pcapStart(String path) =>
+      _run('pcapStart', (a) => a.startPcap(path));
   Future<void> pcapStop() => _run('pcapStop', (a) => a.stopPcap());
 
   // ── Internals ───────────────────────────────────────────────────────────
 
-  Future<T> _run<T>(String op, Future<T> Function(MedutHostApi api) f) async {
+  Future<T> _run<T>(String op, Future<T> Function(MedutHostApi api) f) =>
+      _runStatic(op, () => f(_api));
+
+  static Future<T> _runStatic<T>(String op, Future<T> Function() f) async {
     try {
-      return await f(_api);
+      return await f();
     } on PlatformException catch (e) {
       throw MedutException(
           e.code, (e.details is int) ? e.details as int : 0, op, e.message);
@@ -655,52 +864,80 @@ class Medut {
     return call;
   }
 
-  /// Decode and route one event.
+  /// Decode and route one event.  An event without what its type needs (a
+  /// call, the stats) arrives as [UnknownEvent] rather than throwing.
   void _onEvent(EventMessage m) {
     final account = m.accountId == null ? null : _accounts[m.accountId];
-    final call = m.call == null ? null : _trackCall(m.call!);
+    final mc = m.call;
+    final call = mc == null ? null : _trackCall(mc);
     final error = MedutError.fromRaw(m.error ?? 0);
 
-    final MedutEvent event;
+    MedutEvent? event;
+    var everyAccount = false;
     switch (m.type) {
       case _EventType.log:
         event = LogEvent(m.message ?? '');
+        everyAccount = true;
       case _EventType.regState:
         final state = RegState.fromRaw(m.state ?? 0);
         account?.regState = state;
         event = RegStateEvent(state, error, m.errorText,
-            retryAttempt: m.retryAttempt ?? 0, retryDelayMs: m.retryDelayMs ?? 0);
+            retryAttempt: m.retryAttempt ?? 0,
+            retryDelayMs: m.retryDelayMs ?? 0);
       case _EventType.incomingCall:
-        event = IncomingCallEvent(call!, m.fromUri ?? '', m.displayName);
+        if (call != null) {
+          event = IncomingCallEvent(call, m.fromUri ?? '', m.displayName);
+        }
       case _EventType.callState:
-        event = CallStateEvent(call!, CallState.fromRaw(m.state ?? 0), error, m.reason,
-            endedLocally: m.endedLocally ?? false);
+        if (call != null) {
+          event = CallStateEvent(
+              call, CallState.fromRaw(m.state ?? 0), error, m.reason,
+              endedLocally: m.endedLocally ?? false);
+        }
       case _EventType.dtmf:
-        event = CallDtmfEvent(call!, m.digit ?? '');
+        if (call != null) event = CallDtmfEvent(call, m.digit ?? '');
       case _EventType.sdpNegotiation:
-        event = SdpNegotiationEvent(call!, m.localSdp, m.remoteSdp,
-            m.negotiatedCodec, m.negotiatedCrypto);
+        if (call != null) {
+          event = SdpNegotiationEvent(call, m.localSdp, m.remoteSdp,
+              m.negotiatedCodec, m.negotiatedCrypto,
+              rejectedCodecs: m.rejectedCodecs ?? const [],
+              warnings: m.warnings ?? const []);
+        }
       case _EventType.sipTrace:
-        event = SipTraceEvent(MediaDirection.fromRaw(m.direction ?? 0),
-            m.transport ?? '', m.remoteAddress ?? '', m.rawMessage ?? '',
+        event = SipTraceEvent(
+            MediaDirection.fromRaw(m.direction ?? 0),
+            m.transport ?? '',
+            m.remoteAddress ?? '',
+            m.rawMessage ?? '',
             m.timestampUs ?? 0);
       case _EventType.mediaStats:
-        event = MediaStatsEvent(MediaStats._fromMessage(call!, m.stats!));
+        final stats = m.stats;
+        if (call != null && stats != null) {
+          event = MediaStatsEvent(MediaStats._fromMessage(call, stats));
+        }
       case _EventType.registrarWarning:
         event = RegistrarWarningEvent(m.message ?? '');
+        everyAccount = true;
       case _EventType.transferRequest:
-        event = TransferRequestEvent(call!, m.referToUri ?? '', m.isAttended ?? false,
-            autoFollowed: m.autoFollowed ?? false);
+        if (call != null) {
+          event = TransferRequestEvent(
+              call, m.referToUri ?? '', m.isAttended ?? false,
+              autoFollowed: m.autoFollowed ?? false);
+        }
       case _EventType.mwi:
-        event = MwiEvent(m.messagesWaiting ?? false, m.newVoice ?? 0, m.oldVoice ?? 0,
-            m.newUrgent ?? 0, m.oldUrgent ?? 0, m.rawBody);
+        event = MwiEvent(m.messagesWaiting ?? false, m.newVoice ?? 0,
+            m.oldVoice ?? 0, m.newUrgent ?? 0, m.oldUrgent ?? 0, m.rawBody);
       case _EventType.message:
-        event = MessageEvent(m.fromUri ?? '', m.body ?? '', m.contentType ?? 'text/plain');
+        event = MessageEvent(
+            m.fromUri ?? '', m.body ?? '', m.contentType ?? 'text/plain');
       case _EventType.presence:
-        event = PresenceStateEvent(m.targetUri ?? '', PresenceStatus.fromRaw(m.status ?? 0));
+        event = PresenceStateEvent(
+            m.targetUri ?? '', PresenceStatus.fromRaw(m.status ?? 0));
       case _EventType.qualityAlert:
-        event = QualityAlertEvent(call!, QualityIssue.fromRaw(m.issue ?? 0),
-            m.value ?? 0, m.threshold ?? 0, m.recovering ?? false);
+        if (call != null) {
+          event = QualityAlertEvent(call, QualityIssue.fromRaw(m.issue ?? 0),
+              m.value ?? 0, m.threshold ?? 0, m.recovering ?? false);
+        }
       case _EventType.network:
         event = NetworkEvent(
           stage: NetworkStage.fromRaw(m.stage ?? 0),
@@ -713,7 +950,7 @@ class Medut {
           error: error,
         );
       case _EventType.transferFailed:
-        event = TransferFailedEvent(call!, m.reason ?? '');
+        if (call != null) event = TransferFailedEvent(call, m.reason ?? '');
       case _EventType.iceState:
         event = IceStateEvent(
           call: call,
@@ -729,20 +966,28 @@ class Medut {
         );
       case _EventType.audioRoutesChanged:
         if (!_routes.isClosed) {
-          _routes.add((m.routes ?? const []).map(AudioRoute._fromMessage).toList());
+          _routes.add(
+              (m.routes ?? const []).map(AudioRoute._fromMessage).toList());
         }
         return;
       case _EventType.appOwnedAudioError:
         if (!_appOwnedAudioErrors.isClosed) {
-          _appOwnedAudioErrors.add(AppOwnedAudioError(m.errorCode ?? '', m.message ?? ''));
+          _appOwnedAudioErrors
+              .add(AppOwnedAudioError(m.errorCode ?? '', m.message ?? ''));
         }
         return;
-      default:
-        event = UnknownEvent(m.type);
     }
+    // An unknown type, or a known one without what it needs.
+    event ??= UnknownEvent(m.type);
 
     if (!_ctrl.isClosed) _ctrl.add(event);
-    (account ?? call?.account)?._add(event);
+    if (everyAccount) {
+      for (final a in _accounts.values.toList()) {
+        a._add(event);
+      }
+    } else {
+      (account ?? call?.account)?._add(event);
+    }
   }
 }
 

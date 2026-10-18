@@ -23,8 +23,10 @@ public struct AudioRoute: Equatable, Sendable {
 /// The app's AVAudioSession as the call stack sees it: route listing and
 /// selection, and activation around calls under `AudioSessionPolicy.automatic`.
 ///
-/// The stack sets the category (PlayAndRecord + VoiceChat) at start; this
-/// class never changes it.  Ported from the Flutter plugin.
+/// The stack sets the category (PlayAndRecord + VoiceChat) at start.  This
+/// class re-asserts it (`applyCallCategory()`) right before a call is
+/// reported to CallKit, since another library may have changed it since,
+/// and otherwise never changes it.  Ported from the Flutter plugin.
 public final class MedutAudioSession: @unchecked Sendable {
     public static let shared = MedutAudioSession()
 
@@ -56,6 +58,10 @@ public final class MedutAudioSession: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.medut.audio-session")
     private var activatedBySDK = false
     private var sessionActive = false
+    /// Between an interruption's `.began` and `.ended`: activation attempts
+    /// from call-state events wait, since they would fail or fight the
+    /// interrupting call.
+    private var interrupted = false
     private var appOwnedAudio = false
     private lazy var engine: MedutAudioEngine = {
         let engine = MedutAudioEngine()
@@ -88,19 +94,35 @@ public final class MedutAudioSession: @unchecked Sendable {
         ) { [weak self] note in
             guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            let optionsRaw = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
+                .contains(.shouldResume)
             self?.queue.async {
                 guard let self = self else { return }
                 switch type {
                 case .began:
                     // Siri or a cellular call suspended the session: an
                     // app-owned unit left running renders into nothing.
+                    self.interrupted = true
                     self.sessionActive = false
                     if self.appOwnedAudio { self.engine.sessionDeactivated() }
                 case .ended:
+                    self.interrupted = false
                     // iOS does not reactivate for us.  Only a session the SDK
                     // activated: under CallKit, CXProvider reactivates it and
                     // reports it through callKitDidActivate().
-                    if self.activatedBySDK { self.setActive(true) }
+                    guard self.activatedBySDK else { return }
+                    if shouldResume {
+                        self.setActive(true)
+                    } else {
+                        // The interrupter did not say resuming is
+                        // appropriate (e.g. another app's audio took over).
+                        // Leave it inactive; the next call action or call
+                        // state change (`callStarting` / `callLive`)
+                        // reactivates it.
+                        NSLog("Medut: audio interruption ended without shouldResume; "
+                              + "not reactivating the session")
+                    }
                 @unknown default:
                     break
                 }
@@ -215,6 +237,29 @@ public final class MedutAudioSession: @unchecked Sendable {
         queue.sync { appOwnedAudio ? engine.status() : [:] }
     }
 
+    // ── Category ─────────────────────────────────────────────────────────
+
+    /// Set the call category again: PlayAndRecord, VoiceChat mode, Bluetooth
+    /// (HFP and A2DP) allowed, as the stack does at start.  The SDK calls this
+    /// before it reports a call to CallKit, unless the audio-session policy
+    /// is `.manual`, because CallKit activates the session with whatever
+    /// category is set at that moment and another library (a media player,
+    /// a WebView) may have changed it.  Does not activate the session.  Any
+    /// thread; failures are logged.
+    public func applyCallCategory() {
+        let session = AVAudioSession.sharedInstance()
+        let options: AVAudioSession.CategoryOptions = [.allowBluetooth, .allowBluetoothA2DP]
+        if session.category == .playAndRecord && session.mode == .voiceChat
+            && session.categoryOptions.isSuperset(of: options) {
+            return
+        }
+        do {
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: options)
+        } catch {
+            NSLog("Medut: AVAudioSession setCategory failed: %@", error.localizedDescription)
+        }
+    }
+
     // ── CallKit (AudioSessionPolicy.callKit) ─────────────────────────────
 
     /// Forward `provider(_:didActivate:)`.  CXProvider owns activation, so
@@ -240,17 +285,22 @@ public final class MedutAudioSession: @unchecked Sendable {
     /// active before media opens.  Blocks until it is.
     func callStarting() {
         queue.sync {
-            guard !activatedBySDK else { return }
-            activatedBySDK = setActive(true)
+            // Also after an interruption that ended without shouldResume:
+            // the user acting on a call is the cue to take the session back.
+            guard !(activatedBySDK && sessionActive) else { return }
+            if setActive(true) {
+                activatedBySDK = true
+                interrupted = false
+            }
         }
     }
 
     /// A call is live (a call-state event): same as `callStarting()` without
-    /// blocking, for the SDK's event thread.
+    /// blocking, for the SDK's event thread.  Waits out an interruption.
     func callLive() {
         queue.async {
-            guard !self.activatedBySDK else { return }
-            self.activatedBySDK = self.setActive(true)
+            guard !(self.activatedBySDK && self.sessionActive), !self.interrupted else { return }
+            if self.setActive(true) { self.activatedBySDK = true }
         }
     }
 

@@ -160,4 +160,33 @@ final class MedutKitTests: XCTestCase {
         try Medut.shared.start(config, options: options)
         wait(for: [gotLog], timeout: 5)
     }
+
+    // ── Account store keys ───────────────────────────────────────────────
+
+    func testAccountStoreKeyKeepsPort() {
+        XCTAssertEqual(AccountStore.key("sip:Alice@PBX.example.com:5060;transport=tls"),
+                       AccountStore.key("alice@pbx.example.com:5060"))
+        XCTAssertNotEqual(AccountStore.key("alice@pbx.example.com:5060"),
+                          AccountStore.key("alice@pbx.example.com:5080"))
+        XCTAssertEqual(AccountStore.hostKey("sip:alice@pbx.example.com:5080"),
+                       AccountStore.key("sip:alice@pbx.example.com"))
+        XCTAssertEqual(AccountStore.hostKey("alice@[2001:db8::1]:5060"), "alice@[2001:db8::1]")
+    }
+
+    func testAccountStoreMatchingPrefersExactKey() {
+        let a = AccountConfig(uri: "alice@pbx.example.com:5060", password: "")
+        let b = AccountConfig(uri: "alice@pbx.example.com:5080", password: "")
+        XCTAssertEqual(AccountStore.matching("sip:alice@pbx.example.com:5080", in: [a, b]), [1])
+        // An AOR carries no port: it names every port on that host.
+        XCTAssertEqual(AccountStore.matching("sip:alice@pbx.example.com", in: [a, b]), [0, 1])
+    }
+
+    func testPushPayloadKeyDefaults() {
+        let keys = PushPayloadKeys()
+        XCTAssertEqual(keys.type, "type")
+        XCTAssertEqual(keys.callValue, "call")
+        XCTAssertEqual(keys.cancelValue, "cancel")
+        XCTAssertEqual(keys.callID, "call_id")
+        XCTAssertEqual(keys.container, "medut")
+    }
 }

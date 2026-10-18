@@ -31,8 +31,9 @@ internal interface PlatformHooks {
     /** A call is about to be placed.  May throw to refuse it (the platform
      *  call framework has another call up). */
     fun onCallPlacing() {}
-    /** A call is being placed or answered: make audio ready.  May block. */
-    fun onCallStarting()
+    /** A call is being placed ([call] null: it does not exist yet) or
+     *  answered: make audio ready.  May block. */
+    fun onCallStarting(call: Call?)
     /** An outgoing call was created. */
     fun onCallPlaced(call: Call) {}
     /** A call reported a live state.  Event thread. */
@@ -183,10 +184,24 @@ object Medut {
         return MedutSubscription { listeners.remove(entry) }
     }
 
-    /** Event thread: fan out to listeners. */
+    /** Event thread: fan out to listeners.  A listener that throws (or an
+     *  executor that refuses the task) is logged and skipped: it must not
+     *  crash the app from the main looper, nor stop the other listeners or
+     *  the event thread. */
     internal fun publish(event: MedutEvent) {
         for ((executor, listener) in listeners) {
-            executor.execute { listener.onEvent(event) }
+            try {
+                executor.execute {
+                    try {
+                        listener.onEvent(event)
+                    } catch (t: Throwable) {
+                        System.err.println("Medut: listener threw on ${event::class.simpleName}: $t")
+                        t.printStackTrace()
+                    }
+                }
+            } catch (t: Throwable) {
+                System.err.println("Medut: listener executor refused ${event::class.simpleName}: $t")
+            }
         }
     }
 

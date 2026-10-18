@@ -8,6 +8,51 @@ All notable changes to Medut are documented here.
 
 ### Fixed
 
+- **Kotlin push wait could deadlock with shutdown.** `MedutPush.wake` matched
+  the incoming call on the SDK event thread through the stack gate, which
+  `Medut.shutdown()` holds while it joins that thread. The listener now only
+  queues the call and the push thread does the matching.
+- **Kotlin: a throwing listener no longer crashes the app** or stops the
+  other listeners; `Medut.publish` catches and logs it.
+- **Kotlin: ended calls are no longer resurrected.** A stats, ICE, quality or
+  network event after a call's terminal state re-created its wrapper in
+  `Medut.calls` forever; only an incoming call or a live call state creates
+  one now.
+- **Kotlin account store** survives Keystore and crypto failures (logged, key
+  recreated), and lives in `noBackupFilesDir` (moved there on first use).
+- **Kotlin incoming-call notification** checks the notification permission
+  and, on API 34+, `canUseFullScreenIntent()`, and builds a `CallStyle` only
+  with a full-screen intent (it threw without one); otherwise a plain
+  high-priority notification with the same actions. New
+  `MedutAndroid.notificationsEnabled()` / `fullScreenIntentAllowed()`.
+- **Kotlin: a call Telecom refuses** (`SecurityException`) gets the automatic
+  audio mode, focus and routing instead of none; a Decline with no ring or
+  call clears the stale notification.
+- **Kotlin audio route listeners survive** `MedutAndroid.shutdown()` /
+  `start()` (`MedutAndroid.addAudioRouteListener`).
+- **iOS: every VoIP push is reported to CallKit**, also when the stack or the
+  CallKit integration is not running (iOS ends apps that skip it).
+- **iOS push placeholders bind by SIP Call-ID** (`call_id`), oldest first only
+  as a fallback; **cancel pushes** (`type: cancel`) end the matching ring.
+- **iOS push wake-up refreshes the registration in place**
+  (`Account.refreshRegistration()`) instead of re-registering, which
+  un-REGISTERed the binding the server was holding the INVITE for.
+- **iOS:** `MedutPush.clearPushToken()` (an empty token clears too); a CallKit
+  answer no longer waits forever for audio activation (3 s fallback); the
+  audio category is re-asserted before CallKit reports; a call CallKit
+  refuses is not reported as ended locally; callback properties are
+  lock-protected; SIP log lines are private and at debug level; interruptions
+  honour `shouldResume`; account store keys keep the port.
+- **Flutter:** the audio routes stream survives `shutdown()` then `start()`;
+  an event missing its call or stats arrives as `UnknownEvent` instead of
+  stopping the stream; `AudioSessionMode` crosses as explicit raw values;
+  `logLevel` is clamped to what the native SDKs accept; a second `start()`
+  with a different config warns; destroying an account twice is a no-op; the
+  call finalizer is quiet after `detach()`.
+- **The DTLS patch marker is versioned** (`medut-patch dtls-recovery v2`), so
+  a third-party tree patched by an older version is restored and re-patched
+  instead of silently keeping the old hunk.
+
 - **RFC 8599 push params now reach the wire.** `pn-provider` / `pn-prid` /
   `pn-param` were built from the account config but never put in the
   REGISTER Contact, so no server had a token to push to (baresip job 11).
@@ -40,9 +85,9 @@ All notable changes to Medut are documented here.
 
 - **Mobile architecture.** The Kotlin (`bindings/kotlin`) and Swift
   (`bindings/swift`) SDKs own the stack for the life of the process; the
-  Flutter plugin is a Pigeon layer over them instead of a `dart:ffi` binding,
-  and is mobile only. Every Dart action is async and throws
-  `MedutException`.
+  Flutter plugin is a Pigeon layer over them on Android and iOS; on Linux,
+  macOS and Windows the same Dart API drives the C library over `dart:ffi`.
+  Every Dart action is async and throws `MedutException`.
 - **DTLS-SRTP recovery.** As the DTLS server, a handshake that is under way
   is no longer reset at the deadline; only a peer that stays silent reaches
   the client-role fallback. Fixes silent inbound calls against FreePBX over
@@ -52,6 +97,12 @@ All notable changes to Medut are documented here.
 
 ### Added
 
+- **`refresh_registration()`** in the C++ (`Account::refresh_registration`)
+  and Python (`Account.refresh_registration`) bindings.
+- **Flutter:** `refreshRegistration`, `setReliableProvisional`, static
+  `pushWake` / `pushNewToken`, `strerror`, `MedutConfig.copyWith`, rejected
+  codecs and warnings on SDP negotiation events, desktop over `dart:ffi`. See
+  `bindings/flutter/CHANGELOG.md`.
 - **`medut_account_refresh_registration()`** (Kotlin
   `Account.refreshRegistration()`): re-sends the REGISTER from the client
   holding the binding (same Call-ID and Contact), as a push wake-up needs.

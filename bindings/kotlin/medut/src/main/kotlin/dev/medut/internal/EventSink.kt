@@ -57,7 +57,8 @@ internal object EventSink {
                 val account = registry.account(r.account)
                 val from = r.from_uri.orEmpty()
                 val call = registry.trackCall(r.call, account, CallState.RINGING,
-                    isOutgoing = false, remoteUri = from, remoteDisplayName = r.display_name)
+                    isOutgoing = false, remoteUri = from, remoteDisplayName = r.display_name,
+                    fresh = true)
                 MedutEvent.IncomingCall(account, call, from, r.display_name)
             }
 
@@ -65,12 +66,16 @@ internal object EventSink {
                 if (r.call == 0L) return MedutEvent.Unknown(r.type)
                 val state = CallState.of(r.state)
                 val error = MedutError.fromRaw(r.error)
-                val call = registry.trackCall(r.call)
+                val call = registry.callForState(r.call, state)
                 if (state.isTerminal) {
-                    retain(call.takeTerminalEvent(ev, state, error, r.reason))
-                    val noneLeft = registry.untrackCall(r.call)
-                    Medut.platform?.onCallEnded(call, noneLeft)
-                } else {
+                    // A repeated terminal state for a call already ended is
+                    // reported, but the platform hears of the end once.
+                    val alreadyEnded = call.isEnded
+                    val retained = call.takeTerminalEvent(ev, state, error, r.reason)
+                    retain(retained)
+                    val (_, noneLeft) = registry.untrackCall(r.call, call, retained)
+                    if (!alreadyEnded) Medut.platform?.onCallEnded(call, noneLeft)
+                } else if (!call.isEnded) {
                     call.update(state)
                     Medut.platform?.onCallLive(call)
                 }
@@ -79,10 +84,10 @@ internal object EventSink {
                     endedLocally = state.isTerminal && call.endRequestedLocally)
             }
 
-            EventType.CALL_DTMF -> MedutEvent.Dtmf(registry.trackCallOrNull(r.call), r.digit.toChar())
+            EventType.CALL_DTMF -> MedutEvent.Dtmf(registry.call(r.call), r.digit.toChar())
 
             EventType.SDP_NEGOTIATION -> MedutEvent.SdpNegotiation(
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 localSdp = r.local_sdp,
                 remoteSdp = r.remote_sdp,
                 negotiatedCodec = r.negotiated_codec,
@@ -101,12 +106,12 @@ internal object EventSink {
 
             EventType.MEDIA_STATS -> {
                 val stats = r.stats ?: return MedutEvent.Unknown(r.type)
-                MedutEvent.MediaStatsUpdate(registry.trackCallOrNull(r.call), MediaStats.from(stats))
+                MedutEvent.MediaStatsUpdate(registry.call(r.call), MediaStats.from(stats))
             }
 
             EventType.TRANSFER_REQUEST -> MedutEvent.TransferRequest(
                 account = registry.account(r.account),
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 referToUri = r.refer_to_uri.orEmpty(),
                 isAttended = r.has_replaces,
                 autoFollowed = r.auto_followed,
@@ -114,7 +119,7 @@ internal object EventSink {
 
             EventType.TRANSFER_FAILED -> MedutEvent.TransferFailed(
                 account = registry.account(r.account),
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 reason = r.reason,
             )
 
@@ -140,7 +145,7 @@ internal object EventSink {
             )
 
             EventType.QUALITY_ALERT -> MedutEvent.QualityAlert(
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 issue = QualityIssue.of(r.issue),
                 value = r.value,
                 threshold = r.threshold,
@@ -149,7 +154,7 @@ internal object EventSink {
 
             EventType.NETWORK -> MedutEvent.Network(
                 stage = NetworkStage.of(r.event),
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 accountHandle = registry.account(r.account),
                 localAddress = r.local_addr.orEmpty(),
                 attempt = r.attempt,
@@ -160,7 +165,7 @@ internal object EventSink {
             )
 
             EventType.ICE_STATE -> MedutEvent.IceStateChanged(
-                call = registry.trackCallOrNull(r.call),
+                call = registry.call(r.call),
                 state = IceState.of(r.state),
                 previous = IceState.of(r.prev),
                 generation = r.generation,

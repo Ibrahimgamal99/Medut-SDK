@@ -1,8 +1,10 @@
 package dev.medut.android
 
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -12,6 +14,7 @@ import dev.medut.MedutEvent
 import dev.medut.MedutSubscription
 import dev.medut.android.telecom.MedutTelecom
 import dev.medut.android.telecom.TelecomOptions
+import java.util.concurrent.CopyOnWriteArrayList
 
 /** Who owns the audio mode and audio focus around calls. */
 enum class AudioModePolicy {
@@ -66,11 +69,59 @@ object MedutAndroid {
     @Volatile private var accounts: AccountStore? = null
     @Volatile private var logSubscription: MedutSubscription? = null
 
+    /** Every [AudioRoutes] instance's listeners: one list for the process,
+     *  so a listener outlives [shutdown] / [start], which build a new
+     *  [AudioRoutes]. */
+    internal val routeListeners = CopyOnWriteArrayList<() -> Unit>()
+
     /** Call-audio routes (earpiece, speaker, Bluetooth, wired).  Available
-     *  after [start]. */
+     *  after [start].  Listeners added to it are kept across a restart. */
     @JvmStatic
     val audioRoutes: AudioRoutes
         get() = platform?.routes ?: throw IllegalStateException("MedutAndroid.start() first")
+
+    /** Listen for route changes (main thread), before or after [start];
+     *  kept across [shutdown] / [start].  The same as
+     *  `audioRoutes.addListener`, without needing the stack up. */
+    @JvmStatic
+    fun addAudioRouteListener(listener: () -> Unit) {
+        routeListeners.addIfAbsent(listener)
+    }
+
+    @JvmStatic
+    fun removeAudioRouteListener(listener: () -> Unit) {
+        routeListeners.remove(listener)
+    }
+
+    /**
+     * Whether the app may post notifications at all: false when the user
+     * turned them off, or on API 33+ while POST_NOTIFICATIONS is not granted.
+     * The built-in incoming-call notification is not shown then (Telecom's
+     * own ringing still is, where the system provides one); request the
+     * permission before the first call.
+     */
+    @JvmStatic
+    fun notificationsEnabled(context: Context): Boolean =
+        runCatching {
+            context.applicationContext.getSystemService(NotificationManager::class.java)
+                ?.areNotificationsEnabled() ?: false
+        }.getOrDefault(false)
+
+    /**
+     * Whether the built-in incoming-call notification may use a full-screen
+     * intent.  Always true below API 34; on 34+ the user (or the Play Store
+     * policy for apps that are not calling or alarm apps) can deny
+     * USE_FULL_SCREEN_INTENT, and the notification is then a heads-up one
+     * (send the user to Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).
+     */
+    @JvmStatic
+    fun fullScreenIntentAllowed(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return true
+        return runCatching {
+            context.applicationContext.getSystemService(NotificationManager::class.java)
+                ?.canUseFullScreenIntent() ?: false
+        }.getOrDefault(false)
+    }
 
     /** Accounts kept across process restarts.  Available after [start]; an
      *  app that needs it earlier can construct its own [AccountStore]. */
@@ -105,6 +156,7 @@ object MedutAndroid {
             }
         }
 
+        val previous = Medut.platform
         val p = AndroidPlatform(app, effectiveOptions)
         Medut.platform = p
         if (options.logToLogcat && logSubscription == null) {
@@ -125,7 +177,9 @@ object MedutAndroid {
         try {
             Medut.start(effective)
         } catch (t: Throwable) {
-            Medut.platform = null
+            // Already running (or failed): leave the running stack's hooks
+            // as they were.
+            Medut.platform = previous
             p.release()
             throw t
         }

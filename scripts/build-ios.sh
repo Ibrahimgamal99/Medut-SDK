@@ -255,6 +255,20 @@ for SLICE in device simulator; do
       exit 1
     fi
   done
+  # Called by name from Swift (Account.refreshRegistration, which
+  # MedutPush.reachAccounts uses on every push wake). Missing, MedutKit
+  # fails to link with "Undefined symbol: _medut_account_refresh_registration".
+  if ! grep -q " _medut_account_refresh_registration$" <<<"${GLOBALS}"; then
+    echo "ERROR: ${SLICE}: _medut_account_refresh_registration not exported — MedutKit cannot link against this framework" >&2
+    exit 1
+  fi
+  # Swift imports the framework as a clang module: header and module map
+  # must both be in every slice.
+  FW="${DIST}/${SLICE}/Medut.framework"
+  if [ ! -f "${FW}/Headers/medut.h" ] || [ ! -f "${FW}/Modules/module.modulemap" ]; then
+    echo "ERROR: ${SLICE}: Headers/medut.h or Modules/module.modulemap missing — Swift cannot import Medut" >&2
+    exit 1
+  fi
   # The engine looks this one up with dlsym (so it still links against an
   # older framework), which means a missing export fails silently at run
   # time: the SDK's NS/AGC back on top of VoiceProcessingIO.

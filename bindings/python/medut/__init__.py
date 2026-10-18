@@ -1209,6 +1209,13 @@ class Account:
         """Send a SIP REGISTER to activate this account."""
         _check(lib.medut_account_register(self._h), "register")
 
+    def refresh_registration(self):
+        """Refresh the registration in place: what to call when a push wakes
+        the app.  A registered account re-sends its REGISTER from the client
+        holding the binding (RFC 8599 s4.1.3); any other account registers."""
+        _check(lib.medut_account_refresh_registration(self._h),
+               "refresh_registration")
+
     def unregister(self):
         """Send an unregistration (Expires: 0)."""
         lib.medut_account_unregister(self._h)

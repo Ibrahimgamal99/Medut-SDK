@@ -2,11 +2,46 @@
 
 ## Unreleased
 
+Added:
+
+- `Account.refreshRegistration()`: re-send the REGISTER in place (same
+  Call-ID and Contact), as a push wake-up does.
+- `Account.setReliableProvisional(ReliableProvisionalMode)` for 100rel/PRACK.
+- `Medut.pushWake(data)` and `Medut.pushNewToken(token)`, static, for apps on
+  `firebase_messaging`: Android runs `MedutPush.wake` on a background thread;
+  iOS `pushWake` throws `UNSUPPORTED` (PushKit must reach the SDK natively).
+- `Medut.strerror(code)`, `MedutConfig.copyWith`, and
+  `SdpNegotiationEvent.rejectedCodecs` / `warnings`.
+- Log and registrar-warning events, which belong to no account, also reach
+  every `Account.events`.
+- Concurrent `Medut.start()` calls share one instance.
+- The example app runs on desktop too (no Telecom, CallKit or runtime
+  permissions there).
+- **Desktop (Linux, macOS, Windows) over `dart:ffi`.** `lib/src/ffi_backend.dart`
+  implements the plugin's host API on the C library, so the same Dart API runs
+  on desktop. `Medut.start(libPath:)` loads the library from a given path;
+  mobile-only features (Telecom/CallKit, remembered accounts, audio routes)
+  do nothing there. Tested on Linux by `test/medut_smoke_test.dart` against
+  `dist/linux/x86_64/medut.so` (skipped when it is not built).
+
+Fixed:
+
+- The audio routes stream keeps working after `shutdown()` then `start()`.
+- An event that lacks its call (or its stats) arrives as `UnknownEvent`
+  instead of failing a null check and stopping the event stream.
+- `AudioSessionMode` crosses as explicit raw values (0, 1, 2), not enum
+  positions.
+- `logLevel` above 3 is clamped instead of refused by the native side.
+- `Medut.start()` on a running SDK warns in debug builds when the config or
+  options differ from the running ones (they are still ignored).
+- `Account.destroy()` twice is a no-op; the call finalizer stays quiet after
+  `detach()` / `shutdown()`.
+
 The plugin is now a Pigeon layer over the native SDKs (Kotlin on Android,
 MedutKit on iOS), which own the stack for the process lifetime.  Breaking:
 
-- **Mobile only.** Desktop (Linux/Windows/macOS) is no longer supported by
-  the plugin; use the C++ or Python bindings there.
+- **Desktop goes through `dart:ffi`.** On Linux, macOS and Windows the same
+  Dart API drives the C library directly (see Added above).
 - **Async.** Actions return `Future`s and throw `MedutException`;
   `createAccount`, `Account.call`, `Call.info`, `Call.getStats`,
   `Call.isHeld` / `isMuted` / `iceState` included.

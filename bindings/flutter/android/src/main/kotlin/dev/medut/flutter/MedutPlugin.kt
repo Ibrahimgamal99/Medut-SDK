@@ -18,6 +18,7 @@ import dev.medut.MediaEncryption
 import dev.medut.MediaStats
 import dev.medut.Medut
 import dev.medut.MedutConfig
+import dev.medut.MedutError
 import dev.medut.MedutEvent
 import dev.medut.MedutException
 import dev.medut.MedutSubscription
@@ -31,6 +32,7 @@ import dev.medut.android.AndroidOptions
 import dev.medut.android.AudioModePolicy
 import dev.medut.android.AudioRoute
 import dev.medut.android.MedutAndroid
+import dev.medut.android.MedutPush
 import dev.medut.android.telecom.TelecomOptions
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import java.util.concurrent.ConcurrentHashMap
@@ -41,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Flutter side of the Kotlin SDK (bindings/kotlin): every Pigeon host call
@@ -155,11 +158,7 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
             ))
         }
         if (options.appOwnedAudio) MedutAndroid.useAppOwnedAudio(true)
-        if (routesListener == null) {
-            val l = { send(EventMessage(type = AUDIO_ROUTES_CHANGED, routes = routes())) }
-            // Absent when the app started the stack without MedutAndroid.
-            if (runCatching { MedutAndroid.audioRoutes.addListener(l) }.isSuccess) routesListener = l
-        }
+        listenForRoutes()
         Medut.accounts.forEach { accounts[it.id.toString()] = it }
         StartResultMessage(
             reattached = reattached,
@@ -169,7 +168,21 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
         )
     }
 
+    /** Route changes reach Dart from here on.  Re-registered on every start:
+     *  a restart may have built a new AudioRoutes, and the listener must be
+     *  on the live one (removing first keeps it from being added twice). */
+    private fun listenForRoutes() {
+        val l = routesListener ?: { send(EventMessage(type = AUDIO_ROUTES_CHANGED, routes = routes())) }
+        runCatching { MedutAndroid.audioRoutes.removeListener(l) }
+        // Fails when the app started the stack without MedutAndroid.
+        routesListener = if (runCatching { MedutAndroid.audioRoutes.addListener(l) }.isSuccess) l else null
+    }
+
     override fun shutdown() = sdk {
+        // Let go of the routes listener with the stack: the next start
+        // registers it again on whatever AudioRoutes that start builds.
+        routesListener?.let { l -> runCatching { MedutAndroid.audioRoutes.removeListener(l) } }
+        routesListener = null
         MedutAndroid.shutdown()
         accounts.clear()
         calls.clear()
@@ -211,6 +224,8 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
     }
 
     override fun accountRegister(accountId: String) = sdk { account(accountId).register() }
+    override fun accountRefreshRegistration(accountId: String) =
+        sdk { account(accountId).refreshRegistration() }
     override fun accountUnregister(accountId: String) = sdk { account(accountId).unregister() }
     override fun accountRegistrationState(accountId: String): Long =
         sdk { account(accountId).registrationState.value.toLong() }
@@ -359,6 +374,20 @@ class MedutPlugin : FlutterPlugin, MedutHostApi {
     override fun startPcap(path: String) = sdk { Medut.startPcap(path) }
     override fun stopPcap() = sdk { Medut.stopPcap() }
 
+    override fun strerror(code: Long): String =
+        MedutError.fromRaw(code.toInt())?.message ?: "success"
+
+    // ── Push ─────────────────────────────────────────────────────────────
+
+    /** MedutPush.wake blocks for up to [waitForCallMs]: off the main
+     *  thread.  Needs no Dart start(); the stack must be running. */
+    override suspend fun pushWake(data: Map<String, String>, waitForCallMs: Long): Boolean =
+        withContext(Dispatchers.IO) {
+            sdk { MedutPush.wake(context, data, waitForCallMs) != null }
+        }
+
+    override fun pushNewToken(token: String) = sdk { MedutPush.onNewToken(token) }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private fun account(id: String): Account = accounts[id]
@@ -491,7 +520,10 @@ private fun ConfigMessage.toSdk(): MedutConfig {
         traceSip = traceSip ?: d.traceSip,
         traceSdpDiff = traceSdpDiff ?: d.traceSdpDiff,
         pcapPath = pcapPath ?: d.pcapPath,
-        logLevel = logLevel?.let { enumOf(it, LogLevel.entries) { e -> e.value } } ?: d.logLevel,
+        // The C library takes any int (-1 = no log events, above 3 = like 3);
+        // LogLevel has 0..3, so clamp rather than refuse.
+        logLevel = logLevel?.let { v -> enumOf(v.coerceIn(0L, 3L), LogLevel.entries) { e -> e.value } }
+            ?: d.logLevel,
     )
 }
 

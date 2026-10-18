@@ -12,8 +12,9 @@ import Security
 ///
 /// Storage is one generic-password item holding a JSON array, accessible
 /// after the first unlock so a push that lands on a locked phone can still
-/// register.  Entries are keyed by the account URI; saving the same URI again
-/// replaces it.  The Kotlin SDK's AccountStore is the same design.
+/// register.  Entries are keyed by the account URI (scheme, case and URI
+/// parameters ignored, port kept); saving the same URI again replaces it.
+/// The Kotlin SDK's AccountStore is the same design.
 public final class AccountStore: @unchecked Sendable {
     private let service: String
     private let accessGroup: String?
@@ -24,14 +25,21 @@ public final class AccountStore: @unchecked Sendable {
         self.accessGroup = accessGroup
     }
 
-    /// Every saved account, in save order.
-    public func list() -> [AccountConfig] { lock.locked { load() } }
+    /// Every saved account, in save order.  Empty when the Keychain cannot
+    /// be read (before the first unlock after a reboot).
+    public func list() -> [AccountConfig] { lock.locked { load() ?? [] } }
 
-    /// Save (or replace) `config`, keyed by its URI.
+    /// Save (or replace) `config`, keyed by its URI.  Not saved while the
+    /// Keychain cannot be read, so an unreadable item is never overwritten
+    /// with a partial list.
     public func save(_ config: AccountConfig) {
         lock.locked {
+            guard let saved = load() else {
+                NSLog("Medut: keychain unreadable, not saving %@", config.uri)
+                return
+            }
             let key = AccountStore.key(config.uri)
-            store(load().filter { AccountStore.key($0.uri) != key } + [config])
+            store(saved.filter { AccountStore.key($0.uri) != key } + [config])
         }
     }
 
@@ -39,18 +47,20 @@ public final class AccountStore: @unchecked Sendable {
     /// of every saved account when `uri` is nil, skipping any without a push
     /// provider, so a process a push starts registers with the current token.
     /// Returns how many were updated.  `MedutPush.updatePushToken` calls this.
+    /// nil or an empty token clears the saved token.
     @discardableResult
     public func updatePushToken(_ token: String?, uri: String? = nil) -> Int {
-        lock.locked {
-            let key = uri.map { AccountStore.key($0) }
+        let token = (token?.isEmpty ?? true) ? nil : token
+        return lock.locked {
+            guard let saved = load() else { return 0 }
+            let targets: Set<Int>? = uri.map { AccountStore.matching($0, in: saved) }
             var changed = 0
-            let updated = load().map { config -> AccountConfig in
+            var updated = saved
+            for (i, config) in saved.enumerated() {
                 guard config.pushProvider != .none, config.pushToken != token,
-                      key == nil || AccountStore.key(config.uri) == key else { return config }
-                var copy = config
-                copy.pushToken = token
+                      targets?.contains(i) ?? true else { continue }
+                updated[i].pushToken = token
                 changed += 1
-                return copy
             }
             if changed > 0 { store(updated) }
             return changed
@@ -61,11 +71,10 @@ public final class AccountStore: @unchecked Sendable {
     @discardableResult
     public func remove(_ uri: String) -> Bool {
         lock.locked {
-            let key = AccountStore.key(uri)
-            let before = load()
-            let after = before.filter { AccountStore.key($0.uri) != key }
-            guard after.count != before.count else { return false }
-            store(after)
+            guard let before = load() else { return false }
+            let doomed = AccountStore.matching(uri, in: before)
+            guard !doomed.isEmpty else { return false }
+            store(before.enumerated().filter { !doomed.contains($0.offset) }.map { $0.element })
             return true
         }
     }
@@ -79,9 +88,20 @@ public final class AccountStore: @unchecked Sendable {
     /// registering them when `register` is set.  Returns the accounts created.
     @discardableResult
     public func restore(register: Bool = true) -> [Account] {
-        let live = Set(Medut.shared.accounts.map { AccountStore.key($0.aor) })
+        // A live account's AOR carries no port, so live accounts are counted
+        // per port-less key: two saved accounts on one host (different
+        // ports) are both skipped only when two such accounts are live.
+        var live: [String: Int] = [:]
+        for account in Medut.shared.accounts {
+            live[AccountStore.hostKey(account.aor), default: 0] += 1
+        }
         var created: [Account] = []
-        for config in list() where !live.contains(AccountStore.key(config.uri)) {
+        for config in list() {
+            let hostKey = AccountStore.hostKey(config.uri)
+            if let n = live[hostKey], n > 0 {
+                live[hostKey] = n - 1
+                continue
+            }
             do {
                 let account = try Medut.shared.createAccount(config)
                 created.append(account)
@@ -95,20 +115,45 @@ public final class AccountStore: @unchecked Sendable {
 
     // ── Keys ─────────────────────────────────────────────────────────────
 
-    /// "sip:Alice@PBX.example.com:5060" and "alice@pbx.example.com" are the
-    /// same account.
+    /// "sip:Alice@PBX.example.com:5060;transport=tls" and
+    /// "alice@pbx.example.com:5060" are the same account.  The port is part
+    /// of the key: two accounts for one user on one host but different ports
+    /// are different accounts.
     static func key(_ uri: String) -> String {
         var s = uri.trimmingCharacters(in: .whitespaces).lowercased()
+        if s.hasPrefix("<"), s.hasSuffix(">") { s = String(s.dropFirst().dropLast()) }
         for prefix in ["sips:", "sip:"] where s.hasPrefix(prefix) {
             s = String(s.dropFirst(prefix.count))
         }
-        if let at = s.lastIndex(of: "@") {
-            var host = String(s[s.index(after: at)...])
-            if let semi = host.firstIndex(of: ";") { host = String(host[..<semi]) }
-            if let colon = host.firstIndex(of: ":") { host = String(host[..<colon]) }
-            s = String(s[...at]) + host
-        }
+        // URI parameters (";transport=tls") follow the host part.
+        let hostStart = s.lastIndex(of: "@").map { s.index(after: $0) } ?? s.startIndex
+        if let semi = s[hostStart...].firstIndex(of: ";") { s = String(s[..<semi]) }
         return s
+    }
+
+    /// `key` without the port, for matching an AOR ("sip:user@host", which
+    /// never carries one) against saved URIs.
+    static func hostKey(_ uri: String) -> String {
+        let k = key(uri)
+        let hostStart = k.lastIndex(of: "@").map { k.index(after: $0) } ?? k.startIndex
+        let host = k[hostStart...]
+        if host.hasPrefix("[") {
+            // IPv6 literal: "[::1]:5060" -> "[::1]".
+            guard let close = host.firstIndex(of: "]") else { return k }
+            return String(k[..<k.index(after: close)])
+        }
+        if let colon = host.lastIndex(of: ":") { return String(k[..<colon]) }
+        return k
+    }
+
+    /// Indices of the saved entries `query` (a URI or an AOR) names: the
+    /// exact key, or, for a query without a port that matches nothing
+    /// exactly, every entry on that user and host.
+    static func matching(_ query: String, in list: [AccountConfig]) -> Set<Int> {
+        let k = key(query)
+        let exact = Set(list.indices.filter { key(list[$0].uri) == k })
+        guard exact.isEmpty, hostKey(query) == k else { return exact }
+        return Set(list.indices.filter { hostKey(list[$0].uri) == k })
     }
 
     // ── Keychain ─────────────────────────────────────────────────────────
@@ -123,13 +168,30 @@ public final class AccountStore: @unchecked Sendable {
         return q
     }
 
-    private func load() -> [AccountConfig] {
+    /// The saved list; nil when the Keychain cannot be read now, which is
+    /// not the same as nothing saved (callers must not write then).
+    private func load() -> [AccountConfig]? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return [] }
+        switch status {
+        case errSecSuccess:
+            break
+        case errSecItemNotFound:
+            return []
+        case errSecInteractionNotAllowed:
+            // Before the first unlock after a reboot: a push that starts the
+            // process then cannot restore its accounts.
+            NSLog("Medut: keychain locked (errSecInteractionNotAllowed): saved accounts "
+                  + "unavailable until the device is first unlocked")
+            return nil
+        default:
+            NSLog("Medut: keychain read failed: %d", status)
+            return nil
+        }
+        guard let data = item as? Data else { return [] }
         do {
             return try JSONDecoder().decode([AccountConfig].self, from: data)
         } catch {

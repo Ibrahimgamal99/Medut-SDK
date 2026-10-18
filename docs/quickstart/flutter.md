@@ -11,8 +11,9 @@ the native SDKs, which own the SIP stack:
 
 Native code can start the stack at app launch or from a push, and receive and
 answer calls with no Flutter engine running. Dart's `Medut.start()` then
-attaches to the stack that is already up. Android and iOS only: for desktop,
-use the [C/C++](c.md) or [Python](python.md) bindings.
+attaches to the stack that is already up. On Linux, macOS and Windows the
+same Dart API drives the C library over `dart:ffi`; see
+[Desktop](#desktop-linux-macos-windows).
 
 ## 1 — Add the package
 
@@ -165,15 +166,39 @@ call in `sdk.calls`. The example app does all three
 `FakePushReceiver` that stands in for FCM:
 `adb shell am broadcast -n dev.medut.medut/.FakePushReceiver`.
 
+Apps already on `firebase_messaging` can opt into the same path from Dart:
+
+```dart
+@pragma('vm:entry-point')
+Future<void> onBackgroundMessage(RemoteMessage message) async {
+  // Runs MedutPush.wake on a background thread; true when the INVITE came.
+  await Medut.pushWake(message.data);
+}
+
+FirebaseMessaging.instance.onTokenRefresh.listen(Medut.pushNewToken);
+```
+
+`Medut.pushWake` needs no `Medut` instance in that isolate, but the stack
+must already be running (from `Application.onCreate`), or it throws
+`NOT_RUNNING`. A native `FirebaseMessagingService` is still the better
+choice: it needs no Flutter engine at all.
+
 On iOS the same three steps are `createAccount(remember: true)`,
 `Medut.shared.start(config, options:)` with `StartOptions.callKit` in
 `didFinishLaunching`, and `MedutPush.wake(payload:completion:)` from the
 `PKPushRegistryDelegate`, with `voip` in `UIBackgroundModes` — see the
 [Swift README](../../bindings/swift/README.md#push-wake-up-pushkit) and the
 example's `AppDelegate.swift`. `wake` reports the call to CallKit from the
-push payload before the INVITE arrives, as iOS requires. On iOS, add PushKit + CallKit on the
-native side; Apple kills background sockets, and push is the sanctioned
-wake-up.
+push payload before the INVITE arrives, as iOS requires, which is why
+`Medut.pushWake` throws `UNSUPPORTED` on iOS: PushKit has to reach the SDK
+natively. `Medut.pushNewToken(hex)` works on iOS too
+(`MedutPush.updatePushToken(hex:)`). Apple kills background sockets, and push
+is the sanctioned wake-up.
+
+When the app returns to the foreground, `account.refreshRegistration()` makes
+an account reachable again the way a push does: the REGISTER is re-sent in
+place (same Call-ID and Contact), which is what an RFC 8599 server waits for
+before releasing a held INVITE.
 
 ## 3 — Register an account (any transport)
 
@@ -338,6 +363,24 @@ The SDK never writes to stdout/stderr. Everything arrives as events:
 - `SdpNegotiationEvent`: enable `traceSdpDiff`.
 
 For Wireshark captures, use `sdk.pcapStart('/path/trace.pcap')`.
+
+## Desktop (Linux, macOS, Windows)
+
+The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
+implements the plugin's host API by calling the C library directly, so
+`Medut.start`, accounts, calls, events and errors behave as on mobile. Build
+the library with `scripts/build-linux.sh`, `scripts/build-macos.sh` or
+`scripts/build-windows.ps1`, and ship it with the app (`medut.so`,
+`medut.dylib`, `medut.dll` on the library search path), or pass its location:
+
+```dart
+final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
+```
+
+Mobile-only features do nothing there: `telecom` and `audioSession` are
+ignored, `remember` is ignored and `rememberedAccounts()` is empty, and the
+audio route list is empty. The plugin does not declare desktop platforms in
+`pubspec.yaml`, so Flutter does not bundle the library for you.
 
 ## Example app
 

@@ -99,7 +99,7 @@ class Account internal constructor(
     fun call(uri: String): Call {
         val platform = Medut.platform
         platform?.onCallPlacing()
-        platform?.onCallStarting()
+        platform?.onCallStarting(null)
         val call = withHandle("medut_call_invite") { h ->
             val out = LongArray(1)
             check(Native.callInvite(h, uri, out), "medut_call_invite")

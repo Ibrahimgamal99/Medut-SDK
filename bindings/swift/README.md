@@ -150,14 +150,37 @@ func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload
 }
 ```
 
-`wake` reports the call to CallKit at once (iOS ends the app otherwise),
+`wake` reports a call to CallKit for every push, before it returns (iOS 13+
+ends an app that does not, and stops delivering VoIP pushes to one that keeps
+missing). For a call push it reports the call at once,
 using the caller from the payload (`caller_name` / `caller_uri`, configurable
 through `MedutPush.payloadKeys`), makes every account reachable again, and
 waits for the INVITE, which then takes over that CallKit call: the caller
 shown is updated from the SIP From header and an Answer the user already
 tapped is carried out. No INVITE within the wait ends the call as
 unanswered. `MedutPush.reachAccounts()` is the same recovery without the
-wait, for a foreground return.
+wait, for a foreground return: each account refreshes its registration in
+place (`Account.refreshRegistration()`), which is what RFC 8599 servers wait
+for before releasing a held INVITE.
+
+The payload fields (`MedutPush.payloadKeys`, same defaults as the Kotlin
+SDK):
+
+| Key | Meaning |
+|---|---|
+| `type` | `"call"` (default when absent) or `"cancel"` |
+| `call_id` | SIP Call-ID of the INVITE; the INVITE with that Call-ID takes over the CallKit call, and a cancel ends that one |
+| `caller_uri`, `caller_name` | shown until the INVITE arrives |
+| `medut` | optional nested dictionary holding the keys above |
+
+A cancel push ends the CallKit call its `call_id` names (without one, the
+oldest waiting one) as ended by the caller. When a push can lead to no call
+(the stack is not running, it runs without `StartOptions.callKit`, a cancel
+with nothing to cancel, an unknown `type`) `wake` still reports a call and
+ends it at once, to keep iOS delivering pushes. Start the stack in
+`didFinishLaunching` so a push finds it running. On
+`pushRegistry(_:didInvalidatePushTokenFor:)` call
+`MedutPush.clearPushToken()`.
 
 ## Accounts across restarts
 

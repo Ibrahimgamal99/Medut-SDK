@@ -547,7 +547,6 @@ typedef struct {
  medut_push_provider_t push_provider;
 
  const char *push_token;
-
  const char *push_param;
  medut_codec_t audio_codecs[8];
  int audio_codec_count;
@@ -573,6 +572,7 @@ typedef struct {
  void medut_account_destroy(medut_account_handle_t acct);
 
  int medut_account_register(medut_account_handle_t acct);
+ int medut_account_refresh_registration(medut_account_handle_t acct);
  int medut_account_unregister(medut_account_handle_t acct);
  int medut_account_set_retry_policy(medut_account_handle_t acct,
                                                      uint32_t initial_ms,
@@ -731,6 +731,5 @@ typedef struct {
                                                         bool hangup_on_failure);
  int medut_network_local_addr(char *buf, size_t sz);
  bool medut_network_is_up(void);
-
  int medut_pcap_start(const char *path);
  int medut_pcap_stop(void);

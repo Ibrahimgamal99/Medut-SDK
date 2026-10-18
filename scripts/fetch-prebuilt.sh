@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Download the prebuilt iOS xcframework from an ios-xcframework CI run into the
-# Swift package, where MedutKit and (through a symlink) the Flutter plugin
-# vendor it.
+# Download the prebuilt iOS xcframework from an ios-xcframework CI run into
+# bindings/flutter/ios/Frameworks, where the Flutter plugin's pod vendors it
+# and the Swift package (bindings/swift/Frameworks is a symlink) links it.
 #
 #   scripts/fetch-prebuilt.sh                 latest successful run on main
 #   scripts/fetch-prebuilt.sh --wait          wait for the newest run, then sync
@@ -151,6 +151,22 @@ while read -r BIN; do
   fi
   if [ "${N}" -lt 40 ]; then
     echo "ERROR: ios/${SLICE}: only ${N} medut_* symbols" >&2
+    exit 1
+  fi
+  # Swift needs the header and module map in every slice (`import Medut`),
+  # and MedutKit links this one by name.
+  FW_DIR="$(dirname "${BIN}")"
+  if [ ! -f "${FW_DIR}/Headers/medut.h" ] || [ ! -f "${FW_DIR}/Modules/module.modulemap" ]; then
+    echo "ERROR: ios/${SLICE}: no Headers/medut.h or Modules/module.modulemap — MedutKit cannot import it" >&2
+    exit 1
+  fi
+  if command -v nm >/dev/null && nm -gU "${BIN}" >/dev/null 2>&1; then
+    HAS_REFRESH=$(nm -gU "${BIN}" | grep -c ' _medut_account_refresh_registration$' || true)
+  else
+    HAS_REFRESH=$(strings -a "${BIN}" 2>/dev/null | grep -c 'medut_account_refresh_registration' || true)
+  fi
+  if [ "${HAS_REFRESH}" -lt 1 ]; then
+    echo "ERROR: ios/${SLICE}: medut_account_refresh_registration missing — built from an older core" >&2
     exit 1
   fi
   echo "  ios/${SLICE}: ${N} medut_* symbols"

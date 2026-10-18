@@ -36,11 +36,19 @@ data class AudioRoute(
  * Bluetooth is never reported active until the platform says CONNECTED.
  * Bluetooth means HFP/SCO: A2DP cannot carry the microphone and is not offered.
  */
-class AudioRoutes internal constructor(context: Context) {
+class AudioRoutes internal constructor(
+    context: Context,
+    /** Shared with [MedutAndroid], so listeners survive a restart, which
+     *  builds a new instance. */
+    private val listeners: CopyOnWriteArrayList<() -> Unit> = CopyOnWriteArrayList(),
+) {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val listeners = CopyOnWriteArrayList<() -> Unit>()
+    // A selection was applied through AudioManager although the SDK's
+    // Telecom integration is on (a call Telecom refused has no connection
+    // to route through), so resetToDefault must undo it.
+    @Volatile private var selectedDirectly = false
 
     /** Report-only mode: routes are listed and changes reported, but
      *  selection does nothing.  On under AudioModePolicy.TELECOM with the
@@ -71,8 +79,9 @@ class AudioRoutes internal constructor(context: Context) {
      *  the wrong device; their owner rebuilds them here. */
     internal var onRouteSettled: (() -> Unit)? = null
 
-    /** Called on the main thread when routes or the active route change. */
-    fun addListener(listener: () -> Unit) { listeners.add(listener) }
+    /** Called on the main thread when routes or the active route change.
+     *  Kept across `MedutAndroid.shutdown()` / `start()`. */
+    fun addListener(listener: () -> Unit) { listeners.addIfAbsent(listener) }
     fun removeListener(listener: () -> Unit) { listeners.remove(listener) }
 
     internal fun notifyChanged() {
@@ -111,6 +120,8 @@ class AudioRoutes internal constructor(context: Context) {
             @Suppress("UnspecifiedRegisterReceiverFlag") // system broadcast, API < 31 only
             appContext.registerReceiver(receiver, IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED))
         }
+        // Listeners kept from before a restart see the new instance's state.
+        if (listeners.isNotEmpty()) notifyChanged()
     }
 
     internal fun stop() {
@@ -240,11 +251,19 @@ class AudioRoutes internal constructor(context: Context) {
     fun select(id: String): List<AudioRoute> {
         val telecom = telecomRouter
         if (telecom != null) {
-            list().firstOrNull { it.id == id }?.let { telecom.select(it) }
+            val route = list().firstOrNull { it.id == id }
+            // No connection to route through: a call Telecom refused, whose
+            // audio the SDK manages itself.
+            if (route != null && !telecom.select(route) && !externalRouting) selectDirect(id)
         } else if (!externalRouting) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) select31(id) else selectLegacy(id)
+            selectDirect(id)
         }
         return list()
+    }
+
+    private fun selectDirect(id: String) {
+        if (telecomRouter != null) selectedDirectly = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) select31(id) else selectLegacy(id)
     }
 
     /** Speaker on, or back to the best other route (Bluetooth, wired,
@@ -264,7 +283,11 @@ class AudioRoutes internal constructor(context: Context) {
 
     /** Undo any selection, as the last call ends. */
     internal fun resetToDefault() {
-        if (externalRouting || telecomRouter != null) return
+        if (externalRouting) return
+        if (telecomRouter != null) {
+            if (!selectedDirectly) return
+            selectedDirectly = false
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             am.clearCommunicationDevice()
         } else {

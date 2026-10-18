@@ -2,7 +2,9 @@
 /// `medut_account_config_t`.
 ///
 /// Fields left null keep the C library's default (medut_config_init()), so
-/// the Dart side carries no copy of the defaults.
+/// the Dart side carries no copy of the defaults.  The same holds on every
+/// platform: the native SDKs on Android/iOS and the desktop FFI backend all
+/// start from medut_config_init() and override only what was set.
 part of '../medut.dart';
 
 /// Opus encoder tuning (`medut_opus_config_t`).
@@ -131,7 +133,7 @@ class MedutConfig {
 
   /// Gather on every interface the platform can pin a socket to — cellular
   /// next to Wi-Fi on a phone — so a handover offers candidates that already
-  /// exist.  On Android the plugin keeps a cellular network requested while
+  /// exist.  On Android the Kotlin SDK keeps a cellular network requested while
   /// the SDK is started and hands its interface to the SDK; the modem stays
   /// attached next to Wi-Fi, at some battery and data cost.  Default false.
   final bool? iceMultipath;
@@ -347,8 +349,9 @@ class MedutConfig {
   final double? jitterAlertThreshold;
 
   // ── Platform ───────────────────────────────────────────────────────────
-  /// Writable temp dir for SDK state. REQUIRED on Android (use
-  /// [Medut.start], which fills it with the app cache dir automatically).
+  /// Writable temp dir for SDK state.  null: the app's cache dir on Android
+  /// and iOS (the native SDKs fill it in), the C library's default on
+  /// desktop.
   final String? tmpDir;
 
   // ── Tracing / logging ──────────────────────────────────────────────────
@@ -361,12 +364,18 @@ class MedutConfig {
   /// Live SIP+RTP capture to this pcap file; null = off.
   final String? pcapPath;
 
-  /// 0=err, 1=warn, 2=info, 3=debug.
+  /// 0=err, 1=warn, 2=info, 3=debug; null keeps the C default (1).  Values
+  /// above 3 log everything, like 3.  On Android and iOS the native SDKs
+  /// take 0..3 only, so the plugin sends 4 and above as 3; a negative value
+  /// (no log events at all) reaches the C library on desktop only and is
+  /// sent as 0 on mobile.
   final int? logLevel;
 
   // ── Network handover ───────────────────────────────────────────────────
-  /// Interface poll period seconds; set 0 on mobile — the plugin drives
-  /// [Medut.networkChanged] from the OS connectivity callback instead.
+  /// Interface poll period seconds; null = C default (10).  On Android and
+  /// iOS `Medut.start(monitorNetwork: true)` (the default) sets it to 0
+  /// and drives handover from the OS connectivity callback instead.  On
+  /// desktop `monitorNetwork: false` sets it to 0 unless given here.
   final int? netMonitorIntervalSeconds;
 
   /// Debounce before a reported network change is acted on, in ms: how
@@ -493,6 +502,101 @@ class MedutConfig {
     this.sessionMinSeSeconds,
     this.mosMethod,
   });
+
+  /// A copy with [tmpDir], [netMonitorIntervalSeconds] and [netSettleMs]
+  /// replaced where given.
+  MedutConfig copyWith(
+      {String? tmpDir, int? netMonitorIntervalSeconds, int? netSettleMs}) {
+    return MedutConfig(
+      transport: transport,
+      localIp: localIp,
+      localPort: localPort,
+      bindInterface: bindInterface,
+      preferIpv6: preferIpv6,
+      sipDomain: sipDomain,
+      serverUrl: serverUrl,
+      serverHost: serverHost,
+      serverPort: serverPort,
+      outboundProxy: outboundProxy,
+      caCertPath: caCertPath,
+      clientCert: clientCert,
+      clientKey: clientKey,
+      verifyServer: verifyServer,
+      sniHostname: sniHostname,
+      userAgent: userAgent,
+      wsOrigin: wsOrigin,
+      wsExtraHeaders: wsExtraHeaders,
+      wsKeepaliveMs: wsKeepaliveMs,
+      stunServer: stunServer,
+      turnServer: turnServer,
+      turnUser: turnUser,
+      turnPass: turnPass,
+      iceEnabled: iceEnabled,
+      iceGatheringTimeoutMs: iceGatheringTimeoutMs,
+      iceServers: iceServers,
+      iceTransportPolicy: iceTransportPolicy,
+      iceMultipath: iceMultipath,
+      rtcpMux: rtcpMux,
+      mediaEnc: mediaEnc,
+      audioCodecs: audioCodecs,
+      dscpSip: dscpSip,
+      dscpRtp: dscpRtp,
+      aecMode: aecMode,
+      noiseSuppression: noiseSuppression,
+      autoGainControl: autoGainControl,
+      aecSuppressionLevel: aecSuppressionLevel,
+      micGainDb: micGainDb,
+      speakerGainDb: speakerGainDb,
+      opus: opus,
+      platformAudioActivate: platformAudioActivate,
+      appOwnedAudio: appOwnedAudio,
+      jitterBufferType: jitterBufferType,
+      jitterBufferMinMs: jitterBufferMinMs,
+      jitterBufferMaxMs: jitterBufferMaxMs,
+      regExpires: regExpires,
+      regRefreshPct: regRefreshPct,
+      keepaliveIntervalMs: keepaliveIntervalMs,
+      regRetryInitialMs: regRetryInitialMs,
+      regRetryMaxMs: regRetryMaxMs,
+      regRetryBackoff: regRetryBackoff,
+      regRetryMaxAttempts: regRetryMaxAttempts,
+      statsIntervalMs: statsIntervalMs,
+      mosAlertThreshold: mosAlertThreshold,
+      lossAlertThreshold: lossAlertThreshold,
+      jitterAlertThreshold: jitterAlertThreshold,
+      regRetryJitter: regRetryJitter,
+      sipTimerBMs: sipTimerBMs,
+      sipTimerFMs: sipTimerFMs,
+      rtpTimeoutSeconds: rtpTimeoutSeconds,
+      mediaStallMs: mediaStallMs,
+      adaptiveBitrate: adaptiveBitrate,
+      adaptMinBitrate: adaptMinBitrate,
+      adaptMaxBitrate: adaptMaxBitrate,
+      adaptLossDownPct: adaptLossDownPct,
+      adaptLossUpPct: adaptLossUpPct,
+      adaptRecoverTicks: adaptRecoverTicks,
+      opusExpectedLossPct: opusExpectedLossPct,
+      keepaliveReregister: keepaliveReregister,
+      dnsSrvFailover: dnsSrvFailover,
+      netIceHandover: netIceHandover,
+      tmpDir: tmpDir ?? this.tmpDir,
+      traceSip: traceSip,
+      traceSdpDiff: traceSdpDiff,
+      pcapPath: pcapPath,
+      logLevel: logLevel,
+      netMonitorIntervalSeconds:
+          netMonitorIntervalSeconds ?? this.netMonitorIntervalSeconds,
+      netSettleMs: netSettleMs ?? this.netSettleMs,
+      netReinviteCalls: netReinviteCalls,
+      netHangupOnMigrationFailure: netHangupOnMigrationFailure,
+      netVerifyMs: netVerifyMs,
+      netMaxAttempts: netMaxAttempts,
+      sessionTimerEnabled: sessionTimerEnabled,
+      sessionExpiresSeconds: sessionExpiresSeconds,
+      sessionMinSeSeconds: sessionMinSeSeconds,
+      mosMethod: mosMethod,
+    );
+  }
 
   ConfigMessage _toMessage() => ConfigMessage(
         transport: transport?.raw,
