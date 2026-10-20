@@ -68,6 +68,23 @@ All notable changes to Medut are documented here.
 - **Push wake-up refreshes the registration** instead of sending an OPTIONS
   probe (Kotlin, Swift). RFC 8599 servers release a held INVITE only on the
   binding refresh.
+- **Push wake-up no longer forces a network handover on a stack that just
+  started**: `MedutPush.reachAccounts()` (run by `wake`) skips
+  `network.changed()` for the first 10 s after `start` (Kotlin, Swift). A
+  push that started the process used to flush the transports and re-do the
+  first REGISTER while the INVITE was on its way, adding ~1.5 s to the wake.
+  The age is measured on a clock that counts device sleep
+  (`elapsedRealtimeNanos`, `CLOCK_MONOTONIC`).
+- **A dead TCP/WebSocket connection closes** (libre hunk S). libre closed a
+  connection on a failed `recv()` only on Windows; a socket iOS reclaimed
+  from a suspended app failed every `recv()` with ENOTCONN, spun the handler
+  and kept taking REGISTERs that failed with EPIPE. It now closes on any
+  non-transient error, which triggers the usual re-register.
+- **A dead DNS socket is reopened** (libre hunk T). The resolver's UDP
+  sockets were never reopened, so after iOS reclaimed them every lookup, and
+  so every REGISTER to a named server, failed with EPIPE through transport
+  flushes and account rebuilds. A send failing with EPIPE/ENOTCONN reopens
+  the socket and retries once.
 - **A refreshed push token is saved** with the remembered accounts (Kotlin,
   Swift, Flutter), so a process a later push starts registers with it.
 - **Kotlin in minified builds:** `MedutAndroid.start` failed with
