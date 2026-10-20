@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Build Medut for Linux x86_64.
-# Output: dist/linux/x86_64/medut.a + medut.so + include/, and a stripped
-#         copy of medut.so in bindings/flutter/linux/ for the Flutter plugin.
+# Build Medut for Linux on the host's architecture (x86_64 or aarch64).
+# Output: dist/linux/<uname -m>/medut.a + medut.so + include/, and a stripped
+#         copy of medut.so in bindings/flutter/linux/<x64|arm64>/ for the
+#         Flutter plugin.
 #
 # Prerequisites: cmake ninja gcc openssl-devel (or libssl-dev)
 #                webrtc-audio-processing-devel (build-time only; optional at runtime)
@@ -29,7 +30,13 @@ if ! echo 'int main(void){return 0;}' | \
 fi
 
 BUILD_TYPE="${BUILD_TYPE:-Release}"
-BUILD_DIR="${ROOT}/build/linux-x86_64"
+MACHINE="$(uname -m)"
+case "${MACHINE}" in
+  x86_64)  FLUTTER_ARCH=x64 ;;
+  aarch64) FLUTTER_ARCH=arm64 ;;
+  *) echo "ERROR: unsupported architecture ${MACHINE} (x86_64 or aarch64)" >&2; exit 1 ;;
+esac
+BUILD_DIR="${ROOT}/build/linux-${MACHINE}"
 
 bash "${SCRIPT_DIR}/fetch-third-party.sh"
 
@@ -47,7 +54,7 @@ cmake --build "${BUILD_DIR}" --target medut gen_hpp -j"$(nproc)"
 cmake --install "${BUILD_DIR}"
 
 # ── Link shared library ───────────────────────────────────────────────────────
-DIST_DIR="${ROOT}/dist/linux/x86_64"
+DIST_DIR="${ROOT}/dist/linux/${MACHINE}"
 SO="${DIST_DIR}/medut.so"
 echo ""
 echo "=== Linking ${SO} ==="
@@ -66,7 +73,8 @@ gcc -shared \
 # ── Stage for the Flutter plugin ──────────────────────────────────────────────
 # The plugin's linux/CMakeLists.txt bundles this committed copy into the app.
 # Stripped: dlsym only needs the dynamic symbol table.
-PLUGIN_SO="${ROOT}/bindings/flutter/linux/medut.so"
+PLUGIN_SO="${ROOT}/bindings/flutter/linux/${FLUTTER_ARCH}/medut.so"
+mkdir -p "$(dirname "${PLUGIN_SO}")"
 strip --strip-unneeded -o "${PLUGIN_SO}" "${SO}"
 # Captured once: `nm | grep -q` under pipefail fails when grep exits early
 # and nm dies of SIGPIPE.
@@ -83,4 +91,4 @@ echo ""
 echo "Done. Output:"
 ls -lh "${DIST_DIR}/medut.a" "${SO}" "${PLUGIN_SO}"
 echo "Flutter plugin core: ${N} medut_* exports, needs ${GLIBC_MAX} or later."
-echo "Commit bindings/flutter/linux/medut.so alongside the C change."
+echo "Commit bindings/flutter/linux/${FLUTTER_ARCH}/medut.so alongside the C change."
