@@ -1,5 +1,6 @@
 # Build Medut for Windows x64.
-# Output: dist\windows\x64\medut.dll + medut.lib (import lib) + bare.lib + dist\windows\x64\include\
+# Output: dist\windows\x64\medut.dll + medut.lib (import lib) + bare.lib + dist\windows\x64\include\,
+#         and a copy of medut.dll in bindings\flutter\windows\ for the Flutter plugin.
 #
 # Prerequisites:
 #   - Visual Studio 2022 (or 2019)
@@ -149,11 +150,23 @@ if (Test-Path $VcvarsAll) {
     $TempBat = Join-Path $env:TEMP "link_medut.bat"
     $BatContent | Out-File -FilePath $TempBat -Encoding ASCII
     & cmd /c $TempBat
+    $LinkExit = $LASTEXITCODE
     Remove-Item $TempBat -ErrorAction SilentlyContinue
 } else {
     # Fallback: try running link.exe directly (may fail if SDK paths not set)
     & $LinkExe /DLL /NOLOGO "/DEF:$DefPath" "/OUT:$DllPath" "/WHOLEARCHIVE:$StaticLib" $SslLib $CryptoLib $ZlibLib ws2_32.lib iphlpapi.lib crypt32.lib secur32.lib bcrypt.lib ole32.lib oleaut32.lib avrt.lib advapi32.lib user32.lib shell32.lib qwave.lib
+    $LinkExit = $LASTEXITCODE
 }
+if ($LinkExit -ne 0 -or -not (Test-Path $DllPath)) {
+    Write-Error "link.exe failed (exit $LinkExit)"
+    exit 1
+}
+
+# ── Stage for the Flutter plugin ─────────────────────────────────────────────
+# The plugin's windows\CMakeLists.txt bundles this committed copy into the app.
+$PluginDll = Join-Path $Root "bindings\flutter\windows\medut.dll"
+Copy-Item $DllPath $PluginDll -Force
+Write-Host "Staged $PluginDll"
 
 Write-Host ""
 Write-Host "Done. Output:"

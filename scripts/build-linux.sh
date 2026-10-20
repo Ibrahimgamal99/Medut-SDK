@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build Medut for Linux x86_64.
-# Output: dist/linux/x86_64/medut.a  +  dist/linux/x86_64/include/
+# Output: dist/linux/x86_64/medut.a + medut.so + include/, and a stripped
+#         copy of medut.so in bindings/flutter/linux/ for the Flutter plugin.
 #
 # Prerequisites: cmake ninja gcc openssl-devel (or libssl-dev)
 #                webrtc-audio-processing-devel (build-time only; optional at runtime)
@@ -62,6 +63,24 @@ gcc -shared \
   -Wl,-z,defs \
   -o "${SO}"
 
+# ── Stage for the Flutter plugin ──────────────────────────────────────────────
+# The plugin's linux/CMakeLists.txt bundles this committed copy into the app.
+# Stripped: dlsym only needs the dynamic symbol table.
+PLUGIN_SO="${ROOT}/bindings/flutter/linux/medut.so"
+strip --strip-unneeded -o "${PLUGIN_SO}" "${SO}"
+# Captured once: `nm | grep -q` under pipefail fails when grep exits early
+# and nm dies of SIGPIPE.
+SYMS=$(nm -D --defined-only "${PLUGIN_SO}")
+N=$(grep -c ' T medut_' <<<"${SYMS}" || true)
+if [ "${N}" -lt 40 ] || \
+   ! grep -Eq ' T medut_account_refresh_registration(@|$)' <<<"${SYMS}"; then
+  echo "ERROR: ${PLUGIN_SO}: ${N} medut_* exports, or no medut_account_refresh_registration" >&2
+  exit 1
+fi
+GLIBC_MAX=$(objdump -T "${PLUGIN_SO}" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+
 echo ""
 echo "Done. Output:"
-ls -lh "${DIST_DIR}/medut.a" "${SO}"
+ls -lh "${DIST_DIR}/medut.a" "${SO}" "${PLUGIN_SO}"
+echo "Flutter plugin core: ${N} medut_* exports, needs ${GLIBC_MAX} or later."
+echo "Commit bindings/flutter/linux/medut.so alongside the C change."
