@@ -1,8 +1,9 @@
 /// Desktop smoke test for the FFI backend against the core the plugin ships
 /// for this host: `linux/<arch>/medut.so` (scripts/build-linux.sh) or
 /// `windows/<arch>/medut.dll` (.github/workflows/desktop-libs.yml,
-/// scripts/build-windows.ps1). Skipped on other hosts or when the library is
-/// missing.
+/// scripts/build-windows.ps1). MEDUT_LIB=<path> tests another build instead,
+/// such as a local `scripts/build-linux.sh` one in dist/. Skipped on other
+/// hosts or when the library is missing.
 ///
 /// Run: flutter test test/medut_smoke_test.dart
 @Timeout(Duration(minutes: 2))
@@ -20,9 +21,10 @@ void main() {
     Abi.linuxArm64 || Abi.windowsArm64 => 'arm64',
     _ => 'x64',
   };
-  final libPath = File(Platform.isWindows
-          ? 'windows/$arch/medut.dll'
-          : 'linux/$arch/medut.so')
+  final libPath = File(Platform.environment['MEDUT_LIB'] ??
+          (Platform.isWindows
+              ? 'windows/$arch/medut.dll'
+              : 'linux/$arch/medut.so'))
       .absolute
       .path;
   final haveLib = (Platform.isLinux || Platform.isWindows) &&

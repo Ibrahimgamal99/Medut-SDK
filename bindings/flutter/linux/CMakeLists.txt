@@ -3,9 +3,9 @@
 # runner installs the prebuilt core into bundle/lib/, where
 # DynamicLibrary.open('medut.so') finds it.
 #
-# One committed core per Flutter target: x64/medut.so from
-# scripts/build-linux.sh, arm64/medut.so from .github/workflows/desktop-libs.yml
-# (or build-linux.sh on an arm64 machine). Both are stripped.
+# One committed core per Flutter target, x64/medut.so and arm64/medut.so,
+# both built by .github/workflows/desktop-libs.yml (commit=true) in the
+# manylinux2014 image: glibc 2.17+, OpenSSL linked in, stripped.
 cmake_minimum_required(VERSION 3.10)
 
 # flutter build passes linux-x64 or linux-arm64; fall back to the host.
@@ -19,8 +19,8 @@ endif()
 
 set(_medut_lib "${CMAKE_CURRENT_SOURCE_DIR}/${_medut_arch}/medut.so")
 if(NOT EXISTS "${_medut_lib}")
-  message(FATAL_ERROR "medut: ${_medut_lib} is missing; run "
-    "scripts/build-linux.sh on ${_medut_arch}, or the desktop-libs.yml workflow")
+  message(FATAL_ERROR "medut: ${_medut_lib} is missing; run the "
+    "desktop-libs.yml workflow with commit=true")
 endif()
 
 set(medut_bundled_libraries "${_medut_lib}" PARENT_SCOPE)

@@ -34,7 +34,9 @@ Future<bool> _portOpen(int port) async {
 }
 
 void main() {
-  final libPath = File('linux/x64/medut.so').absolute.path;
+  final libPath = File(Platform.environment['MEDUT_LIB'] ?? 'linux/x64/medut.so')
+      .absolute
+      .path;
 
   test('UDP + WSS registration, echo call, media stats', () async {
     if (!Platform.isLinux || !File(libPath).existsSync()) {
