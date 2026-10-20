@@ -121,17 +121,21 @@ The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
 implements the plugin's host API by calling the C library directly, so
 `Medut.start`, accounts, calls, events and errors behave as on mobile.
 
-On Linux and Windows the plugin ships the prebuilt core, `linux/medut.so`
-(x86_64, glibc 2.34+, needs OpenSSL 3 and PulseAudio) and
-`windows/medut.dll` (x64, OpenSSL and zlib linked in, needs the MSVC
-runtime). `flutter build linux` / `flutter build windows` bundle it with the
-app, so `Medut.start()` needs no path. To refresh them after a core change:
+On Linux and Windows the plugin ships prebuilt cores for x64 and arm64:
+`linux/<arch>/medut.so` (glibc 2.34+, needs OpenSSL 3 and PulseAudio) and
+`windows/<arch>/medut.dll` (OpenSSL and zlib linked in, needs the MSVC
+runtime). `flutter build linux` / `flutter build windows` bundle the one for
+the target, so `Medut.start()` needs no path. To refresh them after a core
+change:
 
-- Linux: `scripts/build-linux.sh` rebuilds `linux/medut.so`; commit it.
-- Windows: run the **Windows DLL** workflow
-  (`gh workflow run windows-dll.yml -f commit=true`), which builds the DLL,
-  runs `test/medut_smoke_test.dart` against it and commits it. Locally,
-  `scripts/build-windows.ps1` refreshes `windows/medut.dll` too.
+- Linux x64: `scripts/build-linux.sh` rebuilds `linux/x64/medut.so`; commit
+  it. (On an arm64 machine it rebuilds `linux/arm64/medut.so`.)
+- Windows x64 and arm64, Linux arm64: run the **Desktop libraries** workflow
+  (`gh workflow run desktop-libs.yml -f commit=true`). It builds each one on
+  a native runner, checks its exports and loads it, runs
+  `test/medut_smoke_test.dart` against Windows x64, and commits them.
+  Locally, `scripts/build-windows.ps1 [-Arch x64|arm64]` refreshes
+  `windows/<arch>/medut.dll` too.
 
 On macOS, build `medut.dylib` with `scripts/build-macos.sh` and ship it on the
 library search path. Any platform can load the library from a given path:

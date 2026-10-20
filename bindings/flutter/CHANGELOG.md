@@ -23,12 +23,12 @@ Added:
   mobile-only features (Telecom/CallKit, remembered accounts, audio routes)
   do nothing there. Tested by `test/medut_smoke_test.dart` against the
   shipped core (skipped when it is not there).
-- **The plugin ships the Linux and Windows cores.** `linux/medut.so` and
-  `windows/medut.dll` are committed and declared as FFI plugins, so Flutter
-  bundles them with the app and `Medut.start()` needs no `libPath` there.
-  `scripts/build-linux.sh` refreshes the Linux one; the manual
-  `windows-dll.yml` workflow builds, tests and (with `commit=true`) commits
-  the Windows one.
+- **The plugin ships the Linux and Windows cores, for x64 and arm64.**
+  `linux/<arch>/medut.so` and `windows/<arch>/medut.dll` are committed and
+  declared as FFI plugins, so Flutter bundles the one for the app's target
+  and `Medut.start()` needs no `libPath` there. `scripts/build-linux.sh`
+  refreshes Linux x64; the manual `desktop-libs.yml` workflow builds, tests
+  and (with `commit=true`) commits Windows x64/arm64 and Linux arm64.
 
 Fixed:
 
