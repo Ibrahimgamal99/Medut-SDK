@@ -371,20 +371,22 @@ implements the plugin's host API by calling the C library directly, so
 `Medut.start`, accounts, calls, events and errors behave as on mobile.
 
 On Linux and Windows the plugin ships prebuilt cores for x64 and arm64:
-`linux/<arch>/medut.so` (glibc 2.34+, needs OpenSSL 3 and PulseAudio) and
-`windows/<arch>/medut.dll` (OpenSSL and zlib linked in, needs the MSVC
-runtime). `flutter build linux` / `flutter build windows` bundle the one for
-the target, so `Medut.start()` needs no path. To refresh them after a core
-change:
+`linux/<arch>/medut.so` (built on CentOS 7, so glibc 2.17+: RHEL/CentOS 7+,
+Ubuntu 14.04+, Debian 8+; OpenSSL linked in, needs only PulseAudio's
+`libpulse.so.0` and zlib) and `windows/<arch>/medut.dll` (OpenSSL and zlib
+linked in, needs the MSVC runtime). `flutter build linux` /
+`flutter build windows` bundle the one for the target, so `Medut.start()`
+needs no path.
 
-- Linux x64: `scripts/build-linux.sh` rebuilds `linux/x64/medut.so`; commit
-  it. (On an arm64 machine it rebuilds `linux/arm64/medut.so`.)
-- Windows x64 and arm64, Linux arm64: run the **Desktop libraries** workflow
-  (`gh workflow run desktop-libs.yml -f commit=true`). It builds each one on
-  a native runner, checks its exports and loads it, runs
-  `test/medut_smoke_test.dart` against Windows x64, and commits them.
-  Locally, `scripts/build-windows.ps1 [-Arch x64|arm64]` refreshes
-  `windows/<arch>/medut.dll` too.
+After a core change, refresh them with the **Desktop libraries** workflow
+(`gh workflow run desktop-libs.yml -f commit=true`). It builds each one on a
+native runner, checks its exports and dependencies and loads it (the Linux
+ones on glibc 2.17), runs `test/medut_smoke_test.dart` against the x64 ones,
+and commits them. Locally, `scripts/build-linux.sh` builds against the system
+OpenSSL into `dist/` without touching the committed ones (test it with
+`MEDUT_LIB=../../dist/linux/x86_64/medut.so flutter test`), and
+`scripts/build-windows.ps1 [-Arch x64|arm64]` refreshes
+`windows/<arch>/medut.dll`.
 
 On macOS, build `medut.dylib` with `scripts/build-macos.sh` and ship it on the
 library search path. Any platform can load the library from a given path:
