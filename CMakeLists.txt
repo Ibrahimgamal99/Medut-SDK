@@ -340,9 +340,21 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   string(REPLACE ";" "_" _ARCH_SLUG "${CMAKE_OSX_ARCHITECTURES}")
   set(MEDUT_PLATFORM_ID "macos/${_ARCH_SLUG}")
 elseif(WIN32)
-  set(MEDUT_PLATFORM_ID "windows/x64")
+  # Visual Studio names the target with -A; other generators build for the
+  # host.
+  if(CMAKE_GENERATOR_PLATFORM)
+    set(_WIN_ARCH "${CMAKE_GENERATOR_PLATFORM}")
+  else()
+    set(_WIN_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+  endif()
+  if(_WIN_ARCH MATCHES "^(ARM64|arm64|aarch64)$")
+    set(MEDUT_PLATFORM_ID "windows/arm64")
+  else()
+    set(MEDUT_PLATFORM_ID "windows/x64")
+  endif()
 else()
-  set(MEDUT_PLATFORM_ID "linux/x86_64")
+  # x86_64 or aarch64, as `uname -m` spells them.
+  set(MEDUT_PLATFORM_ID "linux/${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # ---------------------------------------------------------------------------
