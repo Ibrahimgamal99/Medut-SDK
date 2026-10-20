@@ -796,7 +796,9 @@ ExternalProject_Add(baresip_project
     ${OPUS_ARGS}
     ${_NOTRACK_ARG}
     ${CROSS_ARGS}
-  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target baresip
+  # --config: a multi-config generator (Visual Studio) otherwise builds Debug
+  # while the install step below looks for Release. Ninja ignores it.
+  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG> --target baresip
   # baresip adds test/ and webrtc/ to ALL unconditionally (BUILD_TESTING is not
   # honoured), so the default install step ("--target install" => builds ALL)
   # drags in selftest and baresip-webrtc. Neither ships in the SDK, and
@@ -804,7 +806,7 @@ ExternalProject_Add(baresip_project
   # with the NDK's <sys/user.h>). Install the Development component directly:
   # that is the static archive, the public headers and libbaresip.pc, all of
   # which the BUILD_COMMAND above has already produced.
-  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --component Development
+  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config $<CONFIG> --component Development
   BUILD_BYPRODUCTS "${_BARE_A}"
 )
 
