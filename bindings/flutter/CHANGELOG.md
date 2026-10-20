@@ -21,8 +21,14 @@ Added:
   implements the plugin's host API on the C library, so the same Dart API runs
   on desktop. `Medut.start(libPath:)` loads the library from a given path;
   mobile-only features (Telecom/CallKit, remembered accounts, audio routes)
-  do nothing there. Tested on Linux by `test/medut_smoke_test.dart` against
-  `dist/linux/x86_64/medut.so` (skipped when it is not built).
+  do nothing there. Tested by `test/medut_smoke_test.dart` against the
+  shipped core (skipped when it is not there).
+- **The plugin ships the Linux and Windows cores.** `linux/medut.so` and
+  `windows/medut.dll` are committed and declared as FFI plugins, so Flutter
+  bundles them with the app and `Medut.start()` needs no `libPath` there.
+  `scripts/build-linux.sh` refreshes the Linux one; the manual
+  `windows-dll.yml` workflow builds, tests and (with `commit=true`) commits
+  the Windows one.
 
 Fixed:
 

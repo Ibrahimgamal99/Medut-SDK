@@ -119,10 +119,22 @@ handover and stats.
 
 The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
 implements the plugin's host API by calling the C library directly, so
-`Medut.start`, accounts, calls, events and errors behave as on mobile. Build
-the library with `scripts/build-linux.sh`, `scripts/build-macos.sh` or
-`scripts/build-windows.ps1`, and ship it with the app (`medut.so`,
-`medut.dylib`, `medut.dll` on the library search path), or pass its location:
+`Medut.start`, accounts, calls, events and errors behave as on mobile.
+
+On Linux and Windows the plugin ships the prebuilt core, `linux/medut.so`
+(x86_64, glibc 2.34+, needs OpenSSL 3 and PulseAudio) and
+`windows/medut.dll` (x64, OpenSSL and zlib linked in, needs the MSVC
+runtime). `flutter build linux` / `flutter build windows` bundle it with the
+app, so `Medut.start()` needs no path. To refresh them after a core change:
+
+- Linux: `scripts/build-linux.sh` rebuilds `linux/medut.so`; commit it.
+- Windows: run the **Windows DLL** workflow
+  (`gh workflow run windows-dll.yml -f commit=true`), which builds the DLL,
+  runs `test/medut_smoke_test.dart` against it and commits it. Locally,
+  `scripts/build-windows.ps1` refreshes `windows/medut.dll` too.
+
+On macOS, build `medut.dylib` with `scripts/build-macos.sh` and ship it on the
+library search path. Any platform can load the library from a given path:
 
 ```dart
 final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
@@ -130,8 +142,7 @@ final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
 
 Mobile-only features do nothing there: `telecom` and `audioSession` are
 ignored, `remember` is ignored and `rememberedAccounts()` is empty, and the
-audio route list is empty. The plugin does not declare desktop platforms in
-`pubspec.yaml`, so Flutter does not bundle the library for you.
+audio route list is empty.
 
 ## Development
 
