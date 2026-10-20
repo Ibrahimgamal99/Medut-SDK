@@ -1,21 +1,22 @@
 name: Desktop libraries
 
-# Builds the desktop cores the Flutter plugin ships that this Linux x64
-# machine cannot: medut.dll for Windows x64 and arm64, and medut.so for Linux
-# arm64, each on a native runner. Every library is checked (exports, imports,
-# a real load), and Windows x64 also runs the plugin's FFI smoke test. Each
-# one is published as a run artifact, and on request committed to the branch
-# that was built.
+# Builds every desktop core the Flutter plugin ships, each on a native
+# runner: medut.dll for Windows x64 and arm64, and medut.so for Linux x64 and
+# arm64 in the manylinux2014 image (glibc 2.17, OpenSSL linked in), so it
+# runs on old distros too. Every library is checked (exports, machine,
+# dependencies, a real load) and the x64 ones also run the plugin's FFI smoke
+# test. Each one is published as a run artifact, and on request committed to
+# the branch that was built.
 #
 # Start it from the Actions tab or with
 #   gh workflow run desktop-libs.yml                 # artifacts only
 #   gh workflow run desktop-libs.yml -f commit=true  # and commit them back
-# The committed copies are bindings/flutter/windows/<arch>/medut.dll and
-# bindings/flutter/linux/arm64/medut.so; the plugin's CMakeLists bundle the
-# one matching the app's target. A library whose job failed is not committed.
+# The committed copies are bindings/flutter/{windows,linux}/<arch>/medut.*;
+# the plugin's CMakeLists bundle the one matching the app's target. A library
+# whose job failed is not committed.
 #
-# Linux x64 is built locally with scripts/build-linux.sh, which refreshes
-# bindings/flutter/linux/x64/medut.so.
+# scripts/build-linux.sh (no MEDUT_PORTABLE) is for local development: it
+# links the system OpenSSL and leaves the committed libraries alone.
 on:
   workflow_dispatch:
     inputs:
@@ -98,7 +99,7 @@ jobs:
       # shipped beside it.
       - name: Verify exports, machine and imports
         run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $dumpbin = (Get-Item "$vs\VC\Tools\MSVC\*\bin\Host*\*\dumpbin.exe" | Select-Object -First 1).FullName
           $dll = "bindings\flutter\windows\${{ matrix.arch }}\medut.dll"
 
@@ -173,73 +174,100 @@ jobs:
             dist/windows/${{ matrix.arch }}/include/
           if-no-files-found: error
 
-  linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    name: Linux arm64 · medut.so
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    name: Linux ${{ matrix.arch }} · medut.so
+    env:
+      # CentOS 7 / glibc 2.17: the oldest system the library supports. Pinned
+      # so a rebuild of the same commit gets the same toolchain.
+      IMAGE: quay.io/pypa/manylinux2014_${{ matrix.machine }}:2026.10.16-1
     steps:
       - uses: actions/checkout@v4
 
-      # webrtc-audio-processing 1.x is a build-time dependency only (the AEC
-      # is dlopen'ed by SONAME); OpenSSL 3, zlib and PulseAudio are linked.
-      - name: Build dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build pkg-config libssl-dev zlib1g-dev libpulse-dev \
-            libwebrtc-audio-processing-dev
+      # webrtc-audio-processing 1.3, built in the image by the script below.
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: webrtc-audio-processing-1.3-manylinux2014-${{ matrix.machine }}-v1
 
-      # Fetches third_party, builds the core, links dist/linux/aarch64/medut.so
-      # and stages a stripped copy in bindings/flutter/linux/arm64 (the
-      # script checks its exports).
-      - name: Build medut.so
-        run: bash scripts/build-linux.sh
+      # Clone third_party (OpenSSL included) on the runner, so the container
+      # only builds; the script finds the trees at their pinned revisions.
+      - name: Fetch third_party
+        run: MEDUT_OPENSSL_SRC=1 bash scripts/fetch-third-party.sh
+
+      # Builds medut.so with OpenSSL linked in, checks its exports and that
+      # it needs nothing newer than glibc 2.17, loads it in the image, and
+      # stages it in bindings/flutter/linux/<arch>. Runs as plain docker on
+      # the runner (JavaScript actions cannot run inside a glibc 2.17 image).
+      - name: Build medut.so (manylinux2014)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" \
+            bash scripts/build-linux-portable.sh
 
       - name: Verify machine and dependencies
         run: |
-          SO=bindings/flutter/linux/arm64/medut.so
+          SO=bindings/flutter/linux/${{ matrix.arch }}/medut.so
           file "${SO}"
-          file "${SO}" | grep -q 'ARM aarch64' || { echo "::error::not an aarch64 library"; exit 1; }
+          file "${SO}" | grep -q '${{ matrix.arch == 'x64' && 'x86-64' || 'ARM aarch64' }}' \
+            || { echo "::error::wrong architecture"; exit 1; }
           readelf -d "${SO}" | grep NEEDED
-          echo "Needs $(objdump -T "${SO}" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1) or later"
+          if readelf -d "${SO}" | grep -Eq 'NEEDED.*lib(ssl|crypto)'; then
+            echo "::error::medut.so links the system OpenSSL"; exit 1
+          fi
 
-      # Load it the way an app does and call into it.
-      - name: Load test
+      # The plugin's Dart FFI backend against the library just built, on a
+      # current distro. x64 only: the Flutter SDK has no Linux arm64 host
+      # build to run it on.
+      - name: Runtime libraries for the FFI smoke test
+        if: matrix.arch == 'x64'
+        run: sudo apt-get install -y --no-install-recommends libpulse0
+
+      - uses: subosito/flutter-action@v2
+        if: matrix.arch == 'x64'
+        with:
+          channel: stable
+          cache: true
+
+      - name: FFI smoke test
+        if: matrix.arch == 'x64'
+        working-directory: bindings/flutter
         run: |
-          cat > "${RUNNER_TEMP}/probe.c" <<'EOF'
-          #include <dlfcn.h>
-          #include <stdio.h>
-          int main(int argc, char **argv) {
-            void *h = dlopen(argv[1], RTLD_NOW);
-            if (!h) { fprintf(stderr, "%s\n", dlerror()); return 1; }
-            const char *(*ver)(void) = (const char *(*)(void))dlsym(h, "medut_version");
-            if (!ver) { fprintf(stderr, "no medut_version\n"); return 1; }
-            printf("medut_version() = %s\n", ver());
-            return 0;
-          }
-          EOF
-          gcc -o "${RUNNER_TEMP}/probe" "${RUNNER_TEMP}/probe.c" -ldl
-          "${RUNNER_TEMP}/probe" "$PWD/bindings/flutter/linux/arm64/medut.so"
+          flutter pub get
+          flutter test test/medut_smoke_test.dart
 
       - name: Upload plugin library
         uses: actions/upload-artifact@v4
         with:
-          name: plugin-linux-arm64
-          path: bindings/flutter/linux/arm64/medut.so
+          name: plugin-linux-${{ matrix.arch }}
+          path: bindings/flutter/linux/${{ matrix.arch }}/medut.so
           if-no-files-found: error
 
+      # For C/C++ consumers: the unstripped library, the static archive
+      # (OpenSSL included) and the headers.
       - name: Upload SDK
         uses: actions/upload-artifact@v4
         with:
-          name: medut-linux-arm64
+          name: medut-linux-${{ matrix.arch }}
           path: |
-            dist/linux/aarch64/medut.so
-            dist/linux/aarch64/include/
+            dist/linux/${{ matrix.machine }}/medut.so
+            dist/linux/${{ matrix.machine }}/medut.a
+            dist/linux/${{ matrix.machine }}/include/
           if-no-files-found: error
 
   # One commit for every library that built and passed its checks, so the
   # parallel jobs never race each other to push.
   commit:
-    needs: [windows, linux-arm64]
+    needs: [windows, linux]
     if: ${{ !cancelled() && inputs.commit }}
     runs-on: ubuntu-24.04
     name: Commit libraries to the branch
@@ -256,7 +284,7 @@ jobs:
           shopt -s nullglob
           DONE=()
           for d in "${RUNNER_TEMP}"/plugin/plugin-*; do
-            name="${d##*/plugin-}"   # windows-x64, windows-arm64, linux-arm64
+            name="${d##*/plugin-}"   # windows-x64, windows-arm64, linux-x64, linux-arm64
             os="${name%-*}"; arch="${name##*-}"
             mkdir -p "bindings/flutter/${os}/${arch}"
             cp "${d}"/* "bindings/flutter/${os}/${arch}/"
