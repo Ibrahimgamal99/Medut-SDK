@@ -370,6 +370,12 @@ set(CROSS_ARGS "")
 if(CMAKE_TOOLCHAIN_FILE)
   list(APPEND CROSS_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
 endif()
+# Without it vcpkg's toolchain falls back to the host's default (dynamic)
+# triplet in every sub-build, so re and baresip would look for OpenSSL in a
+# tree that has none, or pick up another OpenSSL on the machine.
+if(VCPKG_TARGET_TRIPLET)
+  list(APPEND CROSS_ARGS "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}")
+endif()
 foreach(_var
     CMAKE_SYSTEM_NAME
     CMAKE_OSX_ARCHITECTURES CMAKE_OSX_SYSROOT CMAKE_OSX_DEPLOYMENT_TARGET

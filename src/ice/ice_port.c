@@ -15,8 +15,14 @@
  */
 
 #include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#define icea_sock_close(fd) closesocket(fd)
+#else
 #include <unistd.h>
 #include <sys/socket.h>
+#define icea_sock_close(fd) close(fd)
+#endif
 #include "ice_internal.h"
 
 
@@ -191,25 +197,25 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 			re_sock_t fd = socket(sa_af(&bind_addr), SOCK_DGRAM,
 					      IPPROTO_UDP);
 			if (fd == RE_BAD_SOCK) {
-				err = errno ? errno : EIO;
+				err = RE_ERRNO_SOCK ? RE_ERRNO_SOCK : EIO;
 				break;
 			}
 			err = gen->conf->pin_fd(fd, ifname, sa_af(&bind_addr));
 			if (err) {
-				(void)close(fd);
+				(void)icea_sock_close(fd);
 				break;
 			}
 			(void)net_sockopt_blocking_set(fd, false);
 			if (bind(fd, &bind_addr.u.sa, bind_addr.len) < 0) {
-				err = errno;
-				(void)close(fd);
+				err = RE_ERRNO_SOCK;
+				(void)icea_sock_close(fd);
 				if (err == EADDRINUSE || err == EACCES)
 					continue;
 				break;
 			}
 			err = udp_alloc_fd(&us, fd, icea_route_port_recv, port);
 			if (err) {
-				(void)close(fd);
+				(void)icea_sock_close(fd);
 				break;
 			}
 			err = udp_thread_attach(us);
