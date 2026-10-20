@@ -904,3 +904,124 @@ void sipreg_handoff_push(struct sipreg *reg, const char *cparams);
 int sipreg_refresh(struct sipreg *reg);
 ]=]
 "sipreg_handoff_push(), sipreg_refresh() declarations")
+
+
+# ---------------------------------------------------------------------------
+# S. tcp/tcp.c — a socket that fails recv() must close
+#
+# libre closes a TCP connection on a failed recv() only on Windows; elsewhere
+# it logs the error and keeps the socket.  iOS reclaims the sockets of a
+# suspended app, and after the resume every recv() on one fails with ENOTCONN
+# and never returns 0.  The poller keeps reporting it readable, so the handler
+# spins — dozens of "recv(): Socket is not connected" lines in one
+# millisecond — and conn_close() never runs: the SIP layer keeps the
+# connection as established, the close watch of patch P never fires, and every
+# REGISTER is written into the dead WebSocket and fails with EPIPE.  Measured
+# on-device (2026-10-19): an iPhone resumed after 2.5 h suspended stayed
+# unregistered through every transport flush and account rebuild.  Close on
+# any error but the transient ones, as recv() returning 0 already does.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/tcp/tcp.c"
+[=[
+		DEBUG_WARNING("recv handler: recv(): %m\n", err);
+#ifdef WIN32
+		if (err == WSAECONNRESET || err == WSAECONNABORTED) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#endif
+		goto out;
+]=]
+[=[
+		DEBUG_WARNING("recv handler: recv(): %m\n", err);
+#ifdef WIN32
+		if (err == WSAECONNRESET || err == WSAECONNABORTED) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#else
+		/* Medut-patched: a socket that fails recv() for good (iOS
+		 * reclaimed it: ENOTCONN on every call, never 0) stays readable;
+		 * keeping it spins this handler and hides the close from SIP. */
+		if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#endif
+		goto out;
+]=]
+"tcp_recv_handler: close the connection on a failed recv()")
+
+
+# ---------------------------------------------------------------------------
+# T. dns/client.c — reopen a DNS socket the OS has reclaimed
+#
+# The resolver's UDP sockets are opened once, in dnsc_alloc(), and nothing
+# reopens them: net_dns_refresh() only swaps the server list.  iOS reclaims
+# them with the rest of a suspended app's sockets, and from then on every send
+# fails with EPIPE.  A SIP request to a named server resolves first, so the
+# REGISTER fails at once — after a transport flush and an account rebuild
+# alike, since neither touches the resolver.  Same on-device trace as S: once
+# the DNS cache entry expired, every REGISTER failed with EPIPE in the same
+# millisecond it was sent.  Reopen the socket on EPIPE/ENOTCONN and retry the
+# send once.  Replies due on the old socket are lost; their queries
+# retransmit on the new one.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+static int send_udp(struct dns_query *q)
+{
+]=]
+[=[
+/* Medut-patched: replace a UDP socket the OS has reclaimed (iOS does so
+ * for a suspended app, and every send on it then fails with EPIPE).
+ * Returns the new socket, or NULL with the old one kept. */
+static struct udp_sock *dnsc_udp_reopen(struct dnsc *dnsc, int af)
+{
+	struct udp_sock **usp = (af == AF_INET6) ? &dnsc->us6 : &dnsc->us;
+	struct udp_sock *us = NULL;
+	struct sa laddr;
+
+	sa_set_str(&laddr, (af == AF_INET6) ? "::" : "0.0.0.0", 0);
+	if (udp_listen(&us, &laddr, udp_recv_handler, dnsc))
+		return NULL;
+
+	mem_deref(*usp);
+	*usp = us;
+
+	return us;
+}
+
+
+static int send_udp(struct dns_query *q)
+{
+]=]
+"dnsc_udp_reopen(): replace a reclaimed DNS socket")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+		q->mb.pos = 0;
+		err = udp_send(us, srv, &q->mb);
+		if (!err)
+			break;
+]=]
+[=[
+		q->mb.pos = 0;
+		err = udp_send(us, srv, &q->mb);
+
+		/* Medut-patched: see dnsc_udp_reopen() */
+		if (err == EPIPE || err == ENOTCONN) {
+			us = dnsc_udp_reopen(q->dnsc, sa_af(srv));
+			if (us) {
+				q->mb.pos = 0;
+				err = udp_send(us, srv, &q->mb);
+			}
+		}
+
+		if (!err)
+			break;
+]=]
+"send_udp: reopen a reclaimed DNS socket and retry")
