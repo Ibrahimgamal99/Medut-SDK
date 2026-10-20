@@ -106,3 +106,6 @@ desktop.ini
 # (scripts/build-ios.sh or scripts/fetch-prebuilt.sh refresh it).
 bindings/swift/.build/
 bindings/swift/.swiftpm/
+
+# Build-only dependencies scripts/build-linux-portable.sh compiles (CI caches it)
+.cache/

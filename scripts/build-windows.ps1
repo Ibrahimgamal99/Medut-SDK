@@ -61,9 +61,19 @@ Write-Host "=== Fetching third_party ==="
 & (Join-Path $ScriptDir "fetch-third-party.ps1")
 if ($LASTEXITCODE -ne 0) { Write-Error "third_party fetch failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 
-Write-Host "=== Configuring Windows $Arch (on $HostArch) ==="
+# The Visual Studio generator is named after the installed version (17 is
+# 2022, 18 is 2026); runner images do not all carry the same one.
+$VsWhereExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VsMajor = (& $VsWhereExe -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationVersion) -replace '\..*$', ''
+$VsGenerator = switch ($VsMajor) {
+    "17" { "Visual Studio 17 2022" }
+    "18" { "Visual Studio 18 2026" }
+    default { Write-Error "No supported Visual Studio with C++ tools found (vswhere: '$VsMajor')"; exit 1 }
+}
+
+Write-Host "=== Configuring Windows $Arch (on $HostArch, $VsGenerator) ==="
 cmake -S $Root -B $BuildDir `
-    -G "Visual Studio 17 2022" -A $VsPlatform `
+    -G $VsGenerator -A $VsPlatform `
     "-DCMAKE_TOOLCHAIN_FILE=$Toolchain" `
     "-DVCPKG_TARGET_TRIPLET=$Triplet" `
     -DMEDUT_TLS=openssl `
@@ -137,9 +147,9 @@ Write-Host ""
 Write-Host "=== Linking $DllPath ==="
 
 # Find link.exe and set up VS environment
-$VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VsWhere = $VsWhereExe
 if (Test-Path $VsWhere) {
-    $VsPath = & $VsWhere -latest -property installationPath
+    $VsPath = & $VsWhere -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
     $LinkExe = Join-Path $VsPath "VC\Tools\MSVC\*\bin\Host$HostArch\$Arch\link.exe"
     $LinkExe = (Get-Item $LinkExe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
     
