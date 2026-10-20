@@ -1,23 +1,26 @@
-name: Windows DLL
+name: Desktop libraries
 
-# Builds medut.dll (x64, MSVC, OpenSSL and zlib linked in statically through
-# vcpkg's x64-windows-static-md triplet), checks its exports, runs the Flutter
-# plugin's FFI smoke test against it, and publishes it: always as a run
-# artifact, and on request as a commit to the branch that was built.
+# Builds the desktop cores the Flutter plugin ships that this Linux x64
+# machine cannot: medut.dll for Windows x64 and arm64, and medut.so for Linux
+# arm64, each on a native runner. Every library is checked (exports, imports,
+# a real load), and Windows x64 also runs the plugin's FFI smoke test. Each
+# one is published as a run artifact, and on request committed to the branch
+# that was built.
 #
 # Start it from the Actions tab or with
-#   gh workflow run windows-dll.yml                 # artifact only
-#   gh workflow run windows-dll.yml -f commit=true  # and commit it back
-# The committed copy is bindings/flutter/windows/medut.dll, which the plugin's
-# windows/CMakeLists.txt bundles next to the app's .exe.
+#   gh workflow run desktop-libs.yml                 # artifacts only
+#   gh workflow run desktop-libs.yml -f commit=true  # and commit them back
+# The committed copies are bindings/flutter/windows/<arch>/medut.dll and
+# bindings/flutter/linux/arm64/medut.so; the plugin's CMakeLists bundle the
+# one matching the app's target. A library whose job failed is not committed.
 #
-# Linux is built locally with scripts/build-linux.sh, which refreshes
-# bindings/flutter/linux/medut.so, so there is no Linux job here.
+# Linux x64 is built locally with scripts/build-linux.sh, which refreshes
+# bindings/flutter/linux/x64/medut.so.
 on:
   workflow_dispatch:
     inputs:
       commit:
-        description: "Commit the built medut.dll to bindings/flutter/windows on this branch"
+        description: "Commit the built libraries to bindings/flutter/{windows,linux}/<arch> on this branch"
         type: boolean
         default: false
 
@@ -25,13 +28,23 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-dll-${{ github.ref }}
+  group: desktop-libs-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  dll:
-    runs-on: windows-2022
-    name: medut.dll · FFI smoke test
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2022
+            machine: x64
+          - arch: arm64
+            runner: windows-11-arm
+            machine: ARM64
+    runs-on: ${{ matrix.runner }}
+    name: Windows ${{ matrix.arch }} · medut.dll
     defaults:
       run:
         shell: pwsh
@@ -45,38 +58,49 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # The image ships vcpkg at C:\vcpkg (VCPKG_INSTALLATION_ROOT). Cache the
-      # built packages per vcpkg revision: OpenSSL alone takes minutes.
-      - name: vcpkg revision
+      # The x64 image ships vcpkg at VCPKG_INSTALLATION_ROOT; bootstrap one
+      # where the image has none. Cache the built packages per vcpkg
+      # revision: OpenSSL alone takes minutes.
+      - name: vcpkg
         id: vcpkg
         run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $root -or -not (Test-Path "$root\vcpkg.exe")) {
+            $root = "C:\vcpkg-medut"
+            git clone -q https://github.com/microsoft/vcpkg.git $root
+            & "$root\bootstrap-vcpkg.bat" -disableMetrics
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
-          "rev=$(git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          "rev=$(git -C $root rev-parse HEAD)" >> $env:GITHUB_OUTPUT
 
       - uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-x64-windows-static-md-openssl-zlib-${{ steps.vcpkg.outputs.rev }}
+          key: vcpkg-${{ matrix.arch }}-windows-static-md-openssl-zlib-${{ steps.vcpkg.outputs.rev }}
 
       - name: vcpkg install openssl zlib
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
-            openssl:x64-windows-static-md zlib:x64-windows-static-md
+          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+            "openssl:${{ matrix.arch }}-windows-static-md" "zlib:${{ matrix.arch }}-windows-static-md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Fetches third_party at the pinned revisions, builds the core, links
-      # dist\windows\x64\medut.dll and stages it in bindings\flutter\windows.
+      # dist\windows\<arch>\medut.dll and stages it in
+      # bindings\flutter\windows\<arch>.
       - name: Build medut.dll
-        run: ./scripts/build-windows.ps1 -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT
+        run: ./scripts/build-windows.ps1 -Arch ${{ matrix.arch }} -VcpkgRoot $env:VCPKG_ROOT
 
       # The C API must be exported by name (dart:ffi looks every symbol up),
-      # and the DLL may only need system DLLs and the MSVC runtime: OpenSSL
-      # and zlib are linked in, not shipped beside it.
-      - name: Verify exports and imports
+      # the DLL must be for the right machine, and it may only need system
+      # DLLs and the MSVC runtime: OpenSSL and zlib are linked in, not
+      # shipped beside it.
+      - name: Verify exports, machine and imports
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $dumpbin = (Get-Item "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
-          $dll = "bindings\flutter\windows\medut.dll"
+          $dumpbin = (Get-Item "$vs\VC\Tools\MSVC\*\bin\Host*\*\dumpbin.exe" | Select-Object -First 1).FullName
+          $dll = "bindings\flutter\windows\${{ matrix.arch }}\medut.dll"
 
           $exports = & $dumpbin /nologo /exports $dll | Select-String '\smedut_\w+$' |
             ForEach-Object { ($_.Line -split '\s+')[-1] }
@@ -87,48 +111,168 @@ jobs:
             Write-Error "medut_account_refresh_registration missing"; exit 1
           }
 
+          $machine = & $dumpbin /nologo /headers $dll | Select-String 'machine \(' | Select-Object -First 1
+          Write-Host "Header: $($machine.Line.Trim())"
+          if ($machine.Line -notmatch '\(${{ matrix.machine }}\)') { Write-Error "not a ${{ matrix.machine }} DLL"; exit 1 }
+
           $imports = & $dumpbin /nologo /dependents $dll | Select-String '^\s+\S+\.dll$' |
             ForEach-Object { $_.Line.Trim() }
           Write-Host "Imports: $($imports -join ', ')"
           $foreign = $imports | Where-Object { $_ -match '(?i)^(libssl|libcrypto|zlib)' }
           if ($foreign) { Write-Error "medut.dll needs $($foreign -join ', ') beside it"; exit 1 }
 
+      # Load it the way an app does and call into it: catches a missing
+      # dependency that dumpbin cannot see. pwsh runs native on both runners.
+      - name: Load test
+        run: |
+          $dll = (Resolve-Path "bindings\flutter\windows\${{ matrix.arch }}\medut.dll").Path
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class MedutProbe {
+            [DllImport(@"$dll", CallingConvention = CallingConvention.Cdecl)]
+            public static extern IntPtr medut_version();
+          }
+          "@
+          $v = [Runtime.InteropServices.Marshal]::PtrToStringAnsi([MedutProbe]::medut_version())
+          Write-Host "medut_version() = $v"
+          if (-not $v) { Write-Error "medut_version() returned nothing"; exit 1 }
+
       - uses: subosito/flutter-action@v2
+        if: matrix.arch == 'x64'
         with:
           channel: stable
           cache: true
 
-      # The plugin's Dart FFI backend against the DLL just built: loads it,
-      # starts the stack, registers against a black-hole registrar, detaches
-      # and reattaches, shuts down.
+      # The plugin's Dart FFI backend against the DLL just built: starts the
+      # stack, registers against a black-hole registrar, detaches and
+      # reattaches, shuts down. x64 only: the Flutter SDK has no Windows
+      # arm64 host build to run it on.
       - name: FFI smoke test
+        if: matrix.arch == 'x64'
         working-directory: bindings/flutter
         run: |
           flutter pub get
           flutter test test/medut_smoke_test.dart
 
-      - name: Upload medut.dll
+      - name: Upload plugin library
         uses: actions/upload-artifact@v4
         with:
-          name: windows-dll
-          path: |
-            dist/windows/x64/medut.dll
-            dist/windows/x64/medut.lib
-            dist/windows/x64/include/
+          name: plugin-windows-${{ matrix.arch }}
+          path: bindings/flutter/windows/${{ matrix.arch }}/medut.dll
           if-no-files-found: error
 
-      # Opt-in: put the DLL where the plugin bundles it from, so a consumer
-      # pinning this branch gets a core that matches it.
-      - name: Commit medut.dll to the branch
-        if: ${{ inputs.commit }}
-        shell: bash
+      # For C/C++ consumers: the DLL, its import library and the headers.
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: medut-windows-${{ matrix.arch }}
+          path: |
+            dist/windows/${{ matrix.arch }}/medut.dll
+            dist/windows/${{ matrix.arch }}/medut.lib
+            dist/windows/${{ matrix.arch }}/include/
+          if-no-files-found: error
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    name: Linux arm64 · medut.so
+    steps:
+      - uses: actions/checkout@v4
+
+      # webrtc-audio-processing 1.x is a build-time dependency only (the AEC
+      # is dlopen'ed by SONAME); OpenSSL 3, zlib and PulseAudio are linked.
+      - name: Build dependencies
         run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config libssl-dev zlib1g-dev libpulse-dev \
+            libwebrtc-audio-processing-dev
+
+      # Fetches third_party, builds the core, links dist/linux/aarch64/medut.so
+      # and stages a stripped copy in bindings/flutter/linux/arm64 (the
+      # script checks its exports).
+      - name: Build medut.so
+        run: bash scripts/build-linux.sh
+
+      - name: Verify machine and dependencies
+        run: |
+          SO=bindings/flutter/linux/arm64/medut.so
+          file "${SO}"
+          file "${SO}" | grep -q 'ARM aarch64' || { echo "::error::not an aarch64 library"; exit 1; }
+          readelf -d "${SO}" | grep NEEDED
+          echo "Needs $(objdump -T "${SO}" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1) or later"
+
+      # Load it the way an app does and call into it.
+      - name: Load test
+        run: |
+          cat > "${RUNNER_TEMP}/probe.c" <<'EOF'
+          #include <dlfcn.h>
+          #include <stdio.h>
+          int main(int argc, char **argv) {
+            void *h = dlopen(argv[1], RTLD_NOW);
+            if (!h) { fprintf(stderr, "%s\n", dlerror()); return 1; }
+            const char *(*ver)(void) = (const char *(*)(void))dlsym(h, "medut_version");
+            if (!ver) { fprintf(stderr, "no medut_version\n"); return 1; }
+            printf("medut_version() = %s\n", ver());
+            return 0;
+          }
+          EOF
+          gcc -o "${RUNNER_TEMP}/probe" "${RUNNER_TEMP}/probe.c" -ldl
+          "${RUNNER_TEMP}/probe" "$PWD/bindings/flutter/linux/arm64/medut.so"
+
+      - name: Upload plugin library
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux-arm64
+          path: bindings/flutter/linux/arm64/medut.so
+          if-no-files-found: error
+
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: medut-linux-arm64
+          path: |
+            dist/linux/aarch64/medut.so
+            dist/linux/aarch64/include/
+          if-no-files-found: error
+
+  # One commit for every library that built and passed its checks, so the
+  # parallel jobs never race each other to push.
+  commit:
+    needs: [windows, linux-arm64]
+    if: ${{ !cancelled() && inputs.commit }}
+    runs-on: ubuntu-24.04
+    name: Commit libraries to the branch
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*
+          path: ${{ runner.temp }}/plugin
+
+      - name: Commit
+        run: |
+          shopt -s nullglob
+          DONE=()
+          for d in "${RUNNER_TEMP}"/plugin/plugin-*; do
+            name="${d##*/plugin-}"   # windows-x64, windows-arm64, linux-arm64
+            os="${name%-*}"; arch="${name##*-}"
+            mkdir -p "bindings/flutter/${os}/${arch}"
+            cp "${d}"/* "bindings/flutter/${os}/${arch}/"
+            git add -f "bindings/flutter/${os}/${arch}"
+            DONE+=("${os} ${arch}")
+          done
+          if [ ${#DONE[@]} -eq 0 ]; then
+            echo "::error::no library built; nothing to commit"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f bindings/flutter/windows/medut.dll
           if git diff --cached --quiet; then
-            echo "medut.dll unchanged; nothing to commit"
+            echo "libraries unchanged; nothing to commit"
             exit 0
           fi
-          git commit -m "windows: refresh medut.dll (CI build of ${GITHUB_SHA::12})"
+          LIST=$(IFS=,; echo "${DONE[*]}" | sed 's/,/, /g')
+          git commit -m "desktop: refresh the plugin's cores: ${LIST} (CI build of ${GITHUB_SHA::12})"
           git push origin "HEAD:${GITHUB_REF_NAME}"
