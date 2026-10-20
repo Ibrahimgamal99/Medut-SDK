@@ -86,7 +86,11 @@ if [ "${PORTABLE}" = "1" ]; then
   SYSROOT="${BUILD_DIR}/sysroot/lib"
   WHOLE=("${BUILD_DIR}/medut-core-build/medut_core.a" "${SYSROOT}/libre.a"
          "${SYSROOT}/libbaresip.a" "${SYSROOT}/libopus.a")
-  SSL_LIBS=("${SYSROOT}/libssl.a" "${SYSROOT}/libcrypto.a")
+  # --exclude-libs: the built-in OpenSSL stays private. Exported, its
+  # SSL_*/EVP_* names could bind to another OpenSSL already in the process
+  # (GTK, libcurl, another plugin) and medut would call into that one.
+  SSL_LIBS=("${SYSROOT}/libssl.a" "${SYSROOT}/libcrypto.a"
+            -Wl,--exclude-libs,libssl.a:libcrypto.a)
 else
   WHOLE=("${DIST_DIR}/medut.a")
   SSL_LIBS=(-lssl -lcrypto)
@@ -115,9 +119,15 @@ if [ "${N}" -lt 40 ] || \
   echo "ERROR: ${SO}: ${N} medut_* exports, or no medut_account_refresh_registration" >&2
   exit 1
 fi
-if [ "${PORTABLE}" = "1" ] && readelf -d "${STRIPPED}" | grep -Eq 'NEEDED.*lib(ssl|crypto)\.so'; then
-  echo "ERROR: portable ${SO} still links the system OpenSSL" >&2
-  exit 1
+if [ "${PORTABLE}" = "1" ]; then
+  if readelf -d "${STRIPPED}" | grep -Eq 'NEEDED.*lib(ssl|crypto)\.so'; then
+    echo "ERROR: portable ${SO} still links the system OpenSSL" >&2
+    exit 1
+  fi
+  if grep -Eq ' T (SSL_|EVP_|OPENSSL_)' <<<"${SYMS}"; then
+    echo "ERROR: portable ${SO} exports its built-in OpenSSL" >&2
+    exit 1
+  fi
 fi
 GLIBC_MAX=$(objdump -T "${STRIPPED}" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
 

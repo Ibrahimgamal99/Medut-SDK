@@ -288,6 +288,8 @@ jobs:
             os="${name%-*}"; arch="${name##*-}"
             mkdir -p "bindings/flutter/${os}/${arch}"
             cp "${d}"/* "bindings/flutter/${os}/${arch}/"
+            # upload-artifact drops the exec bit; git records it.
+            chmod 755 "bindings/flutter/${os}/${arch}"/medut.*
             git add -f "bindings/flutter/${os}/${arch}"
             DONE+=("${os} ${arch}")
           done
