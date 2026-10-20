@@ -9,6 +9,7 @@ import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import dev.medut.Call
 import dev.medut.Medut
@@ -163,6 +164,8 @@ internal class AndroidPlatform(
         // Re-checked on the main thread: a new call may have started since.
         main.post { if (Medut.calls.isEmpty()) deactivate() }
     }
+
+    override fun elapsedNanos(): Long = SystemClock.elapsedRealtimeNanos()
 
     override fun onShutdown() {
         fallbackCalls.clear()

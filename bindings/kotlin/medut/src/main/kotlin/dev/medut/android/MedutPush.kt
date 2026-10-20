@@ -104,6 +104,9 @@ data class PushPayload(
  * None of this needs a Flutter engine or any UI to be up.
  */
 object MedutPush {
+    /** A stack younger than this has nothing a network change could have made stale. */
+    private const val FRESH_START_MS = 10_000L
+
     private const val TAG = "MedutPush"
 
     /** Field names [wake] reads.  Set once, before the first push. */
@@ -230,8 +233,13 @@ object MedutPush {
     @JvmStatic
     fun reachAccounts() {
         // The process may have been dozing on a network that is gone;
-        // coalesced and cheap when nothing changed.
-        runCatching { Medut.network.changed() }
+        // coalesced and cheap when nothing changed.  Not when the stack came
+        // up moments ago (the push started this process): its transports were
+        // bound to this network seconds ago, and the path check that skips a
+        // needless handover only runs once every account is REGISTERED
+        // (src/netmon.c), so the report would flush the transports and re-do
+        // the first REGISTER while the INVITE is on its way.
+        if (!Medut.startedWithin(FRESH_START_MS)) runCatching { Medut.network.changed() }
         for (account in Medut.accounts) {
             val result = runCatching {
                 when (account.registrationState) {

@@ -64,6 +64,10 @@ public final class Medut: @unchecked Sendable {
     private var subscribers: [UUID: Subscriber] = [:]
     private var _reattached = false
     private var _options = StartOptions()
+    /// When `start` brought the native stack up (`CLOCK_MONOTONIC`, ns:
+    /// counts sleep, never steps with the wall clock); nil while stopped, or
+    /// when `start` took over a stack that was already running.
+    private var _startedAt: UInt64?
 
     #if canImport(Network)
     private var networkMonitor: NetworkMonitor?
@@ -80,6 +84,13 @@ public final class Medut: @unchecked Sendable {
     public var reattached: Bool { lock.locked { _reattached } }
 
     var options: StartOptions { lock.locked { _options } }
+
+    /// The stack came up less than `seconds` ago, in this process: its
+    /// transports are bound to the network the device is on now.
+    func startedWithin(_ seconds: TimeInterval) -> Bool {
+        guard let at = lock.locked({ _startedAt }) else { return false }
+        return clock_gettime_nsec_np(CLOCK_MONOTONIC) - at < UInt64(seconds * 1e9)
+    }
 
     /// Start the stack.  Throws `.already` if this instance is running.
     ///
@@ -123,7 +134,10 @@ public final class Medut: @unchecked Sendable {
                 return reattached
             }
 
-            lock.locked { _reattached = reattached }
+            lock.locked {
+                _reattached = reattached
+                _startedAt = reattached ? nil : clock_gettime_nsec_np(CLOCK_MONOTONIC)
+            }
             if reattached { adoptLiveState() }
 
             #if canImport(Network)
@@ -173,6 +187,7 @@ public final class Medut: @unchecked Sendable {
                 accountsByHandle.removeAll()
                 callsByHandle.removeAll()
                 _reattached = false
+                _startedAt = nil
                 return _options.audioSession
             }
             #if os(iOS)

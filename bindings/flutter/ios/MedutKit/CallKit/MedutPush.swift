@@ -55,6 +55,9 @@ public enum MedutPush {
     }
 
     private static let keysLock = NSLock()
+
+    /// A stack younger than this has nothing a network change could have made stale.
+    private static let freshStartSeconds: TimeInterval = 10
     private static var _payloadKeys = PushPayloadKeys()
 
     private enum Kind { case call, cancel, other }
@@ -127,8 +130,15 @@ public enum MedutPush {
     /// added again.  Accounts in a retry loop retry now.
     public static func reachAccounts() {
         // The process may have been suspended on a network that is gone;
-        // coalesced and cheap when nothing changed.
-        try? Medut.shared.network.changed()
+        // coalesced and cheap when nothing changed.  Not when the stack came
+        // up moments ago (the push launched the app): its transports were
+        // bound to this network seconds ago, and the path check that skips a
+        // needless handover only runs once every account is REGISTERED
+        // (src/netmon.c), so the report would flush the transports and re-do
+        // the first REGISTER while the INVITE is on its way.
+        if !Medut.shared.startedWithin(freshStartSeconds) {
+            try? Medut.shared.network.changed()
+        }
         for account in Medut.shared.accounts {
             do {
                 switch account.registrationState {
