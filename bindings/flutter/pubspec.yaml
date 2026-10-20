@@ -46,6 +46,12 @@ flutter:
         pluginClass: MedutPlugin
       ios:
         pluginClass: MedutPlugin
-      # Linux, macOS and Windows are not declared: there the Dart side drives
-      # the C library over dart:ffi (lib/src/ffi_backend.dart), and the app
-      # ships medut.so / medut.dylib / medut.dll or passes Medut.start(libPath:).
+      # Linux and Windows: the Dart side drives the C library over dart:ffi
+      # (lib/src/ffi_backend.dart). The plugin ships the prebuilt core
+      # (linux/medut.so, windows/medut.dll) and Flutter bundles it with the
+      # app. macOS is not declared: the app ships medut.dylib or passes
+      # Medut.start(libPath:).
+      linux:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true

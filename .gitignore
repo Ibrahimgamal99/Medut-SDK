@@ -22,8 +22,12 @@ _deps/
 # ...except the prebuilt Android core the Kotlin binding (and through it the
 # Flutter plugin) ships
 !bindings/kotlin/medut/src/main/jniLibs/**/*.so
+# ...and the desktop cores the Flutter plugin bundles (scripts/build-linux.sh,
+# .github/workflows/windows-dll.yml)
+!bindings/flutter/linux/medut.so
 *.dylib
 *.dll
+!bindings/flutter/windows/medut.dll
 *.lib
 *.exe
 *.out
