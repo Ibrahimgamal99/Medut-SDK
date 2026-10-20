@@ -1,0 +1,134 @@
+name: Windows DLL
+
+# Builds medut.dll (x64, MSVC, OpenSSL and zlib linked in statically through
+# vcpkg's x64-windows-static-md triplet), checks its exports, runs the Flutter
+# plugin's FFI smoke test against it, and publishes it: always as a run
+# artifact, and on request as a commit to the branch that was built.
+#
+# Start it from the Actions tab or with
+#   gh workflow run windows-dll.yml                 # artifact only
+#   gh workflow run windows-dll.yml -f commit=true  # and commit it back
+# The committed copy is bindings/flutter/windows/medut.dll, which the plugin's
+# windows/CMakeLists.txt bundles next to the app's .exe.
+#
+# Linux is built locally with scripts/build-linux.sh, which refreshes
+# bindings/flutter/linux/medut.so, so there is no Linux job here.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit the built medut.dll to bindings/flutter/windows on this branch"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-dll-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dll:
+    runs-on: windows-2022
+    name: medut.dll · FFI smoke test
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\.vcpkg-bincache
+    steps:
+      # The runner image defaults to autocrlf=true; the build's source
+      # patches (cmake/patch-*.cmake) and the committed header expect LF.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      # The image ships vcpkg at C:\vcpkg (VCPKG_INSTALLATION_ROOT). Cache the
+      # built packages per vcpkg revision: OpenSSL alone takes minutes.
+      - name: vcpkg revision
+        id: vcpkg
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          "rev=$(git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-x64-windows-static-md-openssl-zlib-${{ steps.vcpkg.outputs.rev }}
+
+      - name: vcpkg install openssl zlib
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
+            openssl:x64-windows-static-md zlib:x64-windows-static-md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Fetches third_party at the pinned revisions, builds the core, links
+      # dist\windows\x64\medut.dll and stages it in bindings\flutter\windows.
+      - name: Build medut.dll
+        run: ./scripts/build-windows.ps1 -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT
+
+      # The C API must be exported by name (dart:ffi looks every symbol up),
+      # and the DLL may only need system DLLs and the MSVC runtime: OpenSSL
+      # and zlib are linked in, not shipped beside it.
+      - name: Verify exports and imports
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = (Get-Item "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1).FullName
+          $dll = "bindings\flutter\windows\medut.dll"
+
+          $exports = & $dumpbin /nologo /exports $dll | Select-String '\smedut_\w+$' |
+            ForEach-Object { ($_.Line -split '\s+')[-1] }
+          $expected = Select-String -Path include\medut.h -Pattern '^\s*MEDUT_EXPORT\s' | Measure-Object
+          Write-Host "$($exports.Count) medut_* exports (medut.h declares $($expected.Count))"
+          if ($exports.Count -lt $expected.Count) { Write-Error "medut.dll is missing exports"; exit 1 }
+          if ($exports -notcontains 'medut_account_refresh_registration') {
+            Write-Error "medut_account_refresh_registration missing"; exit 1
+          }
+
+          $imports = & $dumpbin /nologo /dependents $dll | Select-String '^\s+\S+\.dll$' |
+            ForEach-Object { $_.Line.Trim() }
+          Write-Host "Imports: $($imports -join ', ')"
+          $foreign = $imports | Where-Object { $_ -match '(?i)^(libssl|libcrypto|zlib)' }
+          if ($foreign) { Write-Error "medut.dll needs $($foreign -join ', ') beside it"; exit 1 }
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # The plugin's Dart FFI backend against the DLL just built: loads it,
+      # starts the stack, registers against a black-hole registrar, detaches
+      # and reattaches, shuts down.
+      - name: FFI smoke test
+        working-directory: bindings/flutter
+        run: |
+          flutter pub get
+          flutter test test/medut_smoke_test.dart
+
+      - name: Upload medut.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dll
+          path: |
+            dist/windows/x64/medut.dll
+            dist/windows/x64/medut.lib
+            dist/windows/x64/include/
+          if-no-files-found: error
+
+      # Opt-in: put the DLL where the plugin bundles it from, so a consumer
+      # pinning this branch gets a core that matches it.
+      - name: Commit medut.dll to the branch
+        if: ${{ inputs.commit }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bindings/flutter/windows/medut.dll
+          if git diff --cached --quiet; then
+            echo "medut.dll unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "windows: refresh medut.dll (CI build of ${GITHUB_SHA::12})"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
