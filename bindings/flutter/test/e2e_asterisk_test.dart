@@ -34,11 +34,11 @@ Future<bool> _portOpen(int port) async {
 }
 
 void main() {
-  final libPath = File('linux/medut.so').absolute.path;
+  final libPath = File('linux/x64/medut.so').absolute.path;
 
   test('UDP + WSS registration, echo call, media stats', () async {
     if (!Platform.isLinux || !File(libPath).existsSync()) {
-      markTestSkipped('needs linux/medut.so (scripts/build-linux.sh)');
+      markTestSkipped('needs linux/x64/medut.so (scripts/build-linux.sh)');
       return;
     }
     if (!await _portOpen(8089)) {

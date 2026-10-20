@@ -1,7 +1,8 @@
-/// Desktop smoke test for the FFI backend against the core the plugin ships:
-/// `linux/medut.so` (scripts/build-linux.sh) or `windows/medut.dll`
-/// (.github/workflows/windows-dll.yml, scripts/build-windows.ps1). Skipped
-/// on other hosts or when the library is missing.
+/// Desktop smoke test for the FFI backend against the core the plugin ships
+/// for this host: `linux/<arch>/medut.so` (scripts/build-linux.sh) or
+/// `windows/<arch>/medut.dll` (.github/workflows/desktop-libs.yml,
+/// scripts/build-windows.ps1). Skipped on other hosts or when the library is
+/// missing.
 ///
 /// Run: flutter test test/medut_smoke_test.dart
 @Timeout(Duration(minutes: 2))
@@ -15,10 +16,15 @@ import 'package:medut/src/ffi_bindings.dart' as c;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final libPath =
-      File(Platform.isWindows ? 'windows/medut.dll' : 'linux/medut.so')
-          .absolute
-          .path;
+  final arch = switch (Abi.current()) {
+    Abi.linuxArm64 || Abi.windowsArm64 => 'arm64',
+    _ => 'x64',
+  };
+  final libPath = File(Platform.isWindows
+          ? 'windows/$arch/medut.dll'
+          : 'linux/$arch/medut.so')
+      .absolute
+      .path;
   final haveLib = (Platform.isLinux || Platform.isWindows) &&
       File(libPath).existsSync();
   // The library may predate medut_account_refresh_registration(); the rest

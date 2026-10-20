@@ -2,11 +2,11 @@ name: Flutter plugin
 
 # The Dart side of the plugin: analyzer and unit tests. The tests fake the
 # native side at the Pigeon channels, so no native build is needed here;
-# test/medut_smoke_test.dart drives the committed linux/medut.so over FFI.
+# test/medut_smoke_test.dart drives the committed linux/x64/medut.so over FFI.
 #
 # The iOS xcframework, MedutKit and the example app are built by
-# ios-xcframework.yml (manual), and the Windows DLL by windows-dll.yml
-# (manual). Linux is built locally with scripts/build-linux.sh. Android is
+# ios-xcframework.yml (manual), and the Windows and Linux arm64 cores by
+# desktop-libs.yml (manual). Linux is built locally with scripts/build-linux.sh. Android is
 # built locally with scripts/build-android.sh; after a native change, run it
 # and then `flutter build apk --debug` in bindings/flutter/example to prove
 # the jniLibs still line up with the Kotlin SDK's JNI layer.
@@ -38,7 +38,7 @@ jobs:
           flutter pub get
           dart analyze lib
 
-      # linux/medut.so links PulseAudio; OpenSSL 3 is already on the image.
+      # linux/x64/medut.so links PulseAudio; OpenSSL 3 is already on the image.
       - name: Runtime libraries for the FFI smoke test
         run: sudo apt-get install -y --no-install-recommends libpulse0
 
