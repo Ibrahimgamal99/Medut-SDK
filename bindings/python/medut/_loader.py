@@ -26,6 +26,18 @@ from cffi import FFI
 # libwebrtc-audio-processing-1 is intentionally NOT here — the shim in
 # Medut handles it via dlopen; missing = AEC unavailable, not a crash.
 _REQUIRED_LINUX_LIBS = {
+    "libpulse.so.0": {
+        "debian": "apt install libpulse0",
+        "fedora": "dnf install pulseaudio-libs",
+        "arch":   "pacman -S libpulse",
+        "suse":   "zypper install libpulse0",
+    },
+}
+
+# Only a local build (scripts/build-linux.sh) links the system OpenSSL 3; the
+# published wheels carry the portable core with OpenSSL linked in. So these
+# are not checked up front, only named when loading the library fails.
+_LOCAL_BUILD_LINUX_LIBS = {
     "libssl.so.3": {
         "debian": "apt install libssl3",
         "fedora": "dnf install openssl-libs",
@@ -38,22 +50,17 @@ _REQUIRED_LINUX_LIBS = {
         "arch":   "pacman -S openssl",
         "suse":   "zypper install libopenssl3",
     },
-    "libpulse.so.0": {
-        "debian": "apt install libpulse0",
-        "fedora": "dnf install pulseaudio-libs",
-        "arch":   "pacman -S libpulse",
-        "suse":   "zypper install libpulse0",
-    },
 }
 
-# medut.dll is built with x64-windows-static-md — OpenSSL and zlib are
+# medut.dll is built with <arch>-windows-static-md — OpenSSL and zlib are
 # statically embedded, but the MSVC runtime is dynamically linked and may
 # be absent on a clean Windows Server install.
+_WINDOWS_ARCH = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
 _REQUIRED_WINDOWS_LIBS = {
     "vcruntime140.dll": (
         "Microsoft Visual C++ Redistributable is not installed.\n"
-        "    → winget install Microsoft.VCRedist.2022.x64\n"
-        "    or download from https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        f"    → winget install Microsoft.VCRedist.2022.{_WINDOWS_ARCH}\n"
+        f"    or download from https://aka.ms/vs/17/release/vc_redist.{_WINDOWS_ARCH}.exe"
     ),
 }
 
@@ -78,10 +85,11 @@ def _distro_family():
     return None
 
 
-def _check_linux_deps():
+def _missing_linux_libs(libs):
+    """Install hints for the libraries in *libs* that cannot be loaded."""
     missing = []
     seen_pkgs = set()  # deduplicate libs that share the same package (libssl3/libcrypto)
-    for lib, cmds in _REQUIRED_LINUX_LIBS.items():
+    for lib, cmds in libs.items():
         try:
             ctypes.CDLL(lib)
         except OSError:
@@ -94,6 +102,11 @@ def _check_linux_deps():
                     missing.append(f"  {lib}\n    → {cmd}")
                 else:
                     missing.append(f"  {lib}\n    → install via your distro's package manager")
+    return missing
+
+
+def _check_linux_deps():
+    missing = _missing_linux_libs(_REQUIRED_LINUX_LIBS)
     if missing:
         raise ImportError(
             "Medut: missing required system libraries.\n\n"
@@ -131,11 +144,11 @@ def _lib_names():
 def _dist_candidates():
     machine = platform.machine().lower()
     if sys.platform == "win32":
-        yield os.path.join(_repo_root, "dist", "windows", "x64", "medut.dll")
+        yield os.path.join(_repo_root, "dist", "windows", _WINDOWS_ARCH, "medut.dll")
     elif sys.platform == "darwin":
         yield os.path.join(_repo_root, "dist", "macos", "universal", "medut.dylib")
     else:
-        arch = "arm64" if machine in ("aarch64", "arm64") else "x86_64"
+        arch = "aarch64" if machine in ("aarch64", "arm64") else "x86_64"
         yield os.path.join(_repo_root, "dist", "linux", arch, "medut.so")
 
 
@@ -178,6 +191,18 @@ if sys.platform == "linux":
 elif sys.platform == "win32":
     _check_windows_deps()
 
-lib = ffi.dlopen(_find_lib())
+try:
+    lib = ffi.dlopen(_find_lib())
+except OSError as e:
+    missing = []
+    if sys.platform == "linux":
+        missing = _missing_linux_libs(
+            {k: v for k, v in _LOCAL_BUILD_LINUX_LIBS.items() if k in str(e)})
+    if missing:
+        raise ImportError(
+            "Medut: missing required system libraries.\n\n"
+            + "\n".join(missing)
+        ) from e
+    raise
 
 __all__ = ["ffi", "lib"]

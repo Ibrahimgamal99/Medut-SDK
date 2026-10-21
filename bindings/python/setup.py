@@ -1,13 +1,13 @@
-import sys
 from setuptools import setup, Distribution
-from wheel.bdist_wheel import bdist_wheel
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel  # setuptools >= 70.1
+except ImportError:
+    from wheel.bdist_wheel import bdist_wheel
 
-if sys.platform == "win32":
-    native_lib = ["medut.dll"]
-elif sys.platform == "darwin":
-    native_lib = ["medut.dylib"]
-else:
-    native_lib = ["medut.so"]
+# Whichever core is in medut/ goes in the wheel; build.sh / build.ps1 and
+# .github/workflows/pypi.yml copy exactly one there. Listing all three
+# lets one host build every platform's wheel.
+native_lib = ["medut.so", "medut.dll", "medut.dylib"]
 
 
 class BinaryDistribution(Distribution):

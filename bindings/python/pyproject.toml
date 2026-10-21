@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel>=0.40", "cffi>=1.15"]
+requires = ["setuptools>=77", "cffi>=1.15"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,12 +7,11 @@ name = "medut"
 version = "1.0.0"
 description = "Python binding for Medut — SIP/WebRTC/NAT SDK"
 readme = "README.md"
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
 requires-python = ">=3.9"
 dependencies = ["cffi>=1.15"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: BSD License",
   "Operating System :: POSIX :: Linux",
   "Operating System :: Microsoft :: Windows",
   "Topic :: Communications :: Telephony",
@@ -20,15 +19,15 @@ classifiers = [
   "Intended Audience :: Developers",
 ]
 
-# Required system libraries on Linux (DT_NEEDED in medut.so):
-#   libssl3 / libcrypto (OpenSSL 3):
-#     Ubuntu/Debian:  apt install libssl3
-#     Fedora/RHEL:    dnf install openssl-libs
-#     Arch:           pacman -S openssl
+# Required system library on Linux (DT_NEEDED in medut.so):
 #   libpulse0 (PulseAudio):
 #     Ubuntu/Debian:  apt install libpulse0
 #     Fedora/RHEL:    dnf install pulseaudio-libs
 #     Arch:           pacman -S libpulse
+#
+# The published wheels (.github/workflows/pypi.yml) carry the portable core:
+# OpenSSL is linked in and it runs on glibc 2.17+. A local build.sh wheel
+# links the system OpenSSL 3 instead (libssl3 / openssl-libs / openssl).
 #
 # libwebrtc-audio-processing-1 is optional (AEC_WEBRTC mode only).
 # Medut raises ImportError with the exact install command if a required

@@ -27,18 +27,20 @@ pip install medut
 
 ## Requirements
 
-**Linux** — two runtime libraries required:
+Wheels are published for Linux (x86_64, aarch64) and Windows (x64, ARM64), Python 3.9+.
+
+**Linux** — glibc 2.17 or newer (CentOS 7 and later) and one runtime library:
 
 ```bash
-sudo apt install libssl3 libpulse0                    # Ubuntu/Debian
-sudo dnf install openssl-libs pulseaudio-libs         # Fedora/RHEL
-sudo pacman -S openssl libpulse                       # Arch
+sudo apt install libpulse0                            # Ubuntu/Debian
+sudo dnf install pulseaudio-libs                      # Fedora/RHEL
+sudo pacman -S libpulse                               # Arch
 ```
 
-> `import Medut` prints the exact install command if either is missing.  
+> `import medut` prints the exact install command if it is missing. OpenSSL and opus are statically embedded.  
 > `libwebrtc-audio-processing-1` is optional — enables `AEC_WEBRTC` full-duplex mode; the SDK works without it.
 
-**Windows** — only the [Visual C++ Redistributable 2015–2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) required. OpenSSL, zlib, and opus are statically embedded.
+**Windows** — only the Visual C++ Redistributable 2015–2022 ([x64](https://aka.ms/vs/17/release/vc_redist.x64.exe), [ARM64](https://aka.ms/vs/17/release/vc_redist.arm64.exe)) required. OpenSSL, zlib, and opus are statically embedded.
 ---
 
 ## Quick start
