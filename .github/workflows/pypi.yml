@@ -65,11 +65,15 @@ jobs:
           fi
 
       # The same pipeline as build.sh, so a published wheel's cffi view of
-      # the C API cannot drift from a local one. Its awk needs gawk.
+      # the C API cannot drift from a local one. Its awk needs gawk. It must
+      # also reproduce the committed header exactly: 1.0.0 shipped one this
+      # runner's gcc had widened (every bool to int), which no check saw.
       - name: Regenerate the cffi header
         run: |
           sudo apt-get install -y --no-install-recommends gawk
           bash bindings/python/gen_header.sh
+          git diff --exit-code bindings/python/medut/_medut_clean.h \
+            || { echo "::error::_medut_clean.h regenerated differently on this runner than the committed copy"; exit 1; }
 
       - uses: actions/download-artifact@v4
         with:
@@ -149,9 +153,19 @@ jobs:
           pip install --no-index --find-links wheels medut
 
       # Loads the bundled core through the package's own loader and calls
-      # into it.
+      # into it. The loader also checks medut_config_t against the core.
       - name: Import
         run: python -c "import medut; from medut._loader import ffi, lib, _find_lib; print(_find_lib()); print('medut', ffi.string(lib.medut_version()).decode())"
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: bindings/python/ci
+          path: src
+
+      # medut_init() with the config the binding builds: the call 1.0.0's
+      # wheels could never make.
+      - name: Init
+        run: python src/bindings/python/ci/init_check.py
 
   publish:
     needs: test
