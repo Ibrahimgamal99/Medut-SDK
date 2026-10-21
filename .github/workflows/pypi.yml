@@ -13,26 +13,18 @@ name: PyPI
 # anything is uploaded.
 #
 # Release by pushing a tag that matches bindings/python/pyproject.toml:
-#   git tag v1.0.1 && git push origin v1.0.1          # → pypi.org
-# A manual run uploads to TestPyPI unless told otherwise:
-#   gh workflow run pypi.yml                          # → test.pypi.org
-#   gh workflow run pypi.yml --ref v1.0.1 -f repository=pypi
-# pypi.org only accepts a run on a tag.
+#   git tag v1.0.1 && git push origin v1.0.1
+# A manual run is a dry run: it builds and tests the wheels, leaves them as
+# the run's "wheels" artifact, and uploads nothing.
+#   gh workflow run pypi.yml
 #
-# Uploads use Trusted Publishing, so there is no token to store. Once, on
-# pypi.org and on test.pypi.org: add a GitHub publisher for this repository,
-# workflow pypi.yml, environment "pypi" (resp. "testpypi"); and create those
-# two environments under the repository's Settings → Environments.
+# Uploads use Trusted Publishing, so there is no token to store. pypi.org has
+# a GitHub publisher for this repository, workflow pypi.yml, environment
+# "pypi", which exists under the repository's Settings → Environments.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      repository:
-        description: "Where to upload the wheels"
-        type: choice
-        options: [testpypi, pypi]
-        default: testpypi
 
 permissions:
   contents: read
@@ -40,9 +32,6 @@ permissions:
 concurrency:
   group: pypi-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  TARGET: ${{ github.event_name == 'push' && 'pypi' || inputs.repository }}
 
 jobs:
   cores:
@@ -69,14 +58,9 @@ jobs:
       - name: Check the version
         run: |
           VERSION=$(python -c 'import tomllib; print(tomllib.load(open("bindings/python/pyproject.toml", "rb"))["project"]["version"])')
-          echo "medut ${VERSION} → ${TARGET}"
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
-              echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
-              exit 1
-            fi
-          elif [ "${TARGET}" = pypi ]; then
-            echo "::error::pypi.org only takes a run on a tag (v${VERSION})"
+          echo "medut ${VERSION}"
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
             exit 1
           fi
 
@@ -171,11 +155,12 @@ jobs:
 
   publish:
     needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    name: Upload
+    name: Upload to PyPI
     environment:
-      name: ${{ github.event_name == 'push' && 'pypi' || inputs.repository }}
-      url: ${{ (github.event_name == 'push' || inputs.repository == 'pypi') && 'https://pypi.org/project/medut/' || 'https://test.pypi.org/project/medut/' }}
+      name: pypi
+      url: https://pypi.org/project/medut/
     permissions:
       id-token: write   # Trusted Publishing
     steps:
@@ -187,7 +172,3 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
-          repository-url: ${{ env.TARGET == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
-          # TestPyPI keeps every upload: a rerun of the same version there
-          # should not fail. pypi.org must never silently skip one.
-          skip-existing: ${{ env.TARGET == 'testpypi' }}
