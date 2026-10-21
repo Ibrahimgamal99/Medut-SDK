@@ -15,6 +15,9 @@ name: Desktop libraries
 # the plugin's CMakeLists bundle the one matching the app's target. A library
 # whose job failed is not committed.
 #
+# pypi.yml also runs it, as a reusable workflow, to build the cores its
+# wheels carry (never committing them).
+#
 # scripts/build-linux.sh (no MEDUT_PORTABLE) is for local development: it
 # links the system OpenSSL and leaves the committed libraries alone.
 on:
@@ -22,6 +25,11 @@ on:
     inputs:
       commit:
         description: "Commit the built libraries to bindings/flutter/{windows,linux}/<arch> on this branch"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      commit:
         type: boolean
         default: false
 

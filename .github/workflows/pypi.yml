@@ -1,0 +1,193 @@
+name: PyPI
+
+# Publishes the Python binding (bindings/python) as one wheel per desktop
+# core: manylinux_2_17 x86_64 and aarch64, win_amd64 and win_arm64. Each is
+# tagged py3-none-<platform>: the package reaches medut.so / medut.dll through
+# cffi's ABI mode, so one wheel serves every Python 3.9+. No sdist: without a
+# core it cannot work, and building one needs the whole native toolchain.
+#
+# The cores come from desktop-libs.yml, run here on the commit being
+# released, so a wheel never carries a stale library and every core has
+# passed the same checks as the Flutter plugin's copies. Each wheel is then
+# installed from the built files and imported on its own platform before
+# anything is uploaded.
+#
+# Release by pushing a tag that matches bindings/python/pyproject.toml:
+#   git tag v1.0.1 && git push origin v1.0.1          # → pypi.org
+# A manual run uploads to TestPyPI unless told otherwise:
+#   gh workflow run pypi.yml                          # → test.pypi.org
+#   gh workflow run pypi.yml --ref v1.0.1 -f repository=pypi
+# pypi.org only accepts a run on a tag.
+#
+# Uploads use Trusted Publishing, so there is no token to store. Once, on
+# pypi.org and on test.pypi.org: add a GitHub publisher for this repository,
+# workflow pypi.yml, environment "pypi" (resp. "testpypi"); and create those
+# two environments under the repository's Settings → Environments.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Where to upload the wheels"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TARGET: ${{ github.event_name == 'push' && 'pypi' || inputs.repository }}
+
+jobs:
+  cores:
+    name: Cores
+    uses: ./.github/workflows/desktop-libs.yml
+    with:
+      commit: false
+    # desktop-libs.yml asks for contents: write for its commit job, skipped
+    # here; a called workflow may not ask for more than its caller grants.
+    permissions:
+      contents: write
+
+  wheels:
+    needs: cores
+    runs-on: ubuntu-24.04
+    name: Build wheels
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the version
+        run: |
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open("bindings/python/pyproject.toml", "rb"))["project"]["version"])')
+          echo "medut ${VERSION} → ${TARGET}"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
+              exit 1
+            fi
+          elif [ "${TARGET}" = pypi ]; then
+            echo "::error::pypi.org only takes a run on a tag (v${VERSION})"
+            exit 1
+          fi
+
+      # The same pipeline as build.sh, so a published wheel's cffi view of
+      # the C API cannot drift from a local one. Its awk needs gawk.
+      - name: Regenerate the cffi header
+        run: |
+          sudo apt-get install -y --no-install-recommends gawk
+          bash bindings/python/gen_header.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*
+          path: ${{ runner.temp }}/cores
+
+      # setup.py packs whichever core sits in medut/, and the wheel is built
+      # on this host, so each one is retagged for the platform it carries.
+      # Not auditwheel: libpulse must stay the system's (it talks to the
+      # running sound server), and the core already passed the glibc 2.17
+      # check in desktop-libs.yml.
+      - name: Build wheels
+        working-directory: bindings/python
+        run: |
+          pip install build wheel twine
+          declare -A PLATFORM=(
+            [linux-x64]=manylinux_2_17_x86_64.manylinux2014_x86_64
+            [linux-arm64]=manylinux_2_17_aarch64.manylinux2014_aarch64
+            [windows-x64]=win_amd64
+            [windows-arm64]=win_arm64
+          )
+          OUT="${RUNNER_TEMP}/wheels"
+          mkdir -p "${OUT}"
+          for core in "${!PLATFORM[@]}"; do
+            rm -rf build dist *.egg-info medut/medut.so medut/medut.dll medut/medut.dylib
+            cp "${RUNNER_TEMP}/cores/plugin-${core}"/medut.* medut/
+            chmod 755 medut/medut.*   # upload-artifact drops the exec bit
+            python -m build --wheel --outdir dist
+            python -m wheel tags --remove --platform-tag "${PLATFORM[$core]}" dist/*.whl
+            mv dist/*.whl "${OUT}/"
+          done
+          ls -l "${OUT}"
+          [ "$(ls "${OUT}" | wc -l)" -eq 4 ] || { echo "::error::expected 4 wheels"; exit 1; }
+          twine check --strict "${OUT}"/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: ${{ runner.temp }}/wheels/*.whl
+          if-no-files-found: error
+
+  # pip picks the wheel itself from the four built, so a wrong platform tag
+  # fails here too.
+  test:
+    needs: wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+          - name: Windows x64
+            runner: windows-2022
+          - name: Windows arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    name: Test wheel · ${{ matrix.name }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Runtime libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends libpulse0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: wheels
+
+      - name: Install
+        run: |
+          pip install cffi
+          pip install --no-index --find-links wheels medut
+
+      # Loads the bundled core through the package's own loader and calls
+      # into it.
+      - name: Import
+        run: python -c "import medut; from medut._loader import ffi, lib, _find_lib; print(_find_lib()); print('medut', ffi.string(lib.medut_version()).decode())"
+
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    name: Upload
+    environment:
+      name: ${{ github.event_name == 'push' && 'pypi' || inputs.repository }}
+      url: ${{ (github.event_name == 'push' || inputs.repository == 'pypi') && 'https://pypi.org/project/medut/' || 'https://test.pypi.org/project/medut/' }}
+    permissions:
+      id-token: write   # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: ${{ env.TARGET == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          # TestPyPI keeps every upload: a rerun of the same version there
+          # should not fail. pypi.org must never silently skip one.
+          skip-existing: ${{ env.TARGET == 'testpypi' }}
