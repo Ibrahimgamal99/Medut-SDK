@@ -205,4 +205,34 @@ except OSError as e:
         ) from e
     raise
 
+
+def _check_abi():
+    """Fail the import if _medut_clean.h does not match the loaded library.
+
+    medut_init() rejects a config whose fields sit where the library does not
+    expect them with a bare -1, so a mismatched header (medut 1.0.0's wheels)
+    would otherwise surface only as an unexplained init failure. The struct
+    size the library writes catches most drift; a few fields set to protocol
+    constants catch a shift that padding happens to hide. The buffer is padded
+    so a library struct larger than cffi's cannot be overrun.
+    """
+    size = ffi.sizeof("medut_config_t")
+    buf = ffi.new("char[]", size + 4096)
+    cfg = ffi.cast("medut_config_t *", buf)
+    lib.medut_config_init(cfg)
+    if cfg.struct_size != size:
+        problem = f"the library's medut_config_t is {cfg.struct_size} bytes, the binding's {size}"
+    elif (cfg.sip_t1_ms, cfg.sip_t2_ms, cfg.session_min_se_s) != (500, 4000, 90):
+        problem = "medut_config_t fields are at different offsets in the library and the binding"
+    else:
+        return
+    raise ImportError(
+        f"Medut: _medut_clean.h does not match {_find_lib()}: {problem}.\n"
+        "Upgrade medut (1.0.0's wheels carry a mismatched header), or regenerate it "
+        "with bindings/python/gen_header.sh from the checkout the library was built from."
+    )
+
+
+_check_abi()
+
 __all__ = ["ffi", "lib"]
