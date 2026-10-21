@@ -118,7 +118,7 @@ dependencies are baked in, so nothing extra is needed at runtime.
 |---|---|---|
 | C | `include/medut.h` | the entire API surface |
 | C++ | `bindings/cpp/medut.hpp` | header-only RAII wrapper |
-| Python | `bindings/python/` | cffi + event decorators |
+| Python | `bindings/python/` · [PyPI `medut`](https://pypi.org/project/medut/) | cffi + event decorators |
 | Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API; Telecom, FCM wake-up, encrypted account store |
 | Swift (iOS) | `bindings/swift/` | Swift package, async event stream; CallKit, PushKit wake-up, Keychain account store |
 | Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs on mobile; `dart:ffi` on desktop |
@@ -147,6 +147,17 @@ first use, and move an existing checkout to the pin when it changes.
 ## Quick start
 
 ### Python
+
+```bash
+pip install medut
+```
+
+Wheels for Linux x86_64 · aarch64 (glibc 2.17+) and Windows x64 · ARM64,
+Python 3.9+, with the core bundled. On Linux the only runtime dependency is
+PulseAudio's client library (`libpulse0`); on Windows, the Visual C++
+Redistributable.
+
+From a checkout, to run against your own build of the core:
 
 ```bash
 bash bindings/python/build.sh
