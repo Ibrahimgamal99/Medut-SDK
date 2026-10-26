@@ -104,7 +104,7 @@ medut_account_config_t lan_cfg = {
 | `stun_server` | STUN server address |
 | `turn_server` / `turn_user` / `turn_pass` | TURN relay |
 | `outbound` | Outbound proxy |
-| `verify_tls` | TLS certificate verification |
+| `verify_tls` / `verify_tls_set` | TLS certificate verification for this account (accounts on the same server that disagree get it verified) |
 
 ---
 

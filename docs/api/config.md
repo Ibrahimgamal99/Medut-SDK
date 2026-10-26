@@ -50,7 +50,7 @@ server_url = "wss://pbx.example.com:8089/ws"
 | `ca_cert_path` | `const char *` | NULL | CA bundle path. NULL = platform trust store ([see below](../guides/tls_wss.md#certificate-trust-store)). |
 | `client_cert` | `const char *` | NULL | Client certificate PEM path. |
 | `client_key` | `const char *` | NULL | Client private key PEM path. |
-| `verify_server` | `bool` | true | Verify server certificate (SIP/WSS over TLS and `turns:` TURN servers). |
+| `verify_server` | `bool` | true | Verify server certificate (SIP/WSS over TLS and `turns:` TURN servers). An account's `verify_tls` / `verify_tls_set` overrides it for SIP and WSS. |
 | `sni_hostname` | `const char *` | NULL | SNI override (for reverse proxy). NULL = derive from URL. |
 | `user_agent` | `const char *` | NULL | `User-Agent` header value. |
 
@@ -294,7 +294,8 @@ without tearing the stack down.
 | `rtcp_mux_set` | `bool` | No | false = inherit the global `rtcp_mux`; true = use the field above |
 | `outbound` | `const char *` | No | Outbound route override; NULL = auto-derived from server |
 | `outbound_proxy` | `const char *` | No | NULL = auto-derived from server |
-| `verify_tls` | `bool` | No | false = skip TLS cert check |
+| `verify_tls` | `bool` | No | Check the server's TLS certificate (SIP over TLS, WSS); only read when `verify_tls_set` is true |
+| `verify_tls_set` | `bool` | No | false = follow the global `verify_server`; true = use the field above. Accounts that reach the same server and disagree get it verified |
 | `push_provider` | `medut_push_provider_t` | No | `NONE`, `APNS`, `FCM` — see [Accounts → Push notifications](accounts.md#push-notifications) |
 | `push_token` | `const char *` | No | Device token (APNs hex, FCM registration token) |
 | `push_param` | `const char *` | No | `pn-param` value (APNs topic / FCM sender id) |

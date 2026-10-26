@@ -8,6 +8,19 @@ All notable changes to Medut are documented here.
 
 ### Fixed
 
+- **Per-account TLS verification works.** `medut_account_config_t.verify_tls`
+  and the bindings' `verifyTls` were passed down and ignored: only the
+  global `verify_server` counted. An account now overrides it either way
+  for SIP over TLS and WSS, via the new `verify_tls_set` (false = follow the
+  global, so zero-filled configs keep checking). The decision is made per
+  server: accounts that reach the same host and disagree get it verified,
+  and a connection opened under one decision is never reused for the other.
+  `verifyTls` is now optional in Kotlin, Flutter and Swift (`verifyTLS`),
+  null following `verifyServer`; Python takes `verify_tls=` on
+  `create_account()`. Kotlin's saved accounts use a new key, since the old
+  one held `true` for every account. TURN over TLS keeps following the
+  global setting.
+
 - **A rejected TLS certificate is reported as one.** SIP over TLS and WSS
   reported a server certificate that failed verification (wrong host name,
   expired, untrusted) as `MEDUT_ERR_TRANSPORT` / "Protocol error [71]" and

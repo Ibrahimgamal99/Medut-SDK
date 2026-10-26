@@ -202,7 +202,10 @@ acfg.turn_server  = "turn:turn.example.com:3478";
 acfg.turn_user    = "alice";
 acfg.turn_pass    = "turn_secret";
 
-acfg.verify_tls   = true;   /* false = skip cert check (testing only) */
+/* Per-account certificate check; leave verify_tls_set false to follow the
+ * global verify_server.  false = skip the check (testing only). */
+acfg.verify_tls     = true;
+acfg.verify_tls_set = true;
 
 /* Codec selection — string names, aliases accepted.
  * Omit to use the global cfg.audio_codecs list. */
@@ -255,6 +258,7 @@ acfg.turn_server  = "turn:turn.example.com:3478";
 acfg.turn_user    = "alice";
 acfg.turn_pass    = "turn_secret";
 acfg.verify_tls   = true;
+acfg.verify_tls_set = true;
 std::strcpy(acfg.audio_codec_names[0], "ulaw");
 std::strcpy(acfg.audio_codec_names[1], "alaw");
 std::strcpy(acfg.audio_codec_names[2], "opus");
