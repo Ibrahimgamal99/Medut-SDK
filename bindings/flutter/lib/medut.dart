@@ -59,7 +59,8 @@ part 'src/types.dart';
 /// [code] is the SDK's error code name — `NOT_RUNNING`, `CALL_ENDED`,
 /// `ACCOUNT_DESTROYED`, `AUTHENTICATION`, `TIMEOUT`, `INVALID_ARGUMENT`,
 /// `INVALID_STATE`, `SERVER_ERROR`, `WEBSOCKET_REJECTED`, `ALREADY`,
-/// `FORBIDDEN`, `DNS`, `TRANSPORT`, `OUT_OF_MEMORY`, `SYSTEM`, `UNKNOWN`, the
+/// `FORBIDDEN`, `TLS_CERTIFICATE`, `DNS`, `TRANSPORT`, `OUT_OF_MEMORY`,
+/// `SYSTEM`, `UNKNOWN`, the
 /// same names on every platform — plus `UNSUPPORTED` for a feature the
 /// platform does not have (see [Medut.pushWake]).  [rawValue] is the C
 /// return value: a negative `MEDUT_ERR_*`, a positive errno, or 0 when the

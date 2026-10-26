@@ -61,6 +61,7 @@ void main() {
     expect(IceHandover.failFast.raw,
         c.medut_ice_handover_t.MEDUT_ICE_HANDOVER_FAIL_FAST);
     expect(MedutError.forbidden.raw, c.medut_error_t.MEDUT_ERR_FORBIDDEN);
+    expect(MedutError.tlsCertificate.raw, c.medut_error_t.MEDUT_ERR_TLS_CERT);
   });
 
   test('register failure path delivers owned events safely', () async {

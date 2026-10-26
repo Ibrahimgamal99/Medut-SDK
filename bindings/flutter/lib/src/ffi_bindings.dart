@@ -1992,6 +1992,15 @@ abstract class medut_error_t {
   /// itself was rejected.  Appended at the end of the enum so an app
   /// built against an older header keeps its own numbering.
   static const int MEDUT_ERR_FORBIDDEN = -11;
+
+  /// The server's TLS certificate failed verification — it names another
+  /// host, has expired, or does not chain to a trusted root.  Covers SIP
+  /// over TLS and WSS.  The event's error_str carries OpenSSL's reason
+  /// ("hostname mismatch", ...).  A registration that hits this reports
+  /// FAILED rather than retrying, since the certificate will be the same
+  /// next time; a network change still gets one fresh attempt, which is
+  /// what clears a captive portal intercepting the connection.
+  static const int MEDUT_ERR_TLS_CERT = -12;
 }
 
 /// ── Call states ────────────────────────────────────────────────────────────

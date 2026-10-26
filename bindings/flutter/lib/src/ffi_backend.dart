@@ -58,6 +58,8 @@ String errorCodeName(int rc) {
       return 'ALREADY';
     case -11:
       return 'FORBIDDEN';
+    case -12:
+      return 'TLS_CERTIFICATE';
     default:
       return 'UNKNOWN';
   }
