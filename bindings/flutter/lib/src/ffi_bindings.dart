@@ -3577,7 +3577,10 @@ final class medut_account_config_t extends ffi.Struct {
   /// true = use verify_tls above for this account, either way round.
   ///
   /// Decided per server: accounts that reach the same host share its
-  /// connections, so when they disagree the server is verified.  TURN
+  /// connections, so when they disagree the server is verified.  A
+  /// request to an address no account names — a call's in-dialog
+  /// requests, when the PBX gives its IP address as Contact — gets the
+  /// decision made for the server at that address.  TURN
   /// over TLS (`turns:`) keeps following the global setting.  Turning
   /// the check off lets anyone on the path impersonate the server; prefer
   /// a server_url the certificate covers, or ca_cert_path for a private

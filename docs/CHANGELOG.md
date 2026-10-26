@@ -8,6 +8,14 @@ All notable changes to Medut are documented here.
 
 ### Fixed
 
+- **Calls on an account with `verify_tls` off no longer fail mid-call.**
+  The per-account decision went by host name, and a call's in-dialog
+  requests go to the PBX's Contact — usually its IP address, which no
+  account names — so they fell back to the global check and were rejected
+  ("IP address mismatch"), also when a handover re-INVITEd the call. The
+  decision made for a server's name is now recorded for the address it
+  reached, and requests to that address use it.
+
 - **Per-account TLS verification works.** `medut_account_config_t.verify_tls`
   and the bindings' `verifyTls` were passed down and ignored: only the
   global `verify_server` counted. An account now overrides it either way
