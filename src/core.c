@@ -439,13 +439,14 @@ int medut_init(const medut_config_t *cfg)
 
 	{
 		struct tls *tls = uag_tls();
-		if (tls) {
-			if (g_bsdk.cfg.ca_cert_path)
-				tls_add_ca(tls, g_bsdk.cfg.ca_cert_path);
-			if (!g_bsdk.cfg.verify_server)
-				tls_disable_verify_server(tls);
-		}
+		if (tls && g_bsdk.cfg.ca_cert_path)
+			tls_add_ca(tls, g_bsdk.cfg.ca_cert_path);
 	}
+
+	/* verify_server is applied per connection from here on, so that an
+	 * account's own verify_tls can override it either way; the shared
+	 * struct tls is left verifying (see src/timers.c). */
+	bsdk_account_tls_verify_init();
 
 	BSDK_TRACE("[bsdk] step 8: event_init\n");
 	err = bsdk_event_init();

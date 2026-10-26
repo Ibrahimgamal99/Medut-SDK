@@ -505,6 +505,69 @@ void bsdk_account_push_init(void)
 	bsdk_reg_cparams_h = reg_cparams_handler;
 }
 
+/* ── Per-account server certificate verification ─────────────────────────
+ *
+ * libre asks this, on re_main, before it picks or opens a TLS or WSS
+ * connection (cmake/patch-re-sources.cmake, sip_transp_set_verify_handler).
+ * It can only say which host the connection is for: the message is written
+ * after the connection is chosen.  So the accounts that send to that host
+ * decide — each by its own verify_tls when verify_tls_set, else the global
+ * verify_server — and when they disagree the server is verified, since an
+ * account that asked for the check must not lose it to one that did not.
+ * A host no account sends to follows the global setting.
+ *
+ * Walked without acct_lock for the reason reg_cparams_handler() gives. */
+static bool account_sends_to(const struct medut_account *acct,
+                             const char *host)
+{
+	const struct account *acc = ua_account(acct->ua);
+	const char *ob = account_outbound(acc, 0);
+	const struct uri *luri;
+
+	if (ob) {
+		struct pl pl;
+		struct uri uri;
+
+		pl_set_str(&pl, ob);
+		if (!uri_decode(&uri, &pl))
+			return 0 == pl_strcasecmp(&uri.host, host);
+	}
+
+	luri = account_luri(acc);
+	return luri && 0 == pl_strcasecmp(&luri->host, host);
+}
+
+static void tls_verify_handler(const char *host, bool *verify, void *arg)
+{
+	struct le *le;
+	bool matched = false;
+	(void)arg;
+
+	*verify = g_bsdk.cfg.verify_server;
+
+	if (!str_isset(host))
+		return;
+
+	LIST_FOREACH(&g_bsdk.accounts, le) {
+		const struct medut_account *acct = le->data;
+		bool want;
+
+		if (acct->destroyed || !acct->ua || !account_sends_to(acct, host))
+			continue;
+
+		want = acct->cfg.verify_tls_set ? acct->cfg.verify_tls
+		                                : g_bsdk.cfg.verify_server;
+
+		*verify  = matched ? (*verify || want) : want;
+		matched  = true;
+	}
+}
+
+void bsdk_account_tls_verify_init(void)
+{
+	sip_transp_set_verify_handler(uag_sip(), tls_verify_handler, NULL);
+}
+
 void bsdk_account_push_settled(struct medut_account *acct)
 {
 	if (!acct || !acct->pn_refresh || !acct->ua || !acct->reg_wanted)

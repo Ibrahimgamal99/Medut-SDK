@@ -55,8 +55,11 @@ void bsdk_timers_configure(const medut_config_t *cfg)
 		str_ncpy(c->sip.cert, cfg->client_cert,
 		         sizeof(c->sip.cert));
 
-	/* Server certificate verification */
-	c->sip.verify_server = cfg->verify_server;
+	/* Server certificate verification: always on at the shared struct tls,
+	 * which would otherwise switch it off for every account.  The global
+	 * cfg->verify_server and each account's verify_tls are applied per
+	 * connection instead (bsdk_account_tls_verify_init()). */
+	c->sip.verify_server = true;
 
 	/* IPv6 preference */
 	c->net.af = cfg->prefer_ipv6 ? AF_INET6 : AF_UNSPEC;
