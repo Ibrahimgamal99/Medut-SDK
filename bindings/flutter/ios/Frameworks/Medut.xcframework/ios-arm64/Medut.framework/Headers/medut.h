@@ -1422,7 +1422,7 @@ typedef struct {
 
 	const char          *outbound;   /* NULL = auto-derived from server */
 	const char          *outbound_proxy; /* alias for outbound; NULL = auto */
-	bool                 verify_tls; /* false = skip TLS cert verification */
+	bool                 verify_tls; /* used when verify_tls_set is true */
 
 	/* ── Push notifications ─────────────────────────────────────────────── */
 
@@ -1503,6 +1503,20 @@ typedef struct {
 	const medut_ice_server_t     *ice_servers;
 	uint32_t                        ice_server_count;
 	medut_ice_transport_policy_t  ice_transport_policy;
+
+	/**
+	 * Per-account server certificate check for SIP over TLS and WSS.
+	 * false (default) = follow the global medut_config_t.verify_server;
+	 * true = use verify_tls above for this account, either way round.
+	 *
+	 * Decided per server: accounts that reach the same host share its
+	 * connections, so when they disagree the server is verified.  TURN
+	 * over TLS (`turns:`) keeps following the global setting.  Turning
+	 * the check off lets anyone on the path impersonate the server; prefer
+	 * a server_url the certificate covers, or ca_cert_path for a private
+	 * CA.
+	 */
+	bool                            verify_tls_set;
 
 } medut_account_config_t;
 
