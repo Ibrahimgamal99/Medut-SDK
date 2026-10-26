@@ -317,8 +317,11 @@ jobs:
           # workflow (desktop-libs.yml / ios-xcframework.yml) commits to it
           # too, and a run started alongside this one pushes first. They
           # touch different files, so rebasing onto it always applies.
+          # --autostash: a build step can leave tracked files modified (the
+          # iOS job builds the example app with pod install), and a plain
+          # rebase refuses to run over them.
           for attempt in 1 2 3; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" &&
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" &&
               git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
             sleep 10
           done
