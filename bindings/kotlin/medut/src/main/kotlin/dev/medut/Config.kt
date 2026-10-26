@@ -195,7 +195,10 @@ data class AccountConfig(
     /** Empty inherits the stack-wide list. */
     val iceServers: List<IceServer> = emptyList(),
     val iceTransportPolicy: IceTransportPolicy = IceTransportPolicy.ALL,
-    val verifyTls: Boolean = true,
+    /** Check the server's TLS certificate for this account (SIP over TLS
+     *  and WSS); null follows [MedutConfig.verifyServer].  Accounts that
+     *  reach the same server and disagree get it verified. */
+    val verifyTls: Boolean? = null,
     /** RFC 8599 push parameters for the REGISTER Contact.  For FCM the token
      *  is the registration token and [pushParam] the Firebase project ID
      *  (docs/guides/push.md).  [Account.setPushToken] updates the token later. */

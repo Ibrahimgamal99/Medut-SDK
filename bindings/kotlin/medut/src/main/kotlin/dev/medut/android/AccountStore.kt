@@ -287,7 +287,10 @@ class AccountStore(context: Context) {
             }
         })
         put("iceTransportPolicy", c.iceTransportPolicy.value)
-        put("verifyTls", c.verifyTls)
+        // Not "verifyTls": that key held a non-null flag the core ignored,
+        // written as true for every account, so reading it now would turn
+        // every saved account into an explicit override.
+        c.verifyTls?.let { put("verifyTlsOverride", it) }
         put("pushProvider", c.pushProvider.value)
         putOpt("pushToken", c.pushToken)
         putOpt("pushParam", c.pushParam)
@@ -325,7 +328,7 @@ class AccountStore(context: Context) {
             turnPass = j.optStringOrNull("turnPass"),
             iceServers = servers,
             iceTransportPolicy = IceTransportPolicy.of(j.optInt("iceTransportPolicy", 0)),
-            verifyTls = j.optBoolean("verifyTls", true),
+            verifyTls = if (j.has("verifyTlsOverride")) j.getBoolean("verifyTlsOverride") else null,
             pushProvider = PushProvider.entries.firstOrNull { it.value == j.optInt("pushProvider", 0) }
                 ?: PushProvider.NONE,
             pushToken = j.optStringOrNull("pushToken"),
