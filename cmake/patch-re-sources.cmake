@@ -1129,6 +1129,14 @@ static int tls_connect(struct tls_conn *tc)
 # reused for the same decision, so one opened before the accounts changed is
 # never handed to a message that wants the other.
 #
+# In-dialog requests go to the peer's Contact, which a PBX usually gives as
+# its IP address: a host no account names.  So each decision made for a host
+# an account claims is also recorded against the address it resolved to, on
+# the SIP stack rather than on a connection (a handover flushes those before
+# the call's re-INVITE goes out), and a host no account claims takes the
+# decision recorded for its address — verify if any recorded host there
+# verifies — and the stack-wide one only when nothing is recorded.
+#
 # WSS connects through the transport's HTTP client.  The client is shared,
 # and the connection may open later than websock_connect() returns (the SDK
 # usually rewrites the URI to the server's host name, so DNS comes first);
@@ -1144,8 +1152,10 @@ int  sip_transp_add_ccert(struct sip *sip, const struct uri *uri,
 int  sip_transp_add_ccert(struct sip *sip, const struct uri *uri,
 			  const char *ccertfile);
 /* Medut-patched: per-account server certificate verification.  Sets
- * *verify for a TLS/WSS connection to host (NULL if unnamed). */
-typedef void (sip_transp_verify_h)(const char *host, bool *verify,
+ * *verify for a TLS/WSS connection to host (NULL if unnamed), and returns
+ * true when an account claims host — false leaves the decision to what was
+ * recorded for the address, *verify being the fallback. */
+typedef bool (sip_transp_verify_h)(const char *host, bool *verify,
 				   void *arg);
 void sip_transp_set_verify_handler(struct sip *sip, sip_transp_verify_h *h,
 				   void *arg);
@@ -1164,6 +1174,7 @@ medut_patch("${SOURCE_DIR}/src/sip/sip.h"
 	/* Medut-patched: see sip_transp_set_verify_handler() */
 	sip_transp_verify_h *medut_verifyh;
 	void *medut_verify_arg;
+	struct list medut_verifyl;  /* decisions by address and host */
 };
 ]=]
 "struct sip: verify handler")
@@ -1220,16 +1231,80 @@ void sip_transp_set_verify_handler(struct sip *sip, sip_transp_verify_h *h,
 }
 
 
-/* Medut-patched: whether a TLS/WSS connection to host verifies the
- * server.  Without a handler, libre's own behaviour: verify. */
-static bool medut_conn_verify(const struct sip *sip, const char *host)
+/* Medut-patched: a decision made for a claimed host, kept against the
+ * address it was sent to. */
+struct medut_verify_rec {
+	struct le le;
+	struct sa addr;
+	char *host;
+	bool verify;
+};
+
+
+static void medut_verify_rec_destructor(void *arg)
 {
-	bool verify = true;
+	struct medut_verify_rec *rec = arg;
 
-	if (sip->medut_verifyh)
-		sip->medut_verifyh(host, &verify, sip->medut_verify_arg);
+	list_unlink(&rec->le);
+	mem_deref(rec->host);
+}
 
-	return verify;
+
+/* Medut-patched: whether a TLS/WSS connection to host at dst verifies the
+ * server.  A host an account claims decides, and the decision is recorded
+ * for dst; any other host (a Contact's IP address) takes what is recorded
+ * for dst — verify if any recorded host there does — else the handler's
+ * fallback.  Without a handler, libre's own behaviour: verify. */
+static bool medut_conn_verify(struct sip *sip, const char *host,
+			      const struct sa *dst)
+{
+	struct medut_verify_rec *rec = NULL;
+	bool verify = true, claimed, recorded = false, any = false;
+	struct le *le;
+
+	if (!sip->medut_verifyh)
+		return true;
+
+	claimed = sip->medut_verifyh(host, &verify, sip->medut_verify_arg);
+
+	for (le = sip->medut_verifyl.head; le; ) {
+		struct medut_verify_rec *r = le->data;
+		le = le->next;
+
+		if (!sa_cmp(&r->addr, dst, SA_ALL))
+			continue;
+
+		if (str_isset(host) && 0 == str_casecmp(r->host, host)) {
+			if (!claimed) {
+				/* no account sends to this name any more */
+				mem_deref(r);
+				continue;
+			}
+			rec = r;
+		}
+
+		recorded = true;
+		any |= r->verify;
+	}
+
+	if (claimed) {
+		if (!rec) {
+			rec = mem_zalloc(sizeof(*rec),
+					 medut_verify_rec_destructor);
+			if (rec && str_dup(&rec->host, host))
+				rec = mem_deref(rec);
+			if (rec) {
+				rec->addr = *dst;
+				list_append(&sip->medut_verifyl, &rec->le, rec);
+			}
+		}
+		if (rec)
+			rec->verify = verify;
+
+		return verify;
+	}
+
+	return recorded ? any : verify;
 }
 
 
@@ -1331,7 +1406,7 @@ medut_patch("${SOURCE_DIR}/src/sip/transp.c"
 
 	/* Medut-patched: per-account server certificate verification */
 	if (secure)
-		verify = medut_conn_verify(sip, host);
+		verify = medut_conn_verify(sip, host, dst);
 
 	conn = conn_find(sip, dst, secure, verify);
 ]=]
@@ -1359,7 +1434,7 @@ medut_patch("${SOURCE_DIR}/src/sip/transp.c"
 ]=]
 [=[
 	/* Medut-patched: per-account server certificate verification */
-	bool verify = secure ? medut_conn_verify(sip, host) : true;
+	bool verify = secure ? medut_conn_verify(sip, host, dst) : true;
 
 	conn = ws_conn_find(sip, dst, tp, verify);
 ]=]
@@ -1474,3 +1549,15 @@ int http_client_disable_verify_server(struct http_cli *cli)
 {
 ]=]
 "http_client_set_verify_next()")
+
+medut_patch("${SOURCE_DIR}/src/sip/sip.c"
+[=[
+	list_flush(&sip->transpl);
+	list_flush(&sip->lsnrl);
+]=]
+[=[
+	list_flush(&sip->transpl);
+	list_flush(&sip->lsnrl);
+	list_flush(&sip->medut_verifyl);  /* Medut-patched */
+]=]
+"sip destructor: free the recorded verification decisions")

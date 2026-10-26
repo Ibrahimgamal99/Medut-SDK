@@ -514,7 +514,12 @@ void bsdk_account_push_init(void)
  * decide — each by its own verify_tls when verify_tls_set, else the global
  * verify_server — and when they disagree the server is verified, since an
  * account that asked for the check must not lose it to one that did not.
- * A host no account sends to follows the global setting.
+ *
+ * A host no account sends to is not claimed (returns false).  That is how an
+ * in-dialog request to the peer's Contact usually looks — a PBX gives its IP
+ * address there — and libre then uses the decision it recorded for that
+ * address when a claimed host's connection went to it; *verify, the global
+ * setting, only when it recorded none.
  *
  * Walked without acct_lock for the reason reg_cparams_handler() gives. */
 static bool account_sends_to(const struct medut_account *acct,
@@ -537,7 +542,7 @@ static bool account_sends_to(const struct medut_account *acct,
 	return luri && 0 == pl_strcasecmp(&luri->host, host);
 }
 
-static void tls_verify_handler(const char *host, bool *verify, void *arg)
+static bool tls_verify_handler(const char *host, bool *verify, void *arg)
 {
 	struct le *le;
 	bool matched = false;
@@ -546,7 +551,7 @@ static void tls_verify_handler(const char *host, bool *verify, void *arg)
 	*verify = g_bsdk.cfg.verify_server;
 
 	if (!str_isset(host))
-		return;
+		return false;
 
 	LIST_FOREACH(&g_bsdk.accounts, le) {
 		const struct medut_account *acct = le->data;
@@ -561,6 +566,8 @@ static void tls_verify_handler(const char *host, bool *verify, void *arg)
 		*verify  = matched ? (*verify || want) : want;
 		matched  = true;
 	}
+
+	return matched;
 }
 
 void bsdk_account_tls_verify_init(void)
