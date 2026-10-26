@@ -313,4 +313,14 @@ jobs:
           fi
           LIST=$(IFS=,; echo "${DONE[*]}" | sed 's/,/, /g')
           git commit -m "desktop: refresh the plugin's cores: ${LIST} (CI build of ${GITHUB_SHA::12})"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # The branch may have moved since checkout: the other prebuilt
+          # workflow (desktop-libs.yml / ios-xcframework.yml) commits to it
+          # too, and a run started alongside this one pushes first. They
+          # touch different files, so rebasing onto it always applies.
+          for attempt in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" &&
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep 10
+          done
+          echo "::error::could not push to ${GITHUB_REF_NAME} after 3 attempts"
+          exit 1
