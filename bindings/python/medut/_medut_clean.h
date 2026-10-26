@@ -557,6 +557,7 @@ typedef struct {
  const medut_ice_server_t *ice_servers;
  uint32_t ice_server_count;
  medut_ice_transport_policy_t ice_transport_policy;
+ bool verify_tls_set;
 
 } medut_account_config_t;
  void medut_config_init(medut_config_t *cfg);
