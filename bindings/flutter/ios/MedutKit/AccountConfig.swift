@@ -33,7 +33,10 @@ public struct AccountConfig: Sendable {
     /// Empty inherits the stack-wide list.
     public var iceServers: [ICEServer] = []
     public var iceTransportPolicy: ICETransportPolicy = .all
-    public var verifyTLS = true
+    /// Check the server's TLS certificate for this account (SIP over TLS
+    /// and WSS); nil follows `MedutConfig.verifyServer`.  Accounts that reach
+    /// the same server and disagree get it verified.
+    public var verifyTLS: Bool?
 
     /// RFC 8599 push parameters for the REGISTER Contact.  For APNs the
     /// token is the hex-encoded VoIP push token and `pushParam`
@@ -83,7 +86,8 @@ public struct AccountConfig: Sendable {
         c.ice_servers = pool.iceServers(iceServers)
         c.ice_server_count = UInt32(iceServers.count)
         c.ice_transport_policy = iceTransportPolicy.cValue()
-        c.verify_tls = verifyTLS
+        c.verify_tls_set = verifyTLS != nil
+        c.verify_tls = verifyTLS ?? false
         c.push_provider = pushProvider.cValue()
         c.push_token = pool.string(pushToken)
         c.push_param = pool.string(pushParam)
