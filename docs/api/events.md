@@ -98,7 +98,7 @@ dialog:
 | State | Meaning | What the app does |
 |---|---|---|
 | `RECONNECTING` | The registration is down and the SDK is getting it back itself — a retry armed after a timeout or 5xx, a keepalive probe the proxy stopped answering, a network handover (Wi-Fi ↔ cellular, VPN, dock). | Show "Reconnecting…". Nothing else. |
-| `FAILED` | The SDK has stopped trying: `MEDUT_ERR_AUTH`, an exhausted `reg_retry_max_attempts`, or a retry the app cancelled. | Surface it — new credentials, or `medut_account_retry_now()`. |
+| `FAILED` | The SDK has stopped trying: `MEDUT_ERR_AUTH`, `MEDUT_ERR_TLS_CERT` (server certificate rejected), an exhausted `reg_retry_max_attempts`, or a retry the app cancelled. | Surface it — new credentials, or `medut_account_retry_now()`. |
 
 A recovery reports `RECONNECTING` once and stays there for every attempt it
 makes, ending at `REGISTERED` or `FAILED`; it does not flip back to

@@ -177,6 +177,7 @@ case MEDUT_EV_MEDIA_STATS: {
 | 401 Unauthorized | Wrong `uri` or `password`; check `auth_user` override |
 | 403 Forbidden | Account not provisioned on server; check `uri` domain |
 | 408 Timeout | Wrong `server_host`/`server_port`; firewall blocks SIP port |
+| FAILED with `MEDUT_ERR_TLS_CERT` | The certificate names another host (`error_str`: "hostname mismatch"): point `server_url` at a name the certificate covers, keeping the account's `uri` domain |
 | Registration drops | `reg_expires` too short; keepalive not working; NAT timeout |
 
 ### Retry policy
@@ -201,7 +202,8 @@ Monitor retries via `retry_attempt` and `retry_delay_ms` in `MEDUT_EV_REG_STATE`
 | Code | Meaning | Action |
 |---|---|---|
 | `MEDUT_ERR_DNS` | Cannot resolve server hostname | Check DNS / network |
-| `MEDUT_ERR_TRANSPORT` | TCP/TLS/WebSocket connection failed | Check firewall, TLS cert |
+| `MEDUT_ERR_TRANSPORT` | TCP/TLS/WebSocket connection failed | Check firewall |
+| `MEDUT_ERR_TLS_CERT` | Server's TLS certificate rejected; `error_str` says why ("hostname mismatch", "certificate has expired", ...) | Fix the server certificate or the host the account connects to. Registration does not retry this on its own: `medut_account_retry_now()`, or a network change |
 | `MEDUT_ERR_AUTH` | SIP authentication failed | Verify credentials |
 | `MEDUT_ERR_FORBIDDEN` | Server refused this request (403) — on a call, a dialplan or policy refusal | Not a credentials problem; surface the refusal, not a login prompt |
 | `MEDUT_ERR_TIMEOUT` | No response (timer B/F expired) | Check server reachability |

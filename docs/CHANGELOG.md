@@ -8,6 +8,17 @@ All notable changes to Medut are documented here.
 
 ### Fixed
 
+- **A rejected TLS certificate is reported as one.** SIP over TLS and WSS
+  reported a server certificate that failed verification (wrong host name,
+  expired, untrusted) as `MEDUT_ERR_TRANSPORT` / "Protocol error [71]" and
+  retried it forever. It is now the new `MEDUT_ERR_TLS_CERT` (-12), with
+  OpenSSL's reason in `error_str` ("TLS certificate rejected: hostname
+  mismatch"), and the registration goes to `FAILED` instead of retrying; a
+  network change still gets one fresh attempt (a captive portal). Calls that
+  fail on it carry the same code. Mirrored in Kotlin and Flutter
+  (`TLS_CERTIFICATE`), Swift (`.tlsCertificate`) and Dart
+  (`MedutError.tlsCertificate`).
+
 - **Kotlin push wait could deadlock with shutdown.** `MedutPush.wake` matched
   the incoming call on the SDK event thread through the stack gate, which
   `Medut.shutdown()` holds while it joins that thread. The listener now only
