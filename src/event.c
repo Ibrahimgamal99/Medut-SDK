@@ -296,6 +296,26 @@ static bool codec_reason_is_really_menc(const char *reason,
 	return enc == MEDUT_MEDIA_ENC_NONE;
 }
 
+/* A TLS or WSS connection the server's certificate failed verification on.
+ *
+ * libre reported every handshake failure as EPROTO, so this used to arrive as
+ * "Protocol error [71]" — a transport error, retried forever on a backoff no
+ * retry could win.  The patched tls_connect() (cmake/patch-re-sources.cmake)
+ * returns EKEYREJECTED for it instead and keeps OpenSSL's reason, which goes
+ * into `buf` as the reason the app sees. */
+static bool tls_cert_rejected(const char *reason, char *buf, size_t sz)
+{
+	const char *why;
+
+	if (bsdk_reason_errno(reason) != EKEYREJECTED)
+		return false;
+
+	why = bsdk_tls_verify_reason();
+	re_snprintf(buf, sz, "TLS certificate rejected: %s",
+	            why ? why : "verification failed");
+	return true;
+}
+
 static void bevent_handler(enum bevent_ev bev,
                             struct bevent *event,
                             void *arg)
@@ -401,11 +421,16 @@ static void bevent_handler(enum bevent_ev bev,
 	case BEVENT_REGISTER_FAIL:
 	case BEVENT_FALLBACK_FAIL: {   /* see FALLBACK_OK above */
 		const char *reason = bevent_get_text(event);
+		char cert_reason[96];
 		ev.type            = MEDUT_EV_REG_STATE;
 		ev.u.reg.account   = acct;
 		/* Classify error by 3-digit SIP status code */
 		int code = bsdk_sip_reason_code(reason);
-		if (code == 401 || code == 403 || code == 407)
+		if (tls_cert_rejected(reason, cert_reason, sizeof(cert_reason))) {
+			ev.u.reg.error = MEDUT_ERR_TLS_CERT;
+			reason = cert_reason;
+		}
+		else if (code == 401 || code == 403 || code == 407)
 			ev.u.reg.error = MEDUT_ERR_AUTH;
 		else if (code >= 500 && code < 600)
 			ev.u.reg.error = MEDUT_ERR_SERVER_5XX;
@@ -447,7 +472,8 @@ static void bevent_handler(enum bevent_ev bev,
 			 * Outside the queued-event allocation below as well: a
 			 * failed alloc costs one event, it must not cost the
 			 * recovery. */
-			if (ev.u.reg.error != MEDUT_ERR_AUTH)
+			if (ev.u.reg.error != MEDUT_ERR_AUTH &&
+			    ev.u.reg.error != MEDUT_ERR_TLS_CERT)
 				bsdk_account_schedule_retry(acct);
 
 			/* schedule_retry() has just reported this same reconnect,
@@ -607,9 +633,15 @@ static void bevent_handler(enum bevent_ev bev,
 		else
 			ev.u.call_state.state = MEDUT_CALL_ENDED;
 
+		char cert_reason[96];
+		bool cert_err = !peer_hangup &&
+		        tls_cert_rejected(reason, cert_reason, sizeof(cert_reason));
+
 		ev.u.call_state.error = bsdk_sip_call_error(scode);
-		if (ev.u.call_state.error == MEDUT_OK &&
-		    is_transport_err && !peer_hangup)
+		if (cert_err)
+			ev.u.call_state.error = MEDUT_ERR_TLS_CERT;
+		else if (ev.u.call_state.error == MEDUT_OK &&
+		         is_transport_err && !peer_hangup)
 			ev.u.call_state.error = MEDUT_ERR_TRANSPORT;
 
 		if (lc) {
@@ -628,6 +660,10 @@ static void bevent_handler(enum bevent_ev bev,
 				 * network fault to anyone logging it. */
 				str_ncpy(qev->buf, "Remote hangup",
 				         sizeof(qev->buf));
+				qev->ev.u.call_state.reason = qev->buf;
+			}
+			else if (cert_err) {
+				str_ncpy(qev->buf, cert_reason, sizeof(qev->buf));
 				qev->ev.u.call_state.reason = qev->buf;
 			}
 			else if (reason && codec_reason_is_really_menc(reason, acct)) {

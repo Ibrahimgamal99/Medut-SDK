@@ -778,10 +778,11 @@ static int configure_baresip_account(struct medut_account *acct)
  * the retry loop, one second later, quietly fixed it.
  *
  * So a failure the SDK will act on itself is RECONNECTING, and FAILED is kept
- * for the ones it has stopped acting on: wrong credentials, an exhausted retry
- * budget, a retry the app cancelled.  The decision is one function because
- * three call sites make it — the REGISTER_FAIL event, the registration
- * watchdog and the keepalive probe — and they must agree.
+ * for the ones it has stopped acting on: wrong credentials, a server certificate
+ * that failed verification, an exhausted retry budget, a retry the app
+ * cancelled.  The decision is one function because three call sites make it —
+ * the REGISTER_FAIL event, the registration watchdog and the keepalive probe —
+ * and they must agree.
  */
 
 static bool retry_budget_left(const struct medut_account *acct)
@@ -799,7 +800,7 @@ medut_reg_state_t bsdk_account_reg_fail_state(struct medut_account *acct,
 	/* An armed retry settles it: that attempt is going out whatever the
 	 * budget now says, and schedule_retry() already counted it. */
 	bool will_retry = acct->reg_wanted && !acct->destroyed &&
-	        err != MEDUT_ERR_AUTH &&
+	        err != MEDUT_ERR_AUTH && err != MEDUT_ERR_TLS_CERT &&
 	        (tmr_isrunning(&acct->retry_tmr) || retry_budget_left(acct));
 
 	acct->reconnecting = will_retry;

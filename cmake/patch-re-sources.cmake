@@ -1025,3 +1025,91 @@ medut_patch("${SOURCE_DIR}/src/dns/client.c"
 			break;
 ]=]
 "send_udp: reopen a reclaimed DNS socket and retry")
+
+# ---------------------------------------------------------------------------
+# tls/openssl/tls_tcp.c — tell a rejected certificate apart from a broken
+# handshake
+#
+# Every SSL_connect() failure came back as EPROTO, so a server presenting a
+# certificate for another name (or an expired or self-signed one) reached the
+# registration as "Protocol error [71]" — indistinguishable from a link that
+# dropped mid-handshake, and retried forever on a backoff that could never
+# fix it.  When OpenSSL's verify result says the certificate was refused,
+# return EKEYREJECTED instead (re_types.h supplies it where the platform does
+# not), and keep OpenSSL's reason text for the SDK to report.  SIP over TLS
+# and WSS both connect through here.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/tls/openssl/tls_tcp.c"
+[=[
+static int tls_connect(struct tls_conn *tc)
+{
+	int err = 0, r;
+
+	ERR_clear_error();
+
+	r = SSL_connect(tc->ssl);
+	if (r <= 0) {
+		const int ssl_err = SSL_get_error(tc->ssl, r);
+
+		switch (ssl_err) {
+
+		case SSL_ERROR_WANT_READ:
+			break;
+
+		default:
+			DEBUG_WARNING("connect: error (r=%d, ssl_err=%d)\n",
+				      r, ssl_err);
+			tls_flush_error();
+			err = EPROTO;
+			break;
+		}
+]=]
+[=[
+/* Medut-patched: why the last certificate check failed, as OpenSSL words
+ * it ("hostname mismatch", "certificate has expired", ...), or NULL before
+ * any has.  Written and read on the re thread only.  OpenSSL returns static
+ * strings, so the pointer stays valid. */
+static const char *bsdk_tls_verify_reason_last;
+
+const char *bsdk_tls_verify_reason(void)
+{
+	return bsdk_tls_verify_reason_last;
+}
+
+
+static int tls_connect(struct tls_conn *tc)
+{
+	int err = 0, r;
+
+	ERR_clear_error();
+
+	r = SSL_connect(tc->ssl);
+	if (r <= 0) {
+		const int ssl_err = SSL_get_error(tc->ssl, r);
+		long vr;
+
+		switch (ssl_err) {
+
+		case SSL_ERROR_WANT_READ:
+			break;
+
+		default:
+			DEBUG_WARNING("connect: error (r=%d, ssl_err=%d)\n",
+				      r, ssl_err);
+			tls_flush_error();
+
+			/* Medut-patched: a certificate the verify step refused
+			 * is EKEYREJECTED, not EPROTO — no retry fixes it. */
+			vr = SSL_get_verify_result(tc->ssl);
+			if (vr != X509_V_OK) {
+				bsdk_tls_verify_reason_last =
+					X509_verify_cert_error_string(vr);
+				err = EKEYREJECTED;
+				break;
+			}
+
+			err = EPROTO;
+			break;
+		}
+]=]
+"tls_connect: report a rejected certificate as EKEYREJECTED")

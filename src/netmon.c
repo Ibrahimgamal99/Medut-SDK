@@ -1524,7 +1524,10 @@ static void reregister_accounts(void)
 		 * contradict that, and would leave it reporting FAILED to the app
 		 * while carrying reconnecting = true internally.  Every other
 		 * failure — transport, timeout, 5xx — is exactly what a new network
-		 * might fix, so those do get the fresh attempt below. */
+		 * might fix, so those do get the fresh attempt below.  That
+		 * includes MEDUT_ERR_TLS_CERT: the usual way to see a certificate
+		 * for the wrong host is a captive portal intercepting the
+		 * connection, and leaving its network is what fixes it. */
 		if (a->reg_state == MEDUT_REG_FAILED &&
 		    a->reg_error == MEDUT_ERR_AUTH)
 			continue;

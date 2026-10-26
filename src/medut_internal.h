@@ -562,6 +562,10 @@ int  bsdk_net_if_cost(const char *ifname);   /* 0 wifi/wired, 1 vpn, 2 cellular 
 void bsdk_account_schedule_retry(struct medut_account *acct);
 void bsdk_account_watch_registration(struct medut_account *acct);
 
+/* OpenSSL's reason the last server certificate was rejected, or NULL.
+ * Defined by the patched libre (tls/openssl/tls_tcp.c); re_main thread only. */
+const char *bsdk_tls_verify_reason(void);
+
 /* Which state a registration failure should be reported as: RECONNECTING when
  * the SDK will keep trying by itself, FAILED when it is done.  Updates
  * acct->reconnecting to match, so call it once per failure, before posting the

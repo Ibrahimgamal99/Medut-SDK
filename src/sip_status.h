@@ -10,6 +10,7 @@
 #define MEDUT_SIP_STATUS_H
 
 #include <stdlib.h>
+#include <string.h>
 #include "../include/medut.h"
 
 /* Parse the leading 3-digit SIP status from a reason string like
@@ -23,6 +24,21 @@ static inline int bsdk_sip_reason_code(const char *reason)
 	if (end == reason || end - reason != 3 || code < 100 || code > 699)
 		return 0;
 	return (int)code;
+}
+
+/* Parse the errno from a reason string libre rendered with "%m", which reads
+ * "<strerror text> [<errno>]" — e.g. "Protocol error [71]".  Returns 0 when
+ * the string does not end that way (a SIP status, or no reason at all). */
+static inline int bsdk_reason_errno(const char *reason)
+{
+	if (!reason) return 0;
+	const char *open = strrchr(reason, '[');
+	if (!open) return 0;
+	char *end;
+	long n = strtol(open + 1, &end, 10);
+	if (end == open + 1 || end[0] != ']' || end[1] != '\0' || n <= 0)
+		return 0;
+	return (int)n;
 }
 
 /**

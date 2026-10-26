@@ -76,6 +76,20 @@ static void test_enum_values_are_stable(void)
 	ASSERT_EQ_INT("ERR_AUTH",      MEDUT_ERR_AUTH,      -6);
 	ASSERT_EQ_INT("ERR_ALREADY",   MEDUT_ERR_ALREADY,   -10);
 	ASSERT_EQ_INT("ERR_FORBIDDEN", MEDUT_ERR_FORBIDDEN, -11);
+	ASSERT_EQ_INT("ERR_TLS_CERT",  MEDUT_ERR_TLS_CERT,  -12);
+}
+
+/* The errno libre's "%m" appends is how a rejected TLS certificate
+ * (EKEYREJECTED) is told apart from a handshake that merely broke. */
+static void test_reason_errno_parsing(void)
+{
+	ASSERT_EQ_INT("EPROTO",        bsdk_reason_errno("Protocol error [71]"), 71);
+	ASSERT_EQ_INT("EKEYREJECTED",  bsdk_reason_errno("Key was rejected by service [129]"), 129);
+	ASSERT_EQ_INT("null",          bsdk_reason_errno(NULL), 0);
+	ASSERT_EQ_INT("SIP status",    bsdk_reason_errno("403 Forbidden"), 0);
+	ASSERT_EQ_INT("not trailing",  bsdk_reason_errno("odd [12] text"), 0);
+	ASSERT_EQ_INT("not a number",  bsdk_reason_errno("odd [x]"), 0);
+	ASSERT_EQ_INT("empty",         bsdk_reason_errno("odd []"), 0);
 }
 
 int main(void)
@@ -86,6 +100,7 @@ int main(void)
 	test_other_failures_unchanged();
 	test_non_failures_are_ok();
 	test_enum_values_are_stable();
+	test_reason_errno_parsing();
 
 	printf("SIP status tests: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail > 0 ? TEST_FAIL : TEST_PASS;

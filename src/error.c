@@ -19,6 +19,7 @@ const char *medut_strerror(int err)
 	case MEDUT_ERR_TIMEOUT:              return "timeout";
 	case MEDUT_ERR_ALREADY:              return "already initialized";
 	case MEDUT_ERR_FORBIDDEN:            return "forbidden (403)";
+	case MEDUT_ERR_TLS_CERT:             return "TLS certificate rejected";
 	default: {
 		static char buf[32];
 		re_snprintf(buf, sizeof(buf), "unknown error %d", err);
