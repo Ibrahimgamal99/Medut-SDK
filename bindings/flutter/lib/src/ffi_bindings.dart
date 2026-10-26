@@ -3504,7 +3504,7 @@ final class medut_account_config_t extends ffi.Struct {
   /// alias for outbound; NULL = auto
   external ffi.Pointer<ffi.Char> outbound_proxy;
 
-  /// false = skip TLS cert verification
+  /// used when verify_tls_set is true
   @ffi.Bool()
   external bool verify_tls;
 
@@ -3571,6 +3571,19 @@ final class medut_account_config_t extends ffi.Struct {
 
   @ffi.Int32()
   external int ice_transport_policy;
+
+  /// Per-account server certificate check for SIP over TLS and WSS.
+  /// false (default) = follow the global medut_config_t.verify_server;
+  /// true = use verify_tls above for this account, either way round.
+  ///
+  /// Decided per server: accounts that reach the same host share its
+  /// connections, so when they disagree the server is verified.  TURN
+  /// over TLS (`turns:`) keeps following the global setting.  Turning
+  /// the check off lets anyone on the path impersonate the server; prefer
+  /// a server_url the certificate covers, or ca_cert_path for a private
+  /// CA.
+  @ffi.Bool()
+  external bool verify_tls_set;
 }
 
 /// Called once per live account by medut_account_foreach().

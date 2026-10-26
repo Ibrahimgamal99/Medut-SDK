@@ -1578,7 +1578,8 @@ class FfiBackend implements MedutHostApi {
     if (m.iceTransportPolicy != null) {
       r.ice_transport_policy = m.iceTransportPolicy!;
     }
-    r.verify_tls = m.verifyTls ?? true;
+    r.verify_tls_set = m.verifyTls != null;
+    r.verify_tls = m.verifyTls ?? false;
     if (m.pushProvider != null) r.push_provider = m.pushProvider!;
     r.push_token = _cstr(m.pushToken, arena);
     r.push_param = _cstr(m.pushParam, arena);
