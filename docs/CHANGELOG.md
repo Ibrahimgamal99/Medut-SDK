@@ -385,19 +385,21 @@ All of these were the same on the baresip build.
 
 ### CI
 
-- **"Build mobile libraries" builds only the libraries** — the Android
-  `libmedut.so` (NDK 28.2.13676358, as built locally) and the iOS
-  `Medut.xcframework` — and commits both to the branch it ran on (input
-  `commit`, default on).  The example-app and Dart checks it also ran moved,
-  unchanged, to the new "Flutter checks" workflow.
-- **One workflow builds the libraries, one checks the apps.**  "iOS
-  xcframework" is gone: it rebuilt the xcframework that "Build mobile
-  libraries" already builds and commits (~8 min of macOS).  Its iOS checks —
-  compiling MedutKit and building the example app through the pod — are a
-  job of "Flutter checks" now, against the committed framework as the
-  Android job is against the committed jniLibs.  `scripts/fetch-prebuilt.sh`
-  takes a "Build mobile libraries" run's artifacts (the xcframework zip, and
-  now the Android jniLibs too) for a run that did not commit.
+CI builds the libraries the SDK ships and nothing else; the Flutter example
+app and the Dart checks are no longer built there.
+
+- **"Build mobile libraries"** builds the Android `libmedut.so` (NDK
+  28.2.13676358, as built locally) and the iOS `Medut.xcframework`, and
+  commits both to the branch it ran on (input `commit`, default on).  It
+  replaces "iOS xcframework", which rebuilt the same framework.
+  `scripts/fetch-prebuilt.sh` takes a run's artifacts (the xcframework zip
+  and the Android jniLibs) for a run that did not commit.
+- **"Desktop libraries"** builds the Linux (x64, arm64; glibc 2.17, WebRTC
+  AEC on) and Windows (x64, arm64) cores and commits them for the Flutter
+  plugin.
+- **"PyPI"** packs those committed desktop cores into the Python wheels
+  instead of building them a second time, and refuses a core whose sources
+  changed after it was built.
 
 ### Fixed
 

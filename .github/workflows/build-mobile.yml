@@ -4,7 +4,7 @@ name: Build mobile libraries
 # (or `gh workflow run build-mobile.yml`) when native sources change.
 #
 # Builds the two native libraries the mobile bindings ship, and nothing else
-# (no example apps — flutter-checks.yml checks those against what this commits):
+# (no example apps: CI builds libraries only):
 #
 #   Android  libmedut.so for arm64-v8a, armeabi-v7a, x86_64
 #            -> bindings/kotlin/medut/src/main/jniLibs/<abi>/
