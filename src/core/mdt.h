@@ -81,7 +81,16 @@ int  mdt_sip_reset_transp(void);
 
 /* The engine's local-address list, which decides what transports bind to. */
 bool mdt_net_ifaddr_ok(const char *ifname, const struct sa *sa);
-bool mdt_net_laddr_apply(net_ifaddr_h *ifh, void *arg);
+/* Called for each local address until it returns true.  The same shape as
+ * libre's net_ifaddr_h, but declared here on purpose: on Windows
+ * cmake/fix-msvc-headers.cmake rewrites libre's function-type typedefs into
+ * function-pointer typedefs for MSVC, which made `net_ifaddr_h *` a pointer
+ * to a pointer there, and the call through it did not compile (C2063).  A
+ * typedef of the stack's own is left as it is, so it means the same thing on
+ * every compiler. */
+typedef bool (mdt_laddr_h)(const char *ifname, const struct sa *sa,
+                           void *arg);
+bool mdt_net_laddr_apply(mdt_laddr_h *ifh, void *arg);
 int  mdt_net_add_address(const struct sa *sa);
 int  mdt_net_rm_address(const struct sa *sa);
 int  mdt_net_af(void);

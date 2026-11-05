@@ -92,7 +92,7 @@ void mdt_net_scan(void)
 	(void)net_if_apply(scan_h, NULL);
 }
 
-bool mdt_net_laddr_apply(net_ifaddr_h *ifh, void *arg)
+bool mdt_net_laddr_apply(mdt_laddr_h *ifh, void *arg)
 {
 	struct le *le;
 
