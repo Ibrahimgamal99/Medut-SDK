@@ -10,7 +10,7 @@
  * stream socket above the ICE layer with the source rewritten to the
  * virtual peer.
  *
- * The stream sockets (baresip's own RTP/RTCP) are served by a helper in
+ * The stream sockets (the stream's own RTP/RTCP) are served by a helper in
  * ice_mod.c that calls icea_route_stun_demux() for the STUN half and does
  * the source rewrite itself, so the demux logic lives in one place.
  */

@@ -225,7 +225,7 @@ bool up = medut_network_is_up();            /* false = no routable address */
 | Call on hold | Migrated with its direction attribute preserved; media check skipped |
 | Link-local-only addresses | Enough to rebind, reported as `DOWN` since no off-link registrar is reachable |
 
-RTP sockets are never re-created. baresip binds them to the wildcard address, so
+RTP sockets are never re-created. The stack binds them to the wildcard address, so
 they follow the new default route automatically — only the address advertised in
 the SDP has to change.
 
@@ -236,12 +236,12 @@ the SDP has to change.
 **An ICE call is migrated with a real RFC 8445 §9 ICE restart.**
 
 Rewriting the SDP address is enough for a direct-RTP call and does nothing for an
-ICE call. Two reasons, both inside baresip's ice module:
+ICE call. Two reasons, both in how an ICE media stream works:
 
-- it owns the *media* address — it writes the selected local candidate there, and
+- the ICE agent owns the *media* address — it writes the selected local candidate there, and
   a media-level `c=` line overrides the session-level one (RFC 4566 §5.7), which
   is the only one a plain re-INVITE changes;
-- nothing re-gathers. Its update handler re-encodes the candidate list it already
+- nothing re-gathers. An update re-encodes the candidate list the agent already
   has, under the same `ice-ufrag` / `ice-pwd`.
 
 So the offer would re-advertise the network the call just left, while the peer
@@ -351,9 +351,14 @@ recovers; one that does not is left to the app with the event above.
 
 An ICE restart that the SDK offers makes it the controlling agent for the new
 generation, as libwebrtc and Asterisk do (offerer = controlling); when the
-peer offers the restart, the SDK takes the controlled role. A peer that does
-not follow this convention is handled by the RFC 8445 §7.3.1.1 role-conflict
-procedure.
+peer offers the restart, the SDK takes the controlled role. Before this the
+answerer's CONTROLLED role was kept across its own restart offer, so an
+*inbound* call's handover met a peer that had also become controlled, and the
+RFC 8445 §7.3.1.1 role-conflict procedure decided — a coin toss that sometimes
+ended with nobody nominating a pair (measured 2026-10-11: one restart in eight
+on an inbound call stayed CONNECTED for good while outbound calls never
+conflicted). Role conflicts are still handled, correctly now, for peers that
+do not follow the convention.
 
 ### A second path before the switch (experimental)
 

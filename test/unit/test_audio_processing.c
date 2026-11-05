@@ -13,17 +13,17 @@
  * device and the voice path its engine reports, the suppressor request that
  * goes with it and that set_aec is not), that a switch reaches
  * a call already up on its next frame, that each call's TX and RX stay
- * paired — including after the far end holds and resumes us, when baresip
+ * paired — including after the far end holds and resumes us, when the stack
  * rebuilds only the TX side — and that with two calls up each TX ducks for
  * the louder far end, since the speaker plays both.
  *
- * Links src/audio_processing.c against libre only.  baresip's filter
+ * Links src/audio/processing.c against libre only.  the stack's filter
  * registry, logging and the two platform hooks are stubbed below, and
  * tmr_jiffies is wrapped (-Wl,--wrap) so time is the test's to move.
  *
  * Built a second time as test_audio_processing_webrtc with the WebRTC
  * filter compiled in (BSDK_TEST_WEBRTC): that run loads the real library
- * through src/webrtc_shim.c and checks the echo is actually removed.
+ * through src/audio/webrtc_shim.c and checks the echo is actually removed.
  */
 
 #include <stdio.h>
@@ -31,7 +31,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 #include <rem_au.h>
 #include <rem_aulevel.h>
 #include <rem_auframe.h>
@@ -46,46 +46,38 @@ static int g_pass, g_fail;
 
 /* ── Stubs ───────────────────────────────────────────────────────────────── */
 
-static void log_va(const char *fmt, va_list ap)
+static char g_last_info[512];   /* the last MDT_INFO() line, for the log tests */
+
+/* The stack's logger (bsdk.h); core/stack.c is not linked. */
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
+	char buf[512];
+	va_list ap;
+
+	va_start(ap, fmt);
+	if (safe)
+		(void)re_vsnprintf_s(buf, sizeof(buf), fmt, ap);
+	else
+		(void)re_vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+
+	if (level == MDT_LOG_INFO)
+		str_ncpy(g_last_info, buf, sizeof(g_last_info));
 	if (getenv("VERBOSE"))
-		re_vfprintf(stderr, fmt, ap);
-}
-
-static char g_last_info[512];   /* the last info() line, for the log tests */
-
-void _info(bool safe, const char *fmt, ...)
-{
-	va_list ap;
-	(void)safe;
-	va_start(ap, fmt);
-	(void)re_vsnprintf(g_last_info, sizeof(g_last_info), fmt, ap);
-	va_end(ap);
-	va_start(ap, fmt);
-	log_va(fmt, ap);
-	va_end(ap);
-}
-
-void _warning(bool safe, const char *fmt, ...)
-{
-	va_list ap;
-	(void)safe;
-	va_start(ap, fmt);
-	log_va(fmt, ap);
-	va_end(ap);
+		fputs(buf, stderr);
 }
 
 static struct list g_aufiltl = LIST_INIT;
 
-struct list *baresip_aufiltl(void) { return &g_aufiltl; }
+struct list *mdt_aufiltl(void) { return &g_aufiltl; }
 
-void aufilt_register(struct list *aufiltl, struct aufilt *af)
+void mdt_aufilt_register(struct list *aufiltl, struct mdt_aufilt *af)
 {
 	af->enabled = true;
 	list_append(aufiltl, &af->le, af);
 }
 
-void aufilt_unregister(struct aufilt *af)
+void mdt_aufilt_unregister(struct mdt_aufilt *af)
 {
 	list_unlink(&af->le);
 }
@@ -105,21 +97,21 @@ uint64_t __wrap_tmr_jiffies(void) { return g_now_ms; }
 #define MAXF 8
 
 struct tcall {
-	const struct audio      *au;
-	struct aufilt_enc_st    *enc[MAXF];
-	struct aufilt_dec_st    *dec[MAXF];
-	const struct aufilt     *af[MAXF];
+	const struct mdt_audio      *au;
+	struct mdt_aufilt_enc_st    *enc[MAXF];
+	struct mdt_aufilt_dec_st    *dec[MAXF];
+	const struct mdt_aufilt     *af[MAXF];
 	int n;
 };
 
-/* What baresip's aufilt_setup does for a new call. */
+/* What the stack's mdt_aufilt_setup does for a new call. */
 static void tcall_open_tx(struct tcall *c)
 {
 	struct le *le;
 	int i = 0;
 	LIST_FOREACH(&g_aufiltl, le) {
-		struct aufilt *af = le->data;
-		struct aufilt_prm prm = {0};
+		struct mdt_aufilt *af = le->data;
+		struct mdt_aufilt_prm prm = {0};
 		void *ctx = NULL;   /* never shared: see the hold/resume test */
 		c->af[i] = af;
 		if (af->encupdh) {
@@ -137,8 +129,8 @@ static void tcall_open_rx(struct tcall *c)
 	struct le *le;
 	int i = 0;
 	LIST_FOREACH(&g_aufiltl, le) {
-		struct aufilt *af = le->data;
-		struct aufilt_prm prm = {0};
+		struct mdt_aufilt *af = le->data;
+		struct mdt_aufilt_prm prm = {0};
 		void *ctx = NULL;
 		if (af->decupdh) {
 			int err = af->decupdh(&c->dec[i], &ctx, af, &prm, c->au);
@@ -150,7 +142,7 @@ static void tcall_open_rx(struct tcall *c)
 	c->n = i;
 }
 
-static void tcall_open(struct tcall *c, const struct audio *au)
+static void tcall_open(struct tcall *c, const struct mdt_audio *au)
 {
 	memset(c, 0, sizeof(*c));
 	c->au = au;
@@ -182,7 +174,7 @@ static void tcall_tx(struct tcall *c, int16_t *p, size_t n,
 }
 
 /* RX walks the chain in reverse, as aureceiver does.  Returns what the
- * filters returned, OR'd: an RX error drops the frame in baresip. */
+ * filters returned, OR'd: an RX error drops the frame in the stack. */
 static int tcall_rx(struct tcall *c, int16_t *p, size_t n,
                     uint32_t srate, uint32_t ch)
 {
@@ -249,8 +241,8 @@ static void init(bool ns, bool agc, medut_aec_mode_t mode)
 	bsdk_audio_processing_init(ns, agc, mode, 1.0f, 0.0f, 0.0f);
 }
 
-static int g_au_ids[4];   /* distinct addresses standing in for struct audio */
-#define AU(i) ((const struct audio *)&g_au_ids[i])
+static int g_au_ids[4];   /* distinct addresses standing in for struct mdt_audio */
+#define AU(i) ((const struct mdt_audio *)&g_au_ids[i])
 
 /* ── NS gate ─────────────────────────────────────────────────────────────── */
 
@@ -357,7 +349,7 @@ static void test_ns_live_toggle(void)
 	CHECK(att <= -15.0, "gate not closed on noise (%.1f dB)", att);
 
 	/* Off mid-call: the very next frame passes untouched.  With
-	 * aufilt_enable() this reached only the next call. */
+	 * mdt_aufilt_enable() this reached only the next call. */
 	bsdk_ap_set_ns(false);
 	gen_noise(buf, n, -50.0f);
 	memcpy(ref, buf, sizeof(ref));
@@ -658,7 +650,7 @@ static void test_suppressor_slots_full(void)
 
 	init(false, false, MEDUT_AEC_SUPPRESSOR);
 	for (int i = 0; i < NCALLS; i++)
-		tcall_open(&c[i], (const struct audio *)&ids[i]);
+		tcall_open(&c[i], (const struct mdt_audio *)&ids[i]);
 
 	for (int t = 0; t < 300; t += 20) {
 		g_now_ms += 20;
@@ -771,7 +763,7 @@ static void test_suppressor_settles_on_far_noise(void)
 	bsdk_audio_processing_close();
 }
 
-/* The far end holds us and resumes: baresip rebuilds only the TX chain,
+/* The far end holds us and resumes: the stack rebuilds only the TX chain,
  * with a fresh ctx.  TX must still find its RX. */
 static void test_hold_resume_pairing(void)
 {
@@ -871,7 +863,7 @@ static void test_agc_rate(unsigned ptime)
 
 /* Every call's shared state goes with its last filter state.  A leaked
  * registry entry would be found again by the next call that happens to get
- * the same struct audio address — with the old call's far-end level in it. */
+ * the same struct mdt_audio address — with the old call's far-end level in it. */
 static void test_registry_entry_dies_with_call(void)
 {
 	struct tcall c;
@@ -899,7 +891,7 @@ static void test_registry_entry_dies_with_call(void)
 
 #ifdef BSDK_TEST_WEBRTC
 
-#include "../../src/webrtc_apm.h"
+#include "../../src/audio/webrtc_apm.h"
 
 #define ECHO_DELAY_MS 150
 #define HIST (SR * 20)

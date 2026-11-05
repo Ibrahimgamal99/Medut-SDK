@@ -52,7 +52,7 @@ server_url = "wss://pbx.example.com:8089/ws"
 | `client_key` | `const char *` | NULL | Client private key PEM path. |
 | `verify_server` | `bool` | true | Verify server certificate (SIP/WSS over TLS and `turns:` TURN servers). |
 | `sni_hostname` | `const char *` | NULL | SNI override (for reverse proxy). NULL = derive from URL. |
-| `user_agent` | `const char *` | NULL | `User-Agent` header value. |
+| `user_agent` | `const char *` | NULL | `User-Agent` (and `Server`) header value. NULL or empty: `Medut/<version>`, e.g. `Medut/2.0.0`. |
 
 ### WebSocket-specific
 
@@ -106,7 +106,7 @@ request is sent. This one bounds the window before it exists.
 | `media_enc` | `medut_media_enc_t` | `NONE` | `NONE`, `SDES`, `DTLS_SRTP` |
 
 A WSS or WebRTC-facing PBX offers `UDP/TLS/RTP/SAVPF` and will not
-negotiate against an account offering plain `RTP/AVP`. baresip reports the
+negotiate against an account offering plain `RTP/AVP`. The stack reports the
 mismatch as *"no common audio or video codecs"*, which sends you looking at
 the codec list — the codecs are usually fine and the media profile is the
 problem. Set `media_enc` to `DTLS_SRTP` for those deployments; the SDK
@@ -231,7 +231,7 @@ the address stays put and the link itself goes bad. Full guide:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `media_stall_ms` | `uint32_t` | 4000 | Fire `QUALITY_ALERT` with issue `MEDIA_STALL` after this long with no inbound RTP; fires again with `recovering` when it resumes. Non-fatal; 0 disables. Requires `stats_interval_ms` > 0 |
-| `rtp_timeout_s` | `uint32_t` | 0 | **End** the call after this long with no inbound RTP (baresip `avt.rtp_timeout`). 0 = never; 30–60 when wanted. Only sendrecv streams are checked, so a held call is never torn down |
+| `rtp_timeout_s` | `uint32_t` | 0 | **End** the call after this long with no inbound RTP (the stream's RTP timeout). 0 = never; 30–60 when wanted. Only sendrecv streams are checked, so a held call is never torn down |
 | `adaptive_bitrate` | `bool` | true | Step the audio encoder bitrate down under peer-reported loss and back up on recovery, via the codec's encoder-update path — no re-INVITE, no audio gap. Opus only; a fixed-rate codec has nothing to vary |
 | `adapt_min_bitrate` | `uint32_t` | 12000 | Adaptation floor, bps. Raised to 20000 while Opus FEC is in use (below it libopus cannot code FEC), unless the loss turns out to be congestion |
 | `adapt_max_bitrate` | `uint32_t` | 32000 | Adaptation ceiling, bps |
@@ -268,7 +268,7 @@ without tearing the stack down.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `tmp_dir` | `const char *` | NULL | Directory for baresip's temporary files. NULL = `$TMPDIR`, or `/tmp` on Linux. **Android must set this** to the app cache dir (`context.getCacheDir().getAbsolutePath()`): `/tmp` does not exist there and `$TMPDIR` is not reliably set from native code. |
+| `tmp_dir` | `const char *` | NULL | Directory for the SDK's working files (`.medut/`: the RFC 5626 instance id, the platform CA bundle). NULL = `$TMPDIR`, or `/tmp` on Linux. **Android must set this** to the app cache dir (`context.getCacheDir().getAbsolutePath()`): `/tmp` does not exist there and `$TMPDIR` is not reliably set from native code. |
 
 ---
 

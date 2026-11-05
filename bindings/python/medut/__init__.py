@@ -933,7 +933,7 @@ _STR_ICE_POLICY = {"all": 0, "relay": 1}
 
 
 def _ice_servers_array(servers):
-    """Build an medut_ice_server_t[] from dicts or (url, user, pass) tuples."""
+    """Build a medut_ice_server_t[] from dicts or (url, user, pass) tuples."""
     arr = ffi.new("medut_ice_server_t[]", max(len(servers), 1))
     refs = []
     for i, s in enumerate(servers):

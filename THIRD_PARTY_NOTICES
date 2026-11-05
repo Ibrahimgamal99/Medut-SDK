@@ -1,0 +1,119 @@
+THIRD-PARTY NOTICES
+===================
+
+Medut contains code adapted from, and links, the software below.  Each is
+distributed under the license reproduced here.
+
+
+1. baresip  (https://github.com/baresip/baresip)
+------------------------------------------------
+
+The Medut stack under src/ is Medut's own, built on libre.  Parts of it
+are adapted from baresip; each such file says so in its header.  So far:
+
+  src/sip/sip_stack.c   from src/uag.c and modules/uuid/uuid.c
+  src/sip/ua.c          from src/ua.c, src/account.c and src/custom_hdrs.c
+  src/sip/reg.c         from src/reg.c
+  src/sip/sipreq.c      from src/sipreq.c
+  src/sip/message.c     from src/message.c
+  src/sip/mwi.c         from modules/mwi/mwi.c
+  src/sip/presence.c    from modules/presence/ (subscriber.c, notifier.c,
+                        publisher.c; publisher.c also Copyright (C) 2014
+                        Juha Heinanen)
+  src/sip/call.c        from src/call.c
+  src/sip/call_api.c    from src/ua.c and src/account.c
+  src/media/stream.c, rtprecv.c, jbuf.c, audio.c, aureceiver.c, metric.c,
+  timestamp.c, sdp.c, aucodec.c, menc.c, rtpstat.c
+                        from the files of the same name in src/
+  src/media/mdt_media.h, src/sip/mdt_call.h
+                        from include/baresip.h and src/core.h
+  src/codec/g711.c      from modules/g711/g711.c
+  src/codec/opus.c, opus_enc.c, opus_dec.c, opus_sdp.c, opus.h
+                        from modules/opus/ (opus.c, encode.c, decode.c,
+                        sdp.c, opus.h)
+  src/menc/dtls_srtp.c, dtls.c, dtls_srtp_keys.c, dtls_srtp.h
+                        from modules/dtls_srtp/ (dtls_srtp_keys.c is its
+                        srtp.c)
+  src/menc/sdes_srtp.c, sdes.c, sdes.h
+                        from modules/srtp/ (sdes_srtp.c is its srtp.c)
+  src/core/stack.c      local-address selection from src/net.c
+  platform/linux/pulse*.c, pulse.h       from modules/pulse/
+  platform/macos/coreaudio*.c, *.h      from modules/coreaudio/
+  platform/windows/wasapi*.c, wasapi.h  from modules/wasapi/
+  platform/ios/audiounit*.c, *.h        from modules/audiounit/
+  src/core/mod.c        mdt_mediadev from src/mediadev.c
+  src/core/mod.c        the plug-in registries (src/ausrc.c, src/auplay.c,
+                        src/aufilt.c, src/mnat.c)
+
+Copyright (C) 2020 - 2026, Baresip Foundation (https://github.com/baresip)
+Copyright (c) 2010 - 2024, Alfred E. Heggestad
+Copyright (c) 2010 - 2021, Richard Aas
+Copyright (c) 2010 - 2021, Creytiv.com
+All rights reserved.
+
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+2. libre  (https://github.com/baresip/re)
+-----------------------------------------
+
+Linked into every Medut library, with the patches in
+cmake/patch-re-sources.cmake applied.
+
+Copyright (C) 2020 - 2026, Baresip Foundation (https://github.com/baresip)
+Copyright (c) 2010 - 2024, Alfred E. Heggestad
+Copyright (c) 2010 - 2020, Richard Aas
+Copyright (c) 2010 - 2020, Creytiv.com
+All rights reserved.
+
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

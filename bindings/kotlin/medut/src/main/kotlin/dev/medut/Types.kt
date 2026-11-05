@@ -121,6 +121,7 @@ enum class NetworkStage(val value: Int) {
 }
 
 enum class LogLevel(val value: Int) {
-    ERROR(0), WARNING(1), INFO(2), DEBUG(3);
+    /** No log events at all. */
+    OFF(-1), ERROR(0), WARNING(1), INFO(2), DEBUG(3);
     internal companion object { fun of(v: Int) = enumOf(v, WARNING) { it.value } }
 }

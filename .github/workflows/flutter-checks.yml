@@ -1,0 +1,162 @@
+name: Flutter checks
+
+# Manual only: start it from the Actions tab (or `gh workflow run
+# flutter-checks.yml`).  Checks the bindings and the example app against the
+# native libraries committed on the branch — "Build mobile libraries" builds
+# and commits those; run this after it:
+#
+#   Android  the example APK against the committed jniLibs — compiles the
+#            Kotlin SDK, its JNI layer and the Pigeon plugin, so a jniLibs
+#            refresh that no longer links against the JNI layer, or a plugin
+#            that no longer matches the Kotlin SDK, fails here
+#   iOS      MedutKit (the Swift SDK) and the example app against the
+#            committed Medut.xcframework, through the pod — no rebuild
+#   Dart     flutter analyze, the Pigeon glue up to date, flutter test
+on:
+  workflow_dispatch:
+
+jobs:
+  # ── Android: example APK (Pigeon plugin + Kotlin SDK + JNI layer) ──────────
+  android:
+    runs-on: ubuntu-22.04
+    name: Android · example APK
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert the prebuilt core is committed
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -f bindings/kotlin/medut/src/main/jniLibs/$abi/libmedut.so
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build example APK (debug)
+        working-directory: bindings/flutter/example
+        run: |
+          flutter pub get
+          flutter build apk --debug
+
+  # ── iOS: MedutKit + example app (pod) ──────────────────────────────────
+  ios:
+    runs-on: macos-15
+    name: iOS · MedutKit + example app
+    steps:
+      - uses: actions/checkout@v4
+
+      # git keeps the framework's exec bit; a slice missing its binary,
+      # header or module map is a broken commit, not something to build.
+      - name: Assert the prebuilt core is committed
+        run: |
+          for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+            fw=bindings/flutter/ios/Frameworks/Medut.xcframework/$slice/Medut.framework
+            test -x "$fw/Medut"
+            test -f "$fw/Headers/medut.h"
+            test -f "$fw/Modules/module.modulemap"
+          done
+
+      # Flutter's own plugins now ship Swift 6.1 syntax (shared_preferences_
+      # foundation 2.6+: a trailing comma in a parameter list), which an
+      # older Xcode rejects with "Unexpected ',' separator".  Take the newest
+      # stable Xcode 16.x (16.3 or later), else the newest stable one, and
+      # stop early if its Swift is older than 6.1.
+      - name: Select Xcode (Swift 6.1 or later)
+        run: |
+          stable() { grep -v -i -E 'beta|release_candidate|_rc'; }
+          XC=$(ls -d /Applications/Xcode_16.*.app 2>/dev/null | stable | sort -V | tail -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode_*.app | stable | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          SV=$(xcrun swift -version 2>&1 | sed -n 's/.*Swift version \([0-9]*\.[0-9]*\).*/\1/p' | head -1)
+          echo "Swift $SV from $XC"
+          if [ "$(printf '%s\n6.1\n' "$SV" | sort -V | head -1)" != "6.1" ]; then
+            echo "::error::Swift $SV is older than 6.1; the example app's plugins need Xcode 16.3+"
+            exit 1
+          fi
+
+      # The Swift SDK on its own, before CocoaPods gets involved: catches an
+      # API mismatch in MedutKit with a readable compiler error.  It links
+      # the committed framework (bindings/swift/Frameworks is a symlink).
+      - name: Compile MedutKit (iOS Simulator)
+        working-directory: bindings/swift
+        run: |
+          xcodebuild build -quiet \
+            -scheme MedutKit \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/MedutKit-dd" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # `pod install` vendors the committed framework; no signing on CI.
+      - name: Build example app (no codesign)
+        working-directory: bindings/flutter/example
+        run: |
+          flutter pub get
+          flutter build ios --debug --no-codesign
+
+  # ── Dart binding: analyzer + tests ───────────────────────────────────────
+  # test/medut_test.dart covers the mobile (Pigeon) side against fake host
+  # channels. The native library is built first so the desktop FFI backend's
+  # test/medut_smoke_test.dart actually runs: it self-skips when
+  # dist/linux/x86_64/medut.so is missing, so without this the job passed
+  # while executing nothing.
+  dart:
+    runs-on: ubuntu-22.04
+    name: Dart · analyze + tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc g++ pkg-config libssl-dev libpulse-dev
+
+      # AEC off: the webrtc_aec module needs libwebrtc-audio-processing-1, which
+      # has no ubuntu-22.04 package and would mean building it from source here.
+      # Nothing under test/ exercises AEC.
+      - name: Build native library
+        run: bash scripts/build-linux.sh
+        env:
+          MEDUT_WITH_WEBRTC_AEC: 'OFF'
+
+      # Guards against silently going back to a vacuous test run. The smoke
+      # test resolves this same path relative to bindings/flutter.
+      - name: Assert the tests have a library to load
+        run: test -f dist/linux/x86_64/medut.so
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze (plugin, tests and example)
+        working-directory: bindings/flutter
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos
+
+      # The generated Pigeon glue must match pigeons/messages.dart.
+      - name: Pigeon output is up to date
+        working-directory: bindings/flutter
+        run: |
+          dart run pigeon --input pigeons/messages.dart
+          git diff --exit-code -- lib/src/messages.g.dart \
+            android/src/main/kotlin/dev/medut/flutter/Messages.g.kt \
+            ios/Classes/Messages.g.swift
+
+      - name: Tests (e2e_asterisk_test self-skips without a SIP server)
+        working-directory: bindings/flutter
+        run: flutter test

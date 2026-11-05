@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# Download the prebuilt iOS xcframework from an ios-xcframework CI run into
-# bindings/flutter/ios/Frameworks, where the Flutter plugin's pod vendors it
-# and the Swift package (bindings/swift/Frameworks is a symlink) links it.
+# Download the native libraries a "Build mobile libraries" CI run built
+# (.github/workflows/build-mobile.yml) into the tree:
+#   iOS      Medut.xcframework -> bindings/flutter/ios/Frameworks, where the
+#            Flutter plugin's pod vendors it and the Swift package
+#            (bindings/swift/Frameworks is a symlink) links it
+#   Android  libmedut.so per ABI -> bindings/kotlin/medut/src/main/jniLibs
+#
+# A run with "commit" checked (the default) has already committed both to its
+# branch — `git pull` is enough.  This is for a run with it unchecked, or to
+# take another branch's build.
 #
 #   scripts/fetch-prebuilt.sh                 latest successful run on main
 #   scripts/fetch-prebuilt.sh --wait          wait for the newest run, then sync
 #   scripts/fetch-prebuilt.sh --run-id 123    a specific run
 #   scripts/fetch-prebuilt.sh --branch dev    latest successful run on a branch
 #
-# iOS only. Android has no CI job any more (see .github/workflows/
-# ios-xcframework.yml) — build its jniLibs locally with scripts/build-android.sh.
-#
 # Why this exists: the bindings ship *prebuilt* binaries, so a consumer adding
 # them as a git dependency gets whatever is committed — not whatever CI last
-# built. CI uploads the xcframework as an artifact, but nothing commits it
-# back, so the two drift silently. That drift has already shipped once: the
+# built, and the two can drift. That drift has already shipped once: the
 # committed libmedut.so predated the baresdk_* -> medut_* rename and exported
 # none of the medut_* symbols, so apps built, installed, and then failed at the
 # first SDK call.
@@ -28,20 +31,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-WORKFLOW="ios-xcframework.yml"
+WORKFLOW="build-mobile.yml"
 BRANCH="main"
 RUN_ID=""
 WAIT=0
 EXPLICIT=0
 
 IOS_DEST="${ROOT}/bindings/flutter/ios/Frameworks/Medut.xcframework"
+JNI_DEST="${ROOT}/bindings/kotlin/medut/src/main/jniLibs"
+ABIS="arm64-v8a armeabi-v7a x86_64"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --run-id) RUN_ID="$2"; EXPLICIT=1; shift 2 ;;
     --branch) BRANCH="$2"; shift 2 ;;
     --wait)   WAIT=1; shift ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "ERROR: unknown argument '$1' (try --help)" >&2; exit 1 ;;
   esac
 done
@@ -105,19 +110,21 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
 # ---------------------------------------------------------------------------
-# iOS — the artifact holds the framework's *contents* (the workflow's upload
-# path ends in "/"), so the destination directory has to supply the
-# Medut.xcframework name itself.
+# iOS — the artifact is one zip made by ditto (symlinks and the exec bit kept)
+# holding Medut.xcframework itself.
 # ---------------------------------------------------------------------------
-echo "=== iOS: ios-xcframework ==="
-gh run download "${RUN_ID}" -n ios-xcframework -D "${TMP}/ios"
-if [ ! -f "${TMP}/ios/Info.plist" ]; then
-  echo "ERROR: artifact is not an xcframework payload (no top-level Info.plist)" >&2
+echo "=== iOS: ios-xcframework-zip ==="
+gh run download "${RUN_ID}" -n ios-xcframework-zip -D "${TMP}/zip"
+mkdir -p "${TMP}/ios"
+unzip -q "${TMP}/zip/Medut.xcframework.zip" -d "${TMP}/ios"
+rm -rf "${TMP}/ios/__MACOSX"   # resource forks, if ditto stored any
+if [ ! -f "${TMP}/ios/Medut.xcframework/Info.plist" ]; then
+  echo "ERROR: artifact is not an xcframework payload (no Info.plist)" >&2
   exit 1
 fi
 rm -rf "${IOS_DEST}"
 mkdir -p "$(dirname "${IOS_DEST}")"
-mv "${TMP}/ios" "${IOS_DEST}"
+mv "${TMP}/ios/Medut.xcframework" "${IOS_DEST}"
 
 # The framework binary must stay executable. actions/upload-artifact has
 # historically dropped the exec bit, and git tracks it — a 644 binary is a
@@ -172,7 +179,34 @@ while read -r BIN; do
   echo "  ios/${SLICE}: ${N} medut_* symbols"
 done < <(find "${IOS_DEST}" -name Medut -type f)
 
+# ---------------------------------------------------------------------------
+# Android — the artifact holds <abi>/libmedut.so for each ABI.
+# ---------------------------------------------------------------------------
+echo "=== Android: android-jniLibs ==="
+gh run download "${RUN_ID}" -n android-jniLibs -D "${TMP}/android"
+for ABI in ${ABIS}; do
+  SO="${TMP}/android/${ABI}/libmedut.so"
+  if [ ! -s "${SO}" ]; then
+    echo "ERROR: android/${ABI}: no libmedut.so in the artifact" >&2
+    exit 1
+  fi
+  if command -v nm >/dev/null && nm -D "${SO}" >/dev/null 2>&1; then
+    N=$(nm -D --defined-only "${SO}" | grep -c ' medut_' || true)
+  else
+    N=$(strings -a "${SO}" 2>/dev/null | grep -c '^medut_' || true)
+  fi
+  if [ "${N}" -lt 40 ]; then
+    echo "ERROR: android/${ABI}: only ${N} medut_* symbols" >&2
+    exit 1
+  fi
+  echo "  android/${ABI}: ${N} medut_* symbols"
+done
+for ABI in ${ABIS}; do
+  mkdir -p "${JNI_DEST}/${ABI}"
+  cp "${TMP}/android/${ABI}/libmedut.so" "${JNI_DEST}/${ABI}/libmedut.so"
+done
+
 echo ""
 echo "Synced from run ${RUN_ID} (${SHA:0:12}). Review and commit:"
-echo "  git add bindings/flutter/ios/Frameworks"
-echo "(Android jniLibs are not fetched — build them with scripts/build-android.sh)"
+echo "  git add -f bindings/flutter/ios/Frameworks/Medut.xcframework"
+echo "  git add bindings/kotlin/medut/src/main/jniLibs"

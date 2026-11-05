@@ -144,7 +144,7 @@ class MedutConfig {
   /// Global codec preference, most preferred first, by name: `opus`,
   /// `ulaw`/`g711u`/`pcmu`, `alaw`/`g711a`/`pcma` — the full set compiled
   /// into the library, on every platform. Matched case-insensitively; an
-  /// unrecognized name is passed through to baresip, so a codec registered
+  /// unrecognized name is passed through to the codec lookup, so a codec registered
   /// by a module added to the build works too.
   ///
   /// Applies to every account that does not set [AccountConfig.audioCodecs].
@@ -364,11 +364,10 @@ class MedutConfig {
   /// Live SIP+RTP capture to this pcap file; null = off.
   final String? pcapPath;
 
-  /// 0=err, 1=warn, 2=info, 3=debug; null keeps the C default (1).  Values
-  /// above 3 log everything, like 3.  On Android and iOS the native SDKs
-  /// take 0..3 only, so the plugin sends 4 and above as 3; a negative value
-  /// (no log events at all) reaches the C library on desktop only and is
-  /// sent as 0 on mobile.
+  /// -1=off (no log events), 0=err, 1=warn, 2=info, 3=debug; null keeps the
+  /// C default (1).  Values above 3 log everything, like 3.  On Android and
+  /// iOS the native SDKs take -1..3, so the plugin sends 4 and above as 3
+  /// and any negative value as -1.
   final int? logLevel;
 
   // ── Network handover ───────────────────────────────────────────────────

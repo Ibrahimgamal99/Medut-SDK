@@ -5,12 +5,12 @@
  * whole stack is up, and that a unit test on audio_external.c alone cannot
  * see:
  *
- *   1. The switch actually re-points baresip at the "external" driver, and
+ *   1. The switch actually re-points the stack at the "external" driver, and
  *      switching back restores the platform device rather than leaving the
  *      stack pointed at a module that is not there.
  *   2. The driver survives a shutdown/init cycle.  This is the regression that
- *      motivated the test: baresip_close()/baresip_init() re-initialise the
- *      device lists, so a registration made before a restart is discarded.
+ *      motivated the test: a shutdown re-initialises the device lists, so a
+ *      registration made before a restart is discarded.
  *      Nothing called bsdk_audio_external_close(), so the driver believed it
  *      was still registered, skipped re-registering, and use_external(true)
  *      went on returning 0 while every call came up with no audio at all.
@@ -38,10 +38,10 @@
 #include "../include/medut.h"
 
 /* White-box on purpose: the alternative to reading back what the SDK told
- * baresip is a live peer to negotiate a codec with. */
+ * the stack is a live peer to negotiate a codec with. */
 #include <re.h>
 #include <rem.h>
-#include <baresip.h>
+#include "../src/core/mdt_stack.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -69,14 +69,15 @@ static int start_sdk(void)
 	return medut_init(&cfg);
 }
 
+/* One driver serves capture and playback (src/audio/device.c). */
 static const char *src_mod(void)
 {
-	return conf_config()->audio.src_mod;
+	return mdt_audio_driver();
 }
 
 static const char *play_mod(void)
 {
-	return conf_config()->audio.play_mod;
+	return mdt_audio_driver();
 }
 
 int main(void)
@@ -90,7 +91,7 @@ int main(void)
 	      "use_external before init: expected MEDUT_ERR_STATE (%d), got %d\n",
 	      MEDUT_ERR_STATE, err);
 
-	/* ── 2. The switch reaches baresip both ways ─────────────────────── */
+	/* ── 2. The switch reaches the stack both ways ───────────────────── */
 
 	err = start_sdk();
 	if (err) {
@@ -98,8 +99,8 @@ int main(void)
 		return 1;
 	}
 
-	/* Whatever modules_init() settled on — pulse here, sles_vc/audiounit on
-	 * mobile. Remember it so we can prove it comes back. */
+	/* Whatever the stack settled on — the platform driver, or "null" on a
+	 * build without one.  Remember it so we can prove it comes back. */
 	char platform_mod[64];
 	str_ncpy(platform_mod, src_mod(), sizeof(platform_mod));
 	CHECK(strcmp(platform_mod, "external") != 0,
@@ -111,9 +112,9 @@ int main(void)
 	      "capture module: expected 'external', got '%s'\n", src_mod());
 	CHECK(strcmp(play_mod(), "external") == 0,
 	      "playback module: expected 'external', got '%s'\n", play_mod());
-	CHECK(ausrc_find(baresip_ausrcl(), "external") != NULL,
+	CHECK(mdt_ausrc_find(mdt_ausrcl(), "external") != NULL,
 	      "the 'external' capture driver must be registered\n");
-	CHECK(auplay_find(baresip_auplayl(), "external") != NULL,
+	CHECK(mdt_auplay_find(mdt_auplayl(), "external") != NULL,
 	      "the 'external' playback driver must be registered\n");
 
 	/* No call is up, so there is no device open behind it yet. */
@@ -139,9 +140,9 @@ int main(void)
 		return 1;
 	}
 
-	CHECK(ausrc_find(baresip_ausrcl(), "external") != NULL,
+	CHECK(mdt_ausrc_find(mdt_ausrcl(), "external") != NULL,
 	      "the capture driver must be re-registered after a restart\n");
-	CHECK(auplay_find(baresip_auplayl(), "external") != NULL,
+	CHECK(mdt_auplay_find(mdt_auplayl(), "external") != NULL,
 	      "the playback driver must be re-registered after a restart\n");
 
 	err = medut_audio_use_external(true);
@@ -150,13 +151,13 @@ int main(void)
 	      "capture module after restart: got '%s'\n", src_mod());
 
 	/* The real point of the restart case: use_external() returning 0 is not
-	 * worth much on its own, because it only writes a module name into the
-	 * config. What matters is that the name still resolves to a driver. */
-	struct ausrc_prm prm = {
+	 * worth much on its own, because it only records a driver name.  What
+	 * matters is that the name still resolves to a driver. */
+	struct mdt_ausrc_prm prm = {
 		.srate = 8000, .ch = 1, .ptime = 20, .fmt = AUFMT_S16LE,
 	};
-	struct ausrc_st *st = NULL;
-	err = ausrc_alloc(&st, baresip_ausrcl(), src_mod(), &prm, NULL,
+	struct mdt_ausrc_st *st = NULL;
+	err = mdt_ausrc_alloc(&st, mdt_ausrcl(), src_mod(), &prm, NULL,
 	                  NULL, NULL, NULL);
 	CHECK(err == EINVAL || err == 0,
 	      "the configured module must resolve to a real driver after a "

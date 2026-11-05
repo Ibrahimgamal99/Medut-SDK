@@ -599,9 +599,9 @@ private extension ConfigMessage {
         if let v = traceSip { c.traceSIP = v }
         if let v = traceSdpDiff { c.traceSDPDiff = v }
         if let v = pcapPath { c.pcapPath = v }
-        // The C library takes any int (-1 = no log events, above 3 = like 3);
-        // LogLevel has 0...3, so clamp rather than refuse.
-        if let v = logLevel { c.logLevel = try enumValue(min(max(v, 0), 3)) }
+        // The C library takes any int (below 0 = no log events, above 3 =
+        // like 3); LogLevel has -1...3, so clamp rather than refuse.
+        if let v = logLevel { c.logLevel = try enumValue(min(max(v, -1), 3)) }
         return c
     }
 }

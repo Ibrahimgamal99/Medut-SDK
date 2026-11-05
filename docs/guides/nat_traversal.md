@@ -149,7 +149,8 @@ Every entry is resolved and asked on every gather — the first offer and the
 re-gather of each ICE restart — and the list is read again at each restart,
 so `medut_account_set_ice_servers()` with fresh TURN credentials reaches the
 next handover without touching the call. When both forms are set the list
-wins; when only the legacy fields are set, both of them are used (TURN first).
+wins; when only the legacy fields are set, both of them are used (TURN first)
+rather than TURN shadowing STUN.
 
 `MEDUT_ICE_TRANSPORT_RELAY` is the browser's `iceTransportPolicy: "relay"`:
 only relayed candidates are offered or accepted, and a call whose TURN

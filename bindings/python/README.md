@@ -2,7 +2,7 @@
 
 There was no production-ready VoIP SDK for Python — if you wanted SIP calling, you had to wrap C libraries yourself or glue together low-level tools. Medut SDK fixes that.
 
-Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [Medut SDK](https://github.com/Ibrahimgamal99/Medut-SDK), built on [baresip](https://github.com/baresip/baresip) + [libre](https://github.com/baresip/re).
+Register an account, place and receive calls, handle encryption and NAT traversal, monitor call quality — all from Python. Python bindings for [Medut SDK](https://github.com/Ibrahimgamal99/Medut-SDK), built on its own SIP and media stack on [libre](https://github.com/baresip/re).
 
 ```bash
 pip install medut
@@ -35,7 +35,7 @@ sudo dnf install openssl-libs pulseaudio-libs         # Fedora/RHEL
 sudo pacman -S openssl libpulse                       # Arch
 ```
 
-> `import Medut` prints the exact install command if either is missing.  
+> `import medut` prints the exact install command if either is missing.  
 > `libwebrtc-audio-processing-1` is optional — enables `AEC_WEBRTC` full-duplex mode; the SDK works without it.
 
 **Windows** — only the [Visual C++ Redistributable 2015–2022](https://aka.ms/vs/17/release/vc_redist.x64.exe) required. OpenSSL, zlib, and opus are statically embedded.

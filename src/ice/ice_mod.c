@@ -1,9 +1,9 @@
 /**
- * @file ice_mod.c  medut-ice: the baresip media-NAT module and SDK seams
+ * @file ice_mod.c  medut-ice: the stack's ICE media-NAT and SDK seams
  *
- * Registers as media-NAT "ice" (the id baresip matches to advertise
+ * Registers as media-NAT "ice" (the id the UA matches to advertise
  * `Supported: ice`, and ftag "+sip.ice" for the Contact) and owns
- * everything between baresip and the engine in ice_*.c: session and media
+ * everything between the call layer and the agent in ice_*.c: session and media
  * wrappers with stable pointers, one generation per stream sharing the
  * session's credentials, gathering and its deadline, the release of the
  * deferred INVITE / re-INVITE, connectivity checks primed while an inbound
@@ -14,7 +14,7 @@
  * Every behaviour carried over from src/ice_shim.c is marked with the date
  * of the on-device incident that produced it; see the plan for the list.
  *
- * Threads: baresip calls sessh/mediah/updateh/attrh and our handlers on
+ * Threads: the stack calls sessh/mediah/updateh/attrh and our handlers on
  * re_main.  The one exception is the stream-socket *send* helper, which
  * runs on the audio encoder thread for RTP: it reads only the
  * mutex-guarded txsel snapshot and never touches agent state.
@@ -22,7 +22,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "medut_internal.h"
+#include "../core/medut_internal.h"
 #include "ice_internal.h"
 
 
@@ -30,11 +30,11 @@
 
 struct icea_media;
 
-/** What baresip holds as `call->mnats`. */
+/** What the call holds as `call->mnats`. */
 struct icea_sess {
 	struct le le;                 /* g_sessl                                */
-	void *call;                   /* borrowed struct call * (estabh's arg)  */
-	mnat_estab_h *estabh;
+	void *call;                   /* borrowed struct mdt_call * (estabh's arg)  */
+	mdt_mnat_estab_h *estabh;
 	struct sdp_session *sdp;      /* mem_ref'd: call_destructor frees the SDP
 	                                 before the media-NAT                    */
 	struct dnsc *dnsc;            /* borrowed; owned by the SIP stack        */
@@ -58,12 +58,12 @@ struct icea_sess {
 
 	struct list medial;           /* owned struct icea_media               */
 	struct tmr tmr_gather;        /* gathering deadline                      */
-	struct tmr tmr_bounce;        /* leave baresip's call stack first        */
+	struct tmr tmr_bounce;        /* leave the call layer's stack first      */
 	struct tmr tmr_reoffer;       /* re-offer held for the DTLS handshake    */
 	struct tmr tmr_media;         /* media-start watchdog, from the answer   */
 	uint64_t reoffer_due;
 
-	bool released;                /* the offer has been handed to baresip    */
+	bool released;                /* the offer has been handed to the call   */
 	bool restarting;              /* a restart gather is outstanding         */
 	bool in_estab;                /* inside estabh — see icea_updateh()      */
 	bool await_answer;            /* a restart offer is on the wire          */
@@ -79,7 +79,7 @@ struct icea_sess {
 	enum icea_state state;
 };
 
-/** What baresip holds as `stream->mns`.  Its address never changes. */
+/** What the stream holds as `stream->mns`.  Its address never changes. */
 struct icea_media {
 	struct le le;                 /* sess->medial                           */
 	struct icea_sess *sess;       /* borrowed; NULL once the session is gone */
@@ -94,7 +94,7 @@ struct icea_media {
 	mtx_t *tx_mtx;                /* owned; guards txsel[]                   */
 	struct icea_txsel txsel[ICEA_MAX_COMP];
 
-	mnat_connected_h *connh;      /* borrowed: baresip's stream handler     */
+	mdt_mnat_connected_h *connh;      /* borrowed: the stream's handler          */
 	void *arg;
 
 	struct sa vpeer[ICEA_MAX_COMP];  /* constant virtual peer per component */
@@ -105,19 +105,24 @@ struct icea_media {
 	bool plain;                   /* peer without ICE: pass through          */
 	bool in_inject;               /* recv helper: this datagram is ours     */
 
+	/* DTLS that arrived before media started (see early_dtls_keep()) */
+	struct mbuf *early[ICEA_MAX_COMP][ICEA_EARLY_DTLS_MAX];
+	struct sa early_src[ICEA_MAX_COMP][ICEA_EARLY_DTLS_MAX];
+	unsigned nearly[ICEA_MAX_COMP];
+
 	struct sa signalled;          /* laddr the peer was told (re-offer rule)*/
 	enum icea_state state;
 };
 
 static struct list g_sessl = LIST_INIT;
-static struct mnat mnat_ice;   /* registered struct; defined at the end */
+static struct mdt_mnat mdt_mnat_ice;   /* registered struct; defined at the end */
 
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
 static void sdk_debug_h(const char *line)
 {
-	debug("%s", line);
+	MDT_DBG("%s", line);
 }
 
 
@@ -137,13 +142,13 @@ static struct icea_sess *sess_find(const void *call)
 static bool call_is_incoming(const struct icea_sess *s)
 {
 	return s->call &&
-	       call_state((const struct call *)s->call) == CALL_STATE_INCOMING;
+	       mdt_call_state((const struct mdt_call *)s->call) == MDT_CALL_INCOMING;
 }
 
 
 /* Has the peer been given our answer — fingerprint, setup role, credentials —
  * so that media may start?  True once we are out of the incoming state (a
- * delayed-offer INVITE answers in the ACK), and from the moment baresip runs
+ * delayed-offer INVITE answers in the ACK), and from the moment the call runs
  * updateh to build the answer itself: call_answer() calls us one step before
  * sdp_encode() and sipsess_answer(), so by the time anything else in this
  * module runs — a bounce, a socket callback — the answer is on the wire. */
@@ -154,14 +159,14 @@ static bool answer_is_out(const struct icea_sess *s)
 
 
 /* The address the call signals from: the session's own c= when set, else
- * the interface baresip would pick for the family. */
+ * the interface the stack would pick for the family. */
 static const struct sa *sig_addr(const struct icea_sess *s)
 {
 	const struct sa *sig = s->sdp ? sdp_session_laddr(s->sdp) : NULL;
 
 	if (sig && sa_isset(sig, SA_ADDR))
 		return sig;
-	return net_laddr_af(baresip_network(), s->af);
+	return mdt_net_laddr_af(s->af);
 }
 
 
@@ -188,15 +193,99 @@ static bool sess_awaiting_secure(const struct icea_sess *s)
 	if (!dtls)
 		return false;
 
-	streaml = call_streaml((const struct call *)s->call);
+	streaml = mdt_call_streaml((const struct mdt_call *)s->call);
 	if (!streaml)
 		return false;
 
 	LIST_FOREACH(streaml, le) {
-		if (!stream_is_secure(le->data))
+		if (!mdt_stream_is_secure(le->data))
 			return true;
 	}
 	return false;
+}
+
+
+/* ── DTLS before media starts ────────────────────────────────────────────── */
+
+/* A peer that takes the DTLS client role (setup:active — Asterisk answering
+ * our offer) sends its ClientHello the moment its own ICE concludes, which
+ * is our nominated check reaching it: a millisecond or two before our ICE
+ * sees the same pair succeed and starts media.  That ClientHello found no
+ * DTLS socket, went up as RTP and was dropped, and the call waited for its
+ * retransmission — one second of silence after answer (2026-11-03).  Keep
+ * the few DTLS records that come before media starts and hand them to the
+ * DTLS layer once it is there. */
+
+static void early_dtls_flush(struct icea_media *m)
+{
+	for (unsigned c = 0; c < ICEA_MAX_COMP; c++) {
+		for (unsigned i = 0; i < m->nearly[c]; i++)
+			m->early[c][i] = mem_deref(m->early[c][i]);
+		m->nearly[c] = 0;
+	}
+}
+
+/* re_main: keep a DTLS record (RFC 7983: first byte 20..63) that came
+ * before media started.  True when kept (the caller consumes it). */
+static bool early_dtls_keep(struct icea_media *m, unsigned compid,
+			    const struct sa *src, const struct mbuf *mb)
+{
+	const unsigned c = compid - 1;
+	size_t n = mbuf_get_left(mb);
+	struct mbuf *copy;
+	uint8_t b;
+
+	if (!n || n > 2048)
+		return false;
+
+	b = mbuf_buf(mb)[0];
+	if (b < 20 || b > 63)
+		return false;
+
+	if (m->nearly[c] >= ICEA_EARLY_DTLS_MAX)
+		return true;            /* enough: the peer retransmits anyway */
+
+	copy = mbuf_alloc(n);
+	if (!copy)
+		return false;
+	(void)mbuf_write_mem(copy, mbuf_buf(mb), n);
+	copy->pos = 0;
+
+	m->early[c][m->nearly[c]]     = copy;
+	m->early_src[c][m->nearly[c]] = *src;
+	m->nearly[c]++;
+
+	MDT_DBG("Medut/ice: '%s' DTLS from %J before media started:"
+		 " kept\n", sdp_media_name(m->sdpm), src);
+	return true;
+}
+
+/* Media has started (the DTLS socket exists now): deliver what was kept,
+ * as from the peer every later datagram appears to come from. */
+static void early_dtls_replay(struct icea_media *m)
+{
+	for (unsigned c = 0; c < ICEA_MAX_COMP && c < m->ncomp; c++) {
+		struct udp_sock *us = m->sock[c];
+
+		for (unsigned i = 0; i < m->nearly[c]; i++) {
+			struct mbuf *mb = m->early[c][i];
+			struct sa src = m->vpeer_set && !m->plain
+				? m->vpeer[c] : m->early_src[c][i];
+
+			if (!us || !m->uh[c])
+				break;
+
+			MDT_INFO("Medut/ice: '%s' handing DTLS that came"
+				  " before media started to the DTLS layer\n",
+				  sdp_media_name(m->sdpm));
+
+			m->in_inject = true;
+			udp_recv_helper(us, &src, mb, m->uh[c]);
+			m->in_inject = false;
+		}
+	}
+
+	early_dtls_flush(m);
 }
 
 
@@ -230,6 +319,8 @@ static void fire_connh(struct icea_media *m)
 	m->connh(&m->vpeer[0], m->ncomp > 1 ? &m->vpeer[1] : NULL, m->arg);
 	m->connh_fired = true;
 	m->held        = false;
+
+	early_dtls_replay(m);
 }
 
 
@@ -254,6 +345,8 @@ static void fire_connh_plain(struct icea_media *m)
 
 	m->connh(raddr, m->ncomp > 1 ? &rtcp : NULL, m->arg);
 	m->connh_fired = true;
+
+	early_dtls_replay(m);
 }
 
 
@@ -284,8 +377,8 @@ static void publish_txsel(struct icea_media *m, unsigned compid)
 
 /* ── Offer release and the deadline ──────────────────────────────────────── */
 
-/* Hand the offer to baresip.  On success in_estab flags that any updateh
- * baresip runs from inside estabh belongs to *our* offer, not to an answer
+/* Hand the offer to the call.  On success in_estab flags that any updateh
+ * the call runs from inside estabh belongs to *our* offer, not to an answer
  * (2026-09-02: checks against the peer's old credentials, 401 every time).
  * On failure `s` may be gone when estabh returns (CALL_EVENT_CLOSED). */
 static void estab_release(struct icea_sess *s, int err, uint16_t scode,
@@ -345,7 +438,7 @@ static bool relay_only_unmet(const struct icea_sess *s)
  * that actually goes out carries the reflexive address gathering just found,
  * so comparing a later selection against the seed reports "never signalled"
  * for an address the peer was told about, and the log says so in as many
- * words.  Take the baseline from what the SDP carries at the moment baresip is
+ * words.  Take the baseline from what the SDP carries at the moment the call is
  * about to build the offer or answer from it.
  */
 static void media_write_sdp(struct icea_sess *s, struct icea_media *m)
@@ -383,12 +476,12 @@ static void release_offer(struct icea_sess *s, const char *why)
 		 * candidates would make the peer fall back to c= — a policy
 		 * violation.  Initial offer: fail the call fast.  Restart:
 		 * no re-INVITE, report, leave the call as it is. */
-		warning("Medut/ice: relay-only policy and no relayed"
+		MDT_WARN("Medut/ice: relay-only policy and no relayed"
 			" candidate (%s) — %s\n", why,
 			s->restarting ? "not re-offering" : "failing the call");
 		if (s->restarting) {
 			s->restarting = false;
-			bsdk_netmon_call_ice_failed((struct call *)s->call,
+			bsdk_netmon_call_ice_failed((struct mdt_call *)s->call,
 						    ETIMEDOUT);
 			return;
 		}
@@ -401,7 +494,7 @@ static void release_offer(struct icea_sess *s, const char *why)
 		/* A late report on an offer already out (2026-08-31 lesson):
 		 * never a re-INVITE mid-handshake.  The prflx rule in
 		 * on_selected() decides whether the new address needs one. */
-		debug("Medut/ice: gathering reported again after the offer"
+		MDT_DBG("Medut/ice: gathering reported again after the offer"
 		      " went out (%s) — nothing to send\n", why);
 		return;
 	}
@@ -410,7 +503,7 @@ static void release_offer(struct icea_sess *s, const char *why)
 	s->restarting = false;
 	s->released   = true;
 
-	info("Medut/ice: %s — %s\n",
+	MDT_INFO("Medut/ice: %s — %s\n",
 	     was_restart ? "restart gathered" : "gathered", why);
 
 	estab_release(s, 0, 0, NULL);
@@ -432,7 +525,7 @@ static void gather_deadline_h(void *arg)
 	if (s->released && !s->restarting)
 		return;
 
-	warning("Medut/ice: %s gathering did not complete in %u ms —"
+	MDT_WARN("Medut/ice: %s gathering did not complete in %u ms —"
 		" offering what exists\n",
 		s->restarting ? "restart" : "candidate",
 		g_bsdk.cfg.ice_gathering_timeout_ms
@@ -511,7 +604,7 @@ static enum icea_state sess_state(const struct icea_sess *s)
 static void emit_ice_state(struct icea_sess *s, struct icea_media *m,
 			   enum icea_state prev, enum icea_state now)
 {
-	struct medut_call *lc = bsdk_call_find((struct call *)s->call);
+	struct medut_call *lc = bsdk_call_find((struct mdt_call *)s->call);
 	struct medut_queued_event *qev;
 	const struct icea_pair *p = m->cur ? m->cur->selected[0] : NULL;
 	size_t off = 0;
@@ -567,13 +660,13 @@ static void on_state(struct icea_gen *gen, enum icea_state prev,
 	if (!s)
 		return;
 
-	info("Medut/ice: '%s' gen %u: %s -> %s\n", sdp_media_name(m->sdpm),
+	MDT_INFO("Medut/ice: '%s' gen %u: %s -> %s\n", sdp_media_name(m->sdpm),
 	     gen->seq, icea_state_name(prev), icea_state_name(now));
 
 	if (now == ICEA_STATE_FAILED) {
 		/* Report, never tear down: the app decides (2026-09-10 —
 		 * three silent calls that nobody had been told about). */
-		bsdk_netmon_call_ice_failed((struct call *)s->call, ETIMEDOUT);
+		bsdk_netmon_call_ice_failed((struct mdt_call *)s->call, ETIMEDOUT);
 	}
 
 	agg = sess_state(s);
@@ -583,7 +676,7 @@ static void on_state(struct icea_gen *gen, enum icea_state prev,
 		s->state = agg;
 		/* netmon reads this to tell "our path died" from "the far end
 		 * went quiet" when it is asked to repair a stall. */
-		bsdk_netmon_call_ice_state((struct call *)s->call, (int)before,
+		bsdk_netmon_call_ice_state((struct mdt_call *)s->call, (int)before,
 					   (int)agg);
 		emit_ice_state(s, m, before, agg);
 	}
@@ -611,7 +704,7 @@ static void on_selected(struct icea_gen *gen, unsigned compid, void *arg)
 	if (!m->connh_fired && p->ws == ICEA_WS_WRITABLE) {
 		if (!answer_is_out(s)) {
 			if (!m->held)
-				info("Medut/ice: '%s' concluded on %J while"
+				MDT_INFO("Medut/ice: '%s' concluded on %J while"
 				     " ringing — media starts with the answer\n",
 				     sdp_media_name(m->sdpm), &p->rc->addr);
 			m->held = true;
@@ -631,7 +724,7 @@ static void on_selected(struct icea_gen *gen, unsigned compid, void *arg)
 	    p->lc->type == ICE_CAND_TYPE_PRFLX && s->released &&
 	    !s->restarting) {
 		s->reoffered = true;
-		info("Medut/ice: selected local candidate %J was never"
+		MDT_INFO("Medut/ice: selected local candidate %J was never"
 		     " signalled (offered %J) — re-offering it\n",
 		     &p->lc->addr, &m->signalled);
 		s->reoffer_due = icea_now() + ICEA_REOFFER_SECURE_DEADLINE_MS;
@@ -696,6 +789,9 @@ static bool stream_recv_h(struct sa *src, struct mbuf *mb, void *arg)
 	else if (gen->conf->drop_unknown_src) {
 		return true;
 	}
+
+	if (!m->connh_fired && early_dtls_keep(m, compid, src, mb))
+		return true;
 
 	if (m->vpeer_set)
 		*src = m->vpeer[compid - 1];
@@ -843,14 +939,14 @@ static bool extra_if_h(const char *ifname, const struct sa *sa, void *arg)
 		err = icea_port_alloc(gen, i + 1, sa, ifname, cost, ctx->pmin,
 				      ctx->pmax, &port);
 		if (err) {
-			debug("Medut/ice: no pinned port on %s (%j): %m —"
+			MDT_DBG("Medut/ice: no pinned port on %s (%j): %m —"
 			      " not gathering there\n", ifname, sa, err);
 			return false;
 		}
 	}
 
 	ctx->added++;
-	info("Medut/ice: also gathering on %s (%j, cost %d)\n", ifname, sa,
+	MDT_INFO("Medut/ice: also gathering on %s (%j, cost %d)\n", ifname, sa,
 	     cost);
 	return false;
 }
@@ -903,7 +999,7 @@ static void gen_carry_ports(struct icea_media *m, struct icea_gen *gen,
 		port->primary = sig_ifname && !strcmp(port->ifname, sig_ifname);
 		list_append(&gen->portl, &port->le, port);
 
-		info("Medut/ice: carrying %s (%J%s) into generation %u\n",
+		MDT_INFO("Medut/ice: carrying %s (%J%s) into generation %u\n",
 		     port->ifname, &port->laddr,
 		     port->gathered ? ", mapping known" : "", gen->seq);
 	}
@@ -912,11 +1008,11 @@ static void gen_carry_ports(struct icea_media *m, struct icea_gen *gen,
 static void gen_add_interface_ports(struct icea_media *m, struct icea_gen *gen,
 				    const struct sa *sig, const char *sig_ifname)
 {
-	const struct config *cfg = conf_config();
+	const struct mdt_port_range *ports = mdt_rtp_ports();
 	struct extra_if_ctx ctx = {
 		.m = m, .gen = gen, .sig = sig, .sig_ifname = sig_ifname,
-		.pmin = cfg ? (uint16_t)cfg->avt.rtp_ports.min : 0,
-		.pmax = cfg ? (uint16_t)cfg->avt.rtp_ports.max : 0,
+		.pmin = ports ? ports->min : 0,
+		.pmax = ports ? ports->max : 0,
 	};
 
 	if (!g_bsdk.cfg.ice_multipath)
@@ -1019,9 +1115,9 @@ static int gen_new(struct icea_media *m, const struct sa *laddr)
 static int media_start_gather(struct icea_media *m)
 {
 	struct icea_sess *s = m->sess;
-	const struct config *cfg = conf_config();
-	uint16_t pmin = cfg ? (uint16_t)cfg->avt.rtp_ports.min : 0;
-	uint16_t pmax = cfg ? (uint16_t)cfg->avt.rtp_ports.max : 0;
+	const struct mdt_port_range *ports = mdt_rtp_ports();
+	uint16_t pmin = ports ? ports->min : 0;
+	uint16_t pmax = ports ? ports->max : 0;
 
 	if (!m->cur)
 		return EINVAL;
@@ -1044,7 +1140,7 @@ static void sess_start_gathering(struct icea_sess *s)
 			continue;
 		err = media_start_gather(m);
 		if (err)
-			warning("Medut/ice: '%s': gathering failed to start"
+			MDT_WARN("Medut/ice: '%s': gathering failed to start"
 				" (%m)\n", sdp_media_name(m->sdpm), err);
 	}
 }
@@ -1060,7 +1156,7 @@ static void media_maybe_start_checks(struct icea_media *m)
 		return;
 
 	if (icea_gen_start_checks(gen))
-		warning("Medut/ice: '%s': could not start checks\n",
+		MDT_WARN("Medut/ice: '%s': could not start checks\n",
 			sdp_media_name(m->sdpm));
 }
 
@@ -1086,7 +1182,7 @@ static void prime_conncheck(struct icea_sess *s)
 			media_maybe_start_checks(m);
 	}
 	s->primed = true;
-	info("Medut/ice: running the connectivity checks while the call"
+	MDT_INFO("Medut/ice: running the connectivity checks while the call"
 	     " rings\n");
 }
 
@@ -1126,7 +1222,7 @@ static void media_watchdog_h(void *arg)
 
 		p = m->cur->selected[0];
 		if (p && p->ws == ICEA_WS_WRITABLE) {
-			warning("Medut/ice: '%s': ICE is %s on %J but media"
+			MDT_WARN("Medut/ice: '%s': ICE is %s on %J but media"
 				" never started — starting it now\n",
 				sdp_media_name(m->sdpm),
 				icea_state_name(m->cur->state), &p->rc->addr);
@@ -1137,7 +1233,7 @@ static void media_watchdog_h(void *arg)
 		pending = true;
 		if (!m->nomedia_warned) {
 			m->nomedia_warned = true;
-			warning("Medut/ice: '%s': no writable ICE pair %u ms"
+			MDT_WARN("Medut/ice: '%s': no writable ICE pair %u ms"
 				" after the answer (ICE %s) — no audio until"
 				" there is one\n", sdp_media_name(m->sdpm),
 				ICEA_MEDIA_START_DEADLINE_MS,
@@ -1182,14 +1278,14 @@ static void bounce_h(void *arg)
 				return;
 			}
 			s->reoffer_due = 0;
-			warning("Medut/ice: media encryption not secure after"
+			MDT_WARN("Medut/ice: media encryption not secure after"
 				" %u ms — dropping the candidate re-offer\n",
 				ICEA_REOFFER_SECURE_DEADLINE_MS);
 			return;
 		}
 		s->reoffer_due = 0;
 		write_all_sdp(s);
-		info("Medut/ice: re-offering the selected candidate\n");
+		MDT_INFO("Medut/ice: re-offering the selected candidate\n");
 		estab_release(s, 0, 0, NULL);
 		return;
 	}
@@ -1205,7 +1301,7 @@ static void bounce_h(void *arg)
 			struct icea_media *m = le->data;
 			if (m->held) {
 				m->held = false;
-				info("Medut/ice: '%s': answer is out —"
+				MDT_INFO("Medut/ice: '%s': answer is out —"
 				     " starting media\n", sdp_media_name(m->sdpm));
 				fire_connh(m);
 			}
@@ -1216,7 +1312,7 @@ static void bounce_h(void *arg)
 		s->bounce_restart = false;
 		int err = bsdk_ice_restart(s->call, NULL);
 		if (err && err != EALREADY)
-			warning("Medut/ice: restart in answer to the peer's"
+			MDT_WARN("Medut/ice: restart in answer to the peer's"
 				" failed (%m)\n", err);
 	}
 }
@@ -1246,6 +1342,7 @@ static void media_destructor(void *data)
 		mem_deref(m->uh[i]);
 		mem_deref(m->sock[i]);
 	}
+	early_dtls_flush(m);
 	mem_deref(m->sdpm);
 	mem_deref(m->tx_mtx);
 }
@@ -1262,7 +1359,7 @@ static void sess_destructor(void *data)
 	tmr_cancel(&s->tmr_media);
 	list_unlink(&s->le);
 
-	/* the media wrappers belong to baresip's streams, which may outlive
+	/* the media wrappers belong to the call's streams, which may outlive
 	 * us — cut them loose (2026-08 shim lesson: nothing guarantees the
 	 * teardown order on every path) */
 	LIST_FOREACH_SAFE(&s->medial, le, tmp) {
@@ -1289,7 +1386,205 @@ struct srv_lookup {
 	uint16_t port;
 	char *user, *pass;
 	struct stun_dns *dnsq;        /* owned                                  */
+	bool cached;                  /* answered from the address cache        */
 };
+
+
+static int ice_url_parse(const char *url, struct srv_lookup *lk);
+
+
+/* ── Server address cache ────────────────────────────────────────────────── */
+
+/* Every call resolved its STUN/TURN servers afresh (an SRV query, then
+ * A/AAAA) and gathered only once all of them had answered: on a network
+ * whose first nameserver is slow, an incoming call waited 1.5 s before it
+ * could ring (2026-11-04).  The addresses are kept here for the process: a
+ * call uses what is known at once, an entry older than SRVC_FRESH_MS is
+ * looked up again in the background for the calls after it, and an entry
+ * is used up to SRVC_MAX_AGE_MS while those lookups fail (servers seldom
+ * move).  bsdk_ice_prewarm() fills it when an account registers, so even
+ * the first call does not wait.  re_main only. */
+enum {
+	SRVC_FRESH_MS   = 5 * 60 * 1000,
+	SRVC_MAX_AGE_MS = 24 * 60 * 60 * 1000,
+};
+
+struct srvc_entry {
+	struct le le;
+	char key[300];
+	struct sa addr;
+	uint64_t at;                  /* tmr_jiffies() of the answer; 0 none   */
+	struct stun_dns *dnsq;        /* the last refresh (owned)               */
+	bool busy;                    /* that refresh is under way              */
+	bool turn;
+	int proto, af;
+	char host[256];
+	uint16_t port;
+};
+
+static struct list g_srvc;
+
+static void srvc_destructor(void *arg)
+{
+	struct srvc_entry *e = arg;
+
+	list_unlink(&e->le);
+	mem_deref(e->dnsq);
+}
+
+static void srvc_key(char *buf, size_t sz, const struct srv_lookup *lk,
+		     int af)
+{
+	(void)re_snprintf(buf, sz, "%d|%d|%d|%d|%s|%u", lk->turn, lk->proto,
+			  lk->tls, af, lk->host, lk->port);
+}
+
+static struct srvc_entry *srvc_find(const char *key)
+{
+	struct le *le;
+
+	LIST_FOREACH(&g_srvc, le) {
+		struct srvc_entry *e = le->data;
+
+		if (!strcmp(e->key, key))
+			return e;
+	}
+
+	return NULL;
+}
+
+/* An IP literal needs no lookup, and nothing to cache. */
+static bool host_is_literal(const struct srv_lookup *lk)
+{
+	struct sa sa;
+
+	return 0 == sa_set_str(&sa, lk->host, lk->port);
+}
+
+static void srvc_dns_h(int err, const struct sa *srv, void *arg)
+{
+	struct srvc_entry *e = arg;
+
+	e->busy = false;
+	if (!err && srv && sa_isset(srv, SA_ADDR)) {
+		e->addr = *srv;
+		e->at   = tmr_jiffies();
+	}
+}
+
+/* Look the entry up again in the background (once at a time). */
+static void srvc_refresh(struct srvc_entry *e, struct dnsc *dnsc)
+{
+	int err;
+
+	if (e->busy || !dnsc)
+		return;
+
+	e->dnsq = mem_deref(e->dnsq);   /* the previous lookup, finished */
+	e->busy = true;
+	err = stun_server_discover(&e->dnsq, dnsc,
+				   e->turn ? stun_usage_relay
+					   : stun_usage_binding,
+				   e->proto == IPPROTO_TCP ? stun_proto_tcp
+							   : stun_proto_udp,
+				   e->af, e->host, e->port, srvc_dns_h, e);
+	if (err)
+		e->busy = false;
+}
+
+static struct srvc_entry *srvc_entry_get(const struct srv_lookup *lk, int af)
+{
+	struct srvc_entry *e;
+	char key[300];
+
+	srvc_key(key, sizeof(key), lk, af);
+	e = srvc_find(key);
+	if (e)
+		return e;
+
+	e = mem_zalloc(sizeof(*e), srvc_destructor);
+	if (!e)
+		return NULL;
+
+	str_ncpy(e->key, key, sizeof(e->key));
+	str_ncpy(e->host, lk->host, sizeof(e->host));
+	e->turn  = lk->turn;
+	e->proto = lk->proto;
+	e->af    = af;
+	e->port  = lk->port;
+	list_append(&g_srvc, &e->le, e);
+
+	return e;
+}
+
+/* A usable cached address for this server, or NULL.  A stale one is still
+ * used and refreshed behind the call. */
+static const struct sa *srvc_use(const struct srv_lookup *lk, int af,
+				 struct dnsc *dnsc)
+{
+	struct srvc_entry *e;
+	char key[300];
+	uint64_t age;
+
+	srvc_key(key, sizeof(key), lk, af);
+	e = srvc_find(key);
+	if (!e || !e->at)
+		return NULL;
+
+	age = tmr_jiffies() - e->at;
+	if (age > SRVC_MAX_AGE_MS)
+		return NULL;
+	if (age > SRVC_FRESH_MS)
+		srvc_refresh(e, dnsc);
+
+	return &e->addr;
+}
+
+/* A call's own lookup answered: keep the address for the next calls. */
+static void srvc_store(const struct srv_lookup *lk, int af,
+		       const struct sa *srv)
+{
+	struct srvc_entry *e;
+
+	if (host_is_literal(lk))
+		return;
+
+	e = srvc_entry_get(lk, af);
+	if (e) {
+		e->addr = *srv;
+		e->at   = tmr_jiffies();
+	}
+}
+
+void bsdk_ice_prewarm(const struct medut_account *acct)
+{
+	struct bsdk_ice_server_snap snap;
+	struct dnsc *dnsc = mdt_net_dnsc();
+	int af = mdt_net_af();
+
+	if (!dnsc || bsdk_ice_servers_for_account(acct, &snap))
+		return;
+
+	if (af != AF_INET && af != AF_INET6)
+		af = AF_INET;
+
+	for (uint32_t i = 0; i < snap.n; i++) {
+		struct srv_lookup lk;
+		struct srvc_entry *e;
+
+		memset(&lk, 0, sizeof(lk));
+		if (ice_url_parse(snap.v[i].url, &lk) || host_is_literal(&lk))
+			continue;
+		if (lk.proto != IPPROTO_UDP && !lk.turn)
+			continue;           /* STUN over TCP/TLS: not gathered */
+
+		e = srvc_entry_get(&lk, af);
+		if (e && (!e->at || tmr_jiffies() - e->at > SRVC_FRESH_MS))
+			srvc_refresh(e, dnsc);
+	}
+
+	bsdk_ice_server_snap_clear(&snap);
+}
 
 
 static void srv_lookup_destructor(void *arg)
@@ -1379,22 +1674,25 @@ static void srv_dns_h(int err, const struct sa *srv, void *arg)
 	struct icea_server *server = NULL;
 
 	if (err || !srv || !sa_isset(srv, SA_ADDR)) {
-		warning("Medut/ice: %s server %s could not be resolved (%m)"
+		MDT_WARN("Medut/ice: %s server %s could not be resolved (%m)"
 			" — skipped\n", lk->turn ? "TURN" : "STUN", lk->host,
 			err);
 	}
 	else if (lk->proto != IPPROTO_UDP && !lk->turn) {
 		if (!s->srv_tcp_warned) {
 			s->srv_tcp_warned = true;
-			warning("Medut/ice: STUN over TCP/TLS (%s) is not used"
+			MDT_WARN("Medut/ice: STUN over TCP/TLS (%s) is not used"
 				" for gathering — skipped\n", lk->host);
 		}
 	}
 	else if (0 == icea_server_alloc(&server, lk->turn, lk->proto, lk->tls,
 					srv, lk->host, lk->user, lk->pass)) {
 		list_append(&s->serverl, &server->le, server);
-		info("Medut/ice: %s server %J (%s)\n",
-		     lk->turn ? "TURN" : "STUN", srv, lk->host);
+		MDT_INFO("Medut/ice: %s server %J (%s)%s\n",
+		     lk->turn ? "TURN" : "STUN", srv, lk->host,
+		     lk->cached ? " [cached]" : "");
+		if (!lk->cached)
+			srvc_store(lk, s->af, srv);
 	}
 
 	/* stun_server_discover() answers an IP literal from inside the call,
@@ -1420,7 +1718,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 	s->servers_ready = false;
 	s->srv_pending   = 0;
 
-	if (bsdk_ice_servers_for_call((const struct call *)s->call, &snap))
+	if (bsdk_ice_servers_for_call((const struct mdt_call *)s->call, &snap))
 		return 0;
 
 	s->conf.policy = snap.policy == MEDUT_ICE_TRANSPORT_RELAY
@@ -1438,7 +1736,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 			break;
 		lk->sess = s;
 		if (ice_url_parse(snap.v[i].url, lk)) {
-			warning("Medut/ice: ICE server URL '%s' not understood"
+			MDT_WARN("Medut/ice: ICE server URL '%s' not understood"
 				" — skipped\n", snap.v[i].url);
 			mem_deref(lk);
 			continue;
@@ -1456,6 +1754,16 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 			continue;
 		}
 
+		{
+			const struct sa *known = srvc_use(lk, s->af, s->dnsc);
+
+			if (known) {
+				lk->cached = true;
+				srv_dns_h(0, known, lk);
+				continue;
+			}
+		}
+
 		err = stun_server_discover(&lk->dnsq, s->dnsc,
 					   lk->turn ? stun_usage_relay
 						    : stun_usage_binding,
@@ -1464,7 +1772,7 @@ static unsigned sess_servers_begin(struct icea_sess *s)
 					   s->af, lk->host, lk->port,
 					   srv_dns_h, lk);
 		if (err) {
-			warning("Medut/ice: lookup of %s failed (%m)\n",
+			MDT_WARN("Medut/ice: lookup of %s failed (%m)\n",
 				lk->host, err);
 			if (s->srv_pending)
 				s->srv_pending--;
@@ -1500,15 +1808,15 @@ static void conf_from_sdk(struct icea_conf *c)
 }
 
 
-static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
-		      struct dnsc *dnsc, int af, const struct stun_uri *srv,
+static int icea_sessh(struct mdt_mnat_sess **sessp, const struct mdt_mnat *mdt_mnat,
+		      struct dnsc *dnsc, int af, const struct mdt_stun_uri *srv,
 		      const char *user, const char *pass,
 		      struct sdp_session *sdp, bool offerer,
-		      mnat_estab_h *estabh, void *arg)
+		      mdt_mnat_estab_h *estabh, void *arg)
 {
 	struct icea_sess *s;
 	int err = 0;
-	(void)mnat;
+	(void)mdt_mnat;
 
 	if (!sessp || !sdp || !estabh)
 		return EINVAL;
@@ -1533,7 +1841,7 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	conf_from_sdk(&s->conf);
 	sess_new_credentials(s);
 
-	/* baresip's one NAT-server slot is superseded by the account's list
+	/* The account's one NAT-server slot is superseded by the account's list
 	 * (account > global > the legacy fields it was filled from) */
 	(void)srv; (void)user; (void)pass;
 	list_init(&s->srv_lookups);
@@ -1547,13 +1855,13 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	list_append(&g_sessl, &s->le, s);
 	if (sess_servers_begin(s) == 0) {
 		/* nothing left to resolve — but never gather from inside
-		 * sessh: baresip has not attached the streams yet */
+		 * sessh: the call has not attached the streams yet */
 		s->bounce_gather = true;
 		tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 	}
 
 	/* A bound on every gather (the empty-medial hang: an INVITE that
-	 * never left).  Zero = wait for baresip's own conclusion. */
+	 * never left).  Zero = wait for the agent's own conclusion. */
 	if (g_bsdk.cfg.ice_gathering_timeout_ms)
 		tmr_start(&s->tmr_gather, g_bsdk.cfg.ice_gathering_timeout_ms,
 			  gather_deadline_h, s);
@@ -1562,14 +1870,14 @@ static int icea_sessh(struct mnat_sess **sessp, const struct mnat *mnat,
 	if (err)
 		mem_deref(s);
 	else
-		*sessp = (struct mnat_sess *)s;
+		*sessp = (struct mdt_mnat_sess *)s;
 	return err;
 }
 
 
-static int icea_mediah(struct mnat_media **mp, struct mnat_sess *sess,
+static int icea_mediah(struct mdt_mnat_media **mp, struct mdt_mnat_sess *sess,
 		       struct udp_sock *sock1, struct udp_sock *sock2,
-		       struct sdp_media *sdpm, mnat_connected_h *connh,
+		       struct sdp_media *sdpm, mdt_mnat_connected_h *connh,
 		       void *arg)
 {
 	struct icea_sess *s = (struct icea_sess *)sess;
@@ -1633,12 +1941,12 @@ static int icea_mediah(struct mnat_media **mp, struct mnat_sess *sess,
 	if (err)
 		mem_deref(m);
 	else
-		*mp = (struct mnat_media *)m;
+		*mp = (struct mdt_mnat_media *)m;
 	return err;
 }
 
 
-static int icea_updateh(struct mnat_sess *sess)
+static int icea_updateh(struct mdt_mnat_sess *sess)
 {
 	struct icea_sess *s = (struct icea_sess *)sess;
 	struct le *le;
@@ -1648,11 +1956,25 @@ static int icea_updateh(struct mnat_sess *sess)
 	if (!s)
 		return EINVAL;
 
-	/* baresip runs this from inside estabh while building OUR offer, with
+	/* The call runs this from inside estabh while building OUR offer, with
 	 * the peer's previous answer still in the SDP.  Reading it would pair
 	 * new credentials with old ones (2026-09-02).  Re-assert the vpeer
-	 * and do nothing else. */
-	if (s->in_estab && s->await_answer) {
+	 * and do nothing else.
+	 *
+	 * call_modify() does the same from outside estabh: it sends the offer
+	 * and then applies the SDP, so a restart offer re-sent by netmon (the
+	 * first one stranded on a dead connection, or a handover's re-offer)
+	 * ran this with the old answer, found nothing changed and cleared
+	 * await_answer.  The real answer, with the peer's new credentials,
+	 * then read as the PEER restarting: our side switched to CONTROLLED
+	 * against an answerer that is CONTROLLED too, nobody nominated, and
+	 * the peer stopped taking our audio a few seconds later (2026-10-31,
+	 * 4 of 11 network down/up runs).  Our offer still unanswered is the
+	 * same case. */
+	if (s->await_answer &&
+	    (s->in_estab ||
+	     mdt_call_sdp_neg_state((const struct mdt_call *)s->call) ==
+	     SDP_NEG_LOCAL_OFFER)) {
 		LIST_FOREACH(&s->medial, le) {
 			struct icea_media *m = le->data;
 			if (m->connh_fired && !m->held && !m->plain)
@@ -1661,7 +1983,7 @@ static int icea_updateh(struct mnat_sess *sess)
 		return 0;
 	}
 
-	/* Incoming and being asked to update: baresip is building our answer
+	/* Incoming and being asked to update: the call is building our answer
 	 * (call_answer() -> call_apply_sdp()).  Whatever runs after this call
 	 * stack may start media, and from here on the caller can answer our
 	 * checks, so an unanswered one counts again. */
@@ -1677,7 +1999,7 @@ static int icea_updateh(struct mnat_sess *sess)
 		struct icea_media *m = le->data;
 		bool changed = false;
 
-		if (!m->cur || !sdp_media_has_media(m->sdpm))
+		if (!m->cur || !mdt_sdp_media_has_media(m->sdpm))
 			continue;
 
 		err |= icea_sdp_read_remote(m->cur, s->sdp, m->sdpm, &changed);
@@ -1685,17 +2007,17 @@ static int icea_updateh(struct mnat_sess *sess)
 
 		if (!icea_sdp_peer_has_ice(m->cur)) {
 			/* RFC 8445 §5.1: no ICE on the far side.  baresip's
-			 * module left the stream waiting for ever here;
+			 * ice module left the stream waiting for ever here;
 			 * we start plain media on the signalled address. */
 			if (!m->plain)
-				info("Medut/ice: '%s': peer offers no ICE —"
+				MDT_INFO("Medut/ice: '%s': peer offers no ICE —"
 				     " plain RTP to the signalled address\n",
 				     sdp_media_name(m->sdpm));
 			fire_connh_plain(m);
 			continue;
 		}
 		if (!icea_sdp_peer_supports_ice(m->cur, m->sdpm)) {
-			warning("Medut/ice: '%s': ICE mismatch — using the"
+			MDT_WARN("Medut/ice: '%s': ICE mismatch — using the"
 				" signalled address\n", sdp_media_name(m->sdpm));
 			fire_connh_plain(m);
 			media_write_sdp(s, m);
@@ -1719,25 +2041,25 @@ static int icea_updateh(struct mnat_sess *sess)
 		 * backstop. */
 		if (sess_awaiting_secure(s)) {
 			if (s->restarting || s->bounce_restart) {
-				info("Medut/ice: peer restarted ICE; ours is"
+				MDT_INFO("Medut/ice: peer restarted ICE; ours is"
 				     " already under way\n");
 			}
 			else if (s->rrestarts < ICEA_MAX_REMOTE_RESTARTS) {
 				s->rrestarts++;
-				info("Medut/ice: peer restarted ICE (%u/%u) —"
+				MDT_INFO("Medut/ice: peer restarted ICE (%u/%u) —"
 				     " restarting ours\n", s->rrestarts,
 				     ICEA_MAX_REMOTE_RESTARTS);
 				s->bounce_restart = true;
 				tmr_start(&s->tmr_bounce, 0, bounce_h, s);
 			}
 			else {
-				warning("Medut/ice: peer has restarted ICE %u"
+				MDT_WARN("Medut/ice: peer has restarted ICE %u"
 					" times — not answering again\n",
 					s->rrestarts);
 			}
 		}
 		else {
-			info("Medut/ice: peer changed its ICE credentials"
+			MDT_INFO("Medut/ice: peer changed its ICE credentials"
 			     " while media is up — checks continue against"
 			     " the new ones\n");
 			/* The peer offered the restart, so it has taken the
@@ -1788,13 +2110,13 @@ static int icea_updateh(struct mnat_sess *sess)
 }
 
 
-static void icea_attrh(struct mnat_media *mm, const char *name,
+static void icea_attrh(struct mdt_mnat_media *mm, const char *name,
 		       const char *value)
 {
 	struct icea_media *m = (struct icea_media *)mm;
 	struct ice_cand_attr attr;
 
-	/* Only peerconn.c calls this in baresip; SIP calls go through
+	/* Only baresip's WebRTC peerconn.c called this; SIP calls go through
 	 * updateh.  Kept for completeness. */
 	if (!m || !m->cur || !name)
 		return;
@@ -1818,7 +2140,7 @@ static void icea_attrh(struct mnat_media *mm, const char *name,
 }
 
 
-static struct mnat mnat_ice = {
+static struct mdt_mnat mdt_mnat_ice = {
 	.id             = "ice",
 	.ftag           = "+sip.ice",
 	.wait_connected = true,
@@ -1865,7 +2187,7 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 		 * carrying media until the new one is nominated */
 		err = gen_new(m, laddr);
 		if (err) {
-			warning("Medut/ice: restart: '%s' failed (%m)\n",
+			MDT_WARN("Medut/ice: restart: '%s' failed (%m)\n",
 				sdp_media_name(m->sdpm), err);
 			continue;
 		}
@@ -1914,10 +2236,10 @@ int bsdk_ice_restart(void *call, const struct sa *laddr)
 	tmr_start(&s->tmr_gather, deadline, gather_deadline_h, s);
 
 	if (laddr && sa_isset(laddr, SA_ADDR))
-		info("Medut/ice: restarting ICE on %j — new credentials,"
+		MDT_INFO("Medut/ice: restarting ICE on %j — new credentials,"
 		     " re-gathering, re-INVITE within %u ms\n", laddr, deadline);
 	else
-		info("Medut/ice: restarting ICE — new credentials,"
+		MDT_INFO("Medut/ice: restarting ICE — new credentials,"
 		     " re-gathering, re-INVITE within %u ms\n", deadline);
 
 	return err;
@@ -1946,6 +2268,23 @@ int bsdk_ice_call_state(void *call)
 	struct icea_sess *s = sess_find(call);
 
 	return s ? (int)sess_state(s) : (int)ICEA_STATE_NEW;
+}
+
+
+int bsdk_ice_call_role(void *call)
+{
+	struct icea_sess *s = sess_find(call);
+	struct le *le;
+
+	if (!s)
+		return -1;
+
+	LIST_FOREACH(&s->medial, le) {
+		const struct icea_media *m = le->data;
+		if (m->cur && !m->plain)
+			return m->cur->role == ICE_ROLE_CONTROLLING ? 1 : 0;
+	}
+	return -1;
 }
 
 
@@ -2050,7 +2389,7 @@ void bsdk_ice_network_changed(void)
 			(void)media_start_gather(m);
 		}
 
-		info("Medut/ice: network changed — re-gathering reflexive"
+		MDT_INFO("Medut/ice: network changed — re-gathering reflexive"
 		     " candidates\n");
 	}
 }
@@ -2058,19 +2397,22 @@ void bsdk_ice_network_changed(void)
 
 int bsdk_ice_module_init(void)
 {
-	if (mnat_ice.le.list)
+	if (mdt_mnat_ice.le.list)
 		return 0;             /* re-init after shutdown: already there */
 
-	mnat_register(baresip_mnatl(), &mnat_ice);
+	mdt_mnat_register(mdt_mnatl(), &mdt_mnat_ice);
 	return 0;
 }
 
 
 void bsdk_ice_module_close(void)
 {
-	if (!mnat_ice.le.list)
+	/* Before the DNS client the refreshes use goes (mdt_stack_close). */
+	list_flush(&g_srvc);
+
+	if (!mdt_mnat_ice.le.list)
 		return;
 
-	mnat_unregister(&mnat_ice);
-	memset(&mnat_ice.le, 0, sizeof(mnat_ice.le));
+	mdt_mnat_unregister(&mdt_mnat_ice);
+	memset(&mdt_mnat_ice.le, 0, sizeof(mdt_mnat_ice.le));
 }

@@ -200,8 +200,8 @@ int websock_connect(struct websock_conn **connp, struct websock *sock,
 # alerting on that extension against 0.33 s on a single-binding one.
 #
 # The fix is the host RFC 7118 prescribes: a stable per-instance name in the
-# ".invalid" domain, taken from the instance-id baresip already advertises in
-# the contact params.  The full rationale is in the hunk.
+# ".invalid" domain, taken from the instance-id the stack already advertises
+# in the contact params (src/sip/sip_stack.c).  The full rationale is in the hunk.
 # ---------------------------------------------------------------------------
 medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
 [=[
@@ -357,8 +357,8 @@ static int send_handler(enum sip_transp tp, struct sa *src,
 # names the same binding, whichever registration client sends it.  libre still
 # treats the client being freed as the binding's owner and un-REGISTERs it:
 #
-#   - baresip's reg_register() frees the old client and allocates the new one
-#     on every ua_register() — each handover, each retry, each keepalive
+#   - mdt_reg_register() (src/sip/reg.c) frees the old client and allocates
+#     the new one on every mdt_ua_register() — each handover, each retry, each keepalive
 #     recovery.  The un-REGISTER goes out first and briefly empties the AOR.
 #   - When the old client still has a request in flight, the un-REGISTER is
 #     deferred until that request is answered or times out.  After a
@@ -771,15 +771,15 @@ medut_patch("${SOURCE_DIR}/src/rtp/sess.c"
 # R. sipreg/reg.c — refresh an RFC 8599 push binding in place
 #
 # A push-capable registrar keys a device's binding on its push params
-# (pn-provider / pn-prid / pn-param, put in the Contact URI by baresip job 11),
+# (pn-provider / pn-prid / pn-param, put in the Contact URI by src/sip/reg.c),
 # and releases a held INVITE when that binding is *refreshed*.  OpenSIPS, for
 # one, forks the INVITE on the usrloc UPDATE event: an un-REGISTER followed by
 # a REGISTER is a DELETE and an INSERT, and the call is never delivered.
 #
 # Two things went out as exactly that pair:
 #
-#   - A wake-up push had nothing to send but a fresh REGISTER, and baresip's
-#     reg_register() frees the old client first, which un-REGISTERs it.
+#   - A wake-up push had nothing to send but a fresh REGISTER, and
+#     mdt_reg_register() frees the old client first, which un-REGISTERs it.
 #     sipreg_refresh() sends the refresh from the client that holds the
 #     binding (same Call-ID, next CSeq), as its own timer would.
 #   - A handover or retry re-creates the client the same way.
@@ -904,3 +904,922 @@ void sipreg_handoff_push(struct sipreg *reg, const char *cparams);
 int sipreg_refresh(struct sipreg *reg);
 ]=]
 "sipreg_handoff_push(), sipreg_refresh() declarations")
+
+
+# ---------------------------------------------------------------------------
+# S. tcp/tcp.c — a socket that fails recv() must close
+#
+# libre closes a TCP connection on a failed recv() only on Windows; elsewhere
+# it logs the error and keeps the socket.  iOS reclaims the sockets of a
+# suspended app, and after the resume every recv() on one fails with ENOTCONN
+# and never returns 0.  The poller keeps reporting it readable, so the handler
+# spins — dozens of "recv(): Socket is not connected" lines in one
+# millisecond — and conn_close() never runs: the SIP layer keeps the
+# connection as established, the close watch of patch P never fires, and every
+# REGISTER is written into the dead WebSocket and fails with EPIPE.  Measured
+# on-device (2026-10-19): an iPhone resumed after 2.5 h suspended stayed
+# unregistered through every transport flush and account rebuild.  Close on
+# any error but the transient ones, as recv() returning 0 already does.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/tcp/tcp.c"
+[=[
+		DEBUG_WARNING("recv handler: recv(): %m\n", err);
+#ifdef WIN32
+		if (err == WSAECONNRESET || err == WSAECONNABORTED) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#endif
+		goto out;
+]=]
+[=[
+		DEBUG_WARNING("recv handler: recv(): %m\n", err);
+#ifdef WIN32
+		if (err == WSAECONNRESET || err == WSAECONNABORTED) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#else
+		/* Medut-patched: a socket that fails recv() for good (iOS
+		 * reclaimed it: ENOTCONN on every call, never 0) stays readable;
+		 * keeping it spins this handler and hides the close from SIP. */
+		if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+			mem_deref(mb);
+			conn_close(tc, err);
+			return;
+		}
+#endif
+		goto out;
+]=]
+"tcp_recv_handler: close the connection on a failed recv()")
+
+
+# ---------------------------------------------------------------------------
+# T. dns/client.c — reopen a DNS socket the OS has reclaimed
+#
+# The resolver's UDP sockets are opened once, in dnsc_alloc(), and nothing
+# reopens them: net_dns_refresh() only swaps the server list.  iOS reclaims
+# them with the rest of a suspended app's sockets, and from then on every send
+# fails with EPIPE.  A SIP request to a named server resolves first, so the
+# REGISTER fails at once — after a transport flush and an account rebuild
+# alike, since neither touches the resolver.  Same on-device trace as S: once
+# the DNS cache entry expired, every REGISTER failed with EPIPE in the same
+# millisecond it was sent.  Reopen the socket on EPIPE/ENOTCONN and retry the
+# send once.  Replies due on the old socket are lost; their queries
+# retransmit on the new one.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+static int send_udp(struct dns_query *q)
+{
+]=]
+[=[
+/* Medut-patched: replace a UDP socket the OS has reclaimed (iOS does so
+ * for a suspended app, and every send on it then fails with EPIPE).
+ * Returns the new socket, or NULL with the old one kept. */
+static struct udp_sock *dnsc_udp_reopen(struct dnsc *dnsc, int af)
+{
+	struct udp_sock **usp = (af == AF_INET6) ? &dnsc->us6 : &dnsc->us;
+	struct udp_sock *us = NULL;
+	struct sa laddr;
+
+	sa_set_str(&laddr, (af == AF_INET6) ? "::" : "0.0.0.0", 0);
+	if (udp_listen(&us, &laddr, udp_recv_handler, dnsc))
+		return NULL;
+
+	mem_deref(*usp);
+	*usp = us;
+
+	return us;
+}
+
+
+static int send_udp(struct dns_query *q)
+{
+]=]
+"dnsc_udp_reopen(): replace a reclaimed DNS socket")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+		q->mb.pos = 0;
+		err = udp_send(us, srv, &q->mb);
+		if (!err)
+			break;
+]=]
+[=[
+		q->mb.pos = 0;
+		err = udp_send(us, srv, &q->mb);
+
+		/* Medut-patched: see dnsc_udp_reopen() */
+		if (err == EPIPE || err == ENOTCONN) {
+			us = dnsc_udp_reopen(q->dnsc, sa_af(srv));
+			if (us) {
+				q->mb.pos = 0;
+				err = udp_send(us, srv, &q->mb);
+			}
+		}
+
+		if (!err)
+			break;
+]=]
+"send_udp: reopen a reclaimed DNS socket and retry")
+
+# ---------------------------------------------------------------------------
+# U. sipsess/modify.c — a re-INVITE that ends without an answer must not leave
+#    the session unable to send another
+#
+# sipsess_reinvite() moves neg_state to SDP_NEG_LOCAL_OFFER, and only a final
+# response moves it back.  A re-INVITE that ends any other way — a transport
+# error from the connection it was queued on, a 2xx without the SDP answer,
+# a request loop — reached `out:` with neg_state still LOCAL_OFFER, and
+# sipsess_refresh_allowed() then said false for the rest of the call: every
+# later handover or stall repair waited on an offer nobody would answer.  An
+# offer that was never answered is withdrawn (RFC 3261 §14.1: the session
+# keeps its old parameters), so roll the state back.
+#
+# sipsess_reinvite_abandon() is the other half.  A request already written to
+# a TCP/TLS/WebSocket connection hears nothing when that connection dies or a
+# transport flush drops it: its client transaction runs Timer B out (64*T1)
+# and the ETIMEDOUT then terminates the whole session.  So a stall repair
+# whose re-INVITE went into a dead WebSocket could neither be answered nor
+# re-sent on the fresh connection a handover built, and the call ended 32 s
+# later (2026-10-31, two calls).  The SDK abandons the request once the
+# connection it went out on is gone, and the next offer goes out on the new
+# one.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+ out:
+	if (sess->terminated)
+		mem_deref(sess);
+	else if (err == ETIMEDOUT)
+]=]
+[=[
+ out:
+	/* Medut-patched: an offer that got no answer is withdrawn */
+	if (sess->neg_state == SDP_NEG_LOCAL_OFFER)
+		sess->neg_state = SDP_NEG_DONE;
+
+	if (sess->terminated)
+		mem_deref(sess);
+	else if (err == ETIMEDOUT)
+]=]
+"reinvite_resp_handler: withdraw an offer that got no answer")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+/**
+ * Modify an established SIP Session sending Re-INVITE or UPDATE
+]=]
+[=[
+/* Medut-patched: drop an in-flight re-INVITE whose connection is gone.
+ * Its response handler never runs; the offer is withdrawn and a modify that
+ * queued behind it goes out now.  Returns true when there was one. */
+bool sipsess_reinvite_abandon(struct sipsess *sess)
+{
+	if (!sess || !sess->req || sess->terminated)
+		return false;
+
+	sess->req = mem_deref(sess->req);
+
+	if (sess->neg_state == SDP_NEG_LOCAL_OFFER)
+		sess->neg_state = SDP_NEG_DONE;
+
+	if (sess->modify_pending && !sess->tmr.th)
+		(void)sipsess_reinvite(sess, true);
+
+	return true;
+}
+
+
+/**
+ * Modify an established SIP Session sending Re-INVITE or UPDATE
+]=]
+"sipsess_reinvite_abandon(): drop a re-INVITE stranded on a dead connection")
+
+medut_patch("${SOURCE_DIR}/include/re_sipsess.h"
+[=[
+bool sipsess_refresh_allowed(const struct sipsess *sess);
+]=]
+[=[
+bool sipsess_refresh_allowed(const struct sipsess *sess);
+/* Medut-patched: see src/sipsess/modify.c */
+bool sipsess_reinvite_abandon(struct sipsess *sess);
+]=]
+"re_sipsess.h: declare sipsess_reinvite_abandon()")
+
+# ---------------------------------------------------------------------------
+# V. sipsess — report how a session modification ended
+#
+# sipsess_modify() sends a re-INVITE (or an UPDATE before the session is
+# established) and then tells nobody how it went.  A 2xx reaches the
+# application only indirectly, through the answer handler, and a refusal — a
+# 488 to a hold, a 403 from a policy, a 408 — not at all: the session quietly
+# sets its negotiation state back and moves on.  An engine that changed its
+# own state when it sent the offer (put the call on hold, moved its media to
+# a new address) has no way to learn it must roll that back.
+#
+# sipsess_set_modify_handler() reports each re-INVITE / UPDATE once, when it
+# has really ended: err 0 and the final response (a 2xx once the ACK is out,
+# or a failure response that is not retried), or an error and no response
+# (timeout, transport failure).  What the session handles itself —
+# provisional responses, authentication challenges it answers, 491 and 500 +
+# Retry-After that it retries — is not reported, nor is a request withdrawn
+# with sipsess_reinvite_abandon().  The negotiation state is settled by the
+# time it runs (hunk U), so the handler may call sipsess_modify() again.
+#
+# Anchored around hunk U's text, never inside it: U finds itself applied by
+# its own replacement text, so V must leave that text contiguous.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/include/re_sipsess.h"
+[=[
+typedef void (sipsess_prack_h)(const struct sip_msg *msg, void *arg);
+]=]
+[=[
+typedef void (sipsess_prack_h)(const struct sip_msg *msg, void *arg);
+/* Medut-patched: see sipsess_set_modify_handler() */
+typedef void (sipsess_modify_h)(int err, const struct sip_msg *msg,
+				void *arg);
+]=]
+"re_sipsess.h: sipsess_modify_h")
+
+medut_patch("${SOURCE_DIR}/include/re_sipsess.h"
+[=[
+int  sipsess_set_prack_handler(struct sipsess *sess, sipsess_prack_h *prackh);
+]=]
+[=[
+int  sipsess_set_prack_handler(struct sipsess *sess, sipsess_prack_h *prackh);
+/* Medut-patched: see src/sipsess/sess.c */
+int  sipsess_set_modify_handler(struct sipsess *sess,
+				sipsess_modify_h *modifyh);
+]=]
+"re_sipsess.h: declare sipsess_set_modify_handler()")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/sipsess.h"
+[=[
+	sipsess_prack_h *prackh;
+]=]
+[=[
+	sipsess_prack_h *prackh;
+	sipsess_modify_h *modifyh;   /* Medut-patched */
+]=]
+"struct sipsess: modify handler")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/sipsess.h"
+[=[
+int  sipsess_reinvite(struct sipsess *sess, bool reset_ls);
+]=]
+[=[
+int  sipsess_reinvite(struct sipsess *sess, bool reset_ls);
+/* Medut-patched: see src/sipsess/modify.c */
+void sipsess_modify_report(struct sipsess *sess, int err,
+			   const struct sip_msg *msg);
+]=]
+"sipsess.h: declare sipsess_modify_report()")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/sess.c"
+[=[
+int sipsess_set_prack_handler(struct sipsess *sess, sipsess_prack_h *prackh)
+{
+	if (!sess || !prackh)
+		return EINVAL;
+
+	sess->prackh = prackh;
+
+	return 0;
+}
+]=]
+[=[
+int sipsess_set_prack_handler(struct sipsess *sess, sipsess_prack_h *prackh)
+{
+	if (!sess || !prackh)
+		return EINVAL;
+
+	sess->prackh = prackh;
+
+	return 0;
+}
+
+
+/**
+ * Medut-patched: set the handler that reports how a session modification
+ * ended — once per re-INVITE or UPDATE, when it has really ended: err 0 and
+ * the final response (a 2xx once the ACK is out, or a failure that is not
+ * retried), or an error and no response.  Provisional responses, answered
+ * auth challenges, retried 491/500 and abandoned requests are not reported.
+ * The negotiation state is settled when it runs; the handler may call
+ * sipsess_modify() and must not dereference the session.
+ *
+ * @param sess     SIP Session
+ * @param modifyh  Modify handler, NULL to remove it
+ *
+ * @return 0 if success, otherwise errorcode
+ */
+int sipsess_set_modify_handler(struct sipsess *sess,
+			       sipsess_modify_h *modifyh)
+{
+	if (!sess)
+		return EINVAL;
+
+	sess->modifyh = modifyh;
+
+	return 0;
+}
+]=]
+"sipsess_set_modify_handler()")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+static void tmr_handler(void *arg)
+{
+	struct sipsess *sess = arg;
+
+	(void)sipsess_reinvite(sess, true);
+}
+]=]
+[=[
+static void tmr_handler(void *arg)
+{
+	struct sipsess *sess = arg;
+
+	(void)sipsess_reinvite(sess, true);
+}
+
+
+/* Medut-patched: tell the application how a modification ended */
+void sipsess_modify_report(struct sipsess *sess, int err,
+			   const struct sip_msg *msg)
+{
+	if (sess->modifyh)
+		sess->modifyh(err, msg, sess->arg);
+}
+]=]
+"sipsess_modify_report()")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+		case 408:
+		case 481:
+			sipsess_terminate(sess, 0, msg);
+			return;
+]=]
+[=[
+		case 408:
+		case 481:
+			/* Medut-patched: report before the session ends */
+			sipsess_modify_report(sess, 0, msg);
+			sipsess_terminate(sess, 0, msg);
+			return;
+]=]
+"reinvite_resp_handler: report a 408/481")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+		sipsess_terminate(sess, err, NULL);
+	else if (sess->modify_pending)
+		(void)sipsess_reinvite(sess, true);
+
+	else
+		sess->desc = mem_deref(sess->desc);
+}
+]=]
+[=[
+		sipsess_modify_end(sess, err, msg);
+	else if (sess->modify_pending) {
+		/* Medut-patched: report, then send what queued behind it */
+		sipsess_modify_report(sess, err, msg);
+		(void)sipsess_reinvite(sess, true);
+	}
+	else {
+		sess->desc = mem_deref(sess->desc);
+		sipsess_modify_report(sess, err, msg);
+	}
+}
+]=]
+"reinvite_resp_handler: report how the re-INVITE ended")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/modify.c"
+[=[
+static void reinvite_resp_handler(int err, const struct sip_msg *msg,
+				  void *arg)
+]=]
+[=[
+/* Medut-patched: a re-INVITE that timed out ends the session — report it
+ * first */
+static void sipsess_modify_end(struct sipsess *sess, int err,
+			       const struct sip_msg *msg)
+{
+	sipsess_modify_report(sess, err, msg);
+	sipsess_terminate(sess, err, NULL);
+}
+
+
+static void reinvite_resp_handler(int err, const struct sip_msg *msg,
+				  void *arg)
+]=]
+"sipsess_modify_end()")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/update.c"
+[=[
+		case 408:
+		case 481:
+			sipsess_terminate(req->sess, 0, msg);
+			break;
+]=]
+[=[
+		case 408:
+		case 481:
+			/* Medut-patched: report before the session ends */
+			sipsess_modify_report(req->sess, 0, msg);
+			sipsess_terminate(req->sess, 0, msg);
+			break;
+]=]
+"update_resp_handler: report a 408/481")
+
+medut_patch("${SOURCE_DIR}/src/sipsess/update.c"
+[=[
+out:
+	if (!req->sess->terminated) {
+		if (err == ETIMEDOUT)
+]=]
+[=[
+out:
+	if (!req->sess->terminated) {
+		/* Medut-patched: report how the UPDATE ended */
+		sipsess_modify_report(req->sess, err, msg);
+		if (err == ETIMEDOUT)
+]=]
+"update_resp_handler: report how the UPDATE ended")
+
+
+# ---------------------------------------------------------------------------
+# W. dns/client.c — ask every nameserver at once
+#
+# A query went to the first nameserver and moved to the next only after a
+# 500 ms timeout, so a slow or dead first server delayed every SRV / A
+# lookup — registration, a SIP server, a STUN server.  (The office network of
+# 2026-11-04: its own resolver first, 8.8.8.8 second, 1.5 s per lookup.)
+# Each round now goes to every server, and the first positive answer wins.
+# A negative one — NXDOMAIN, no records, SERVFAIL — counts in the first
+# round only from the first server: a name only the local resolver knows
+# (split-horizon DNS, an internal PBX) must not be lost to a public
+# resolver's quicker "no such name".  From the second round, any answer
+# counts.  The TCP path (truncated replies) is unchanged.
+# ---------------------------------------------------------------------------
+# After patch T's loop: it stops at the first server that takes the send;
+# the remaining servers are asked here (T's own text is left as it is).
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+		if (!err)
+			break;
+	}
+
+	return err;
+}
+
+
+static void udp_timeout_handler(void *arg)
+]=]
+[=[
+		if (!err)
+			break;
+	}
+
+	/* Medut-patched: one server took the query — ask the others at
+	 * once too (see reply_recv()) */
+	for (i++; !err && i < *q->srvc; i++) {
+		struct udp_sock *us2;
+		int err2;
+
+		srv = &q->srvv[q->ntx++ % *q->srvc];
+
+		switch (sa_af(srv)) {
+
+		case AF_INET:
+			us2 = q->dnsc->us;
+			break;
+
+		case AF_INET6:
+			us2 = q->dnsc->us6;
+			break;
+
+		default:
+			continue;
+		}
+
+		q->mb.pos = 0;
+		err2 = udp_send(us2, srv, &q->mb);
+		if (err2 == EPIPE || err2 == ENOTCONN) {
+			us2 = dnsc_udp_reopen(q->dnsc, sa_af(srv));
+			if (us2) {
+				q->mb.pos = 0;
+				(void)udp_send(us2, srv, &q->mb);
+			}
+		}
+	}
+
+	return err;
+}
+
+
+static void udp_timeout_handler(void *arg)
+]=]
+"send_udp: ask the remaining nameservers too")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+static int reply_recv(struct dnsc *dnsc, struct mbuf *mb)
+{
+]=]
+[=[
+static int reply_recv(struct dnsc *dnsc, struct mbuf *mb,
+		      const struct sa *src)
+{
+]=]
+"reply_recv: know which server answered")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+	/* try next server */
+	if (dq.hdr.rcode == DNS_RCODE_SRV_FAIL && q->ntx < *q->srvc) {
+]=]
+[=[
+	/* Medut-patched: every server was asked at once (send_udp).  In
+	 * that first round only a positive answer, or a negative one from
+	 * the first server (split-horizon names), settles the query; the
+	 * rest wait for the others or for the next round. */
+	if (src && *q->srvc > 1 && q->ntx <= *q->srvc &&
+	    !(dq.hdr.rcode == DNS_RCODE_OK && dq.hdr.nans > 0) &&
+	    !(dq.hdr.rcode != DNS_RCODE_SRV_FAIL &&
+	      sa_cmp(src, &q->srvv[0], SA_ALL))) {
+		err = EPROTO;
+		goto out;
+	}
+
+	/* try next server */
+	if (dq.hdr.rcode == DNS_RCODE_SRV_FAIL && q->ntx < *q->srvc) {
+]=]
+"reply_recv: first round settles on a positive or the first server")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+	(void)src;
+	(void)reply_recv(arg, mb);
+]=]
+[=[
+	/* Medut-patched: which server answered (see reply_recv()) */
+	(void)reply_recv(arg, mb, src);
+]=]
+"udp_recv_handler: pass the answering server")
+
+medut_patch("${SOURCE_DIR}/src/dns/client.c"
+[=[
+	err = reply_recv(tc->dnsc, mb);
+]=]
+[=[
+	err = reply_recv(tc->dnsc, mb, NULL);
+]=]
+"tcp_recv_handler: no per-server rule over TCP")
+
+
+# ---------------------------------------------------------------------------
+# X. main/main.c — the thread that runs re_main() owns the context
+#
+# libre stamps the owner thread (re->tid) in libre_init().  Medut calls
+# libre_init() on the app's thread and runs re_main() on a thread of its own
+# (src/api/re_loop.c), so in a debug build re_thread_check() took every
+# fd_listen() on the loop thread — each call's RTP sockets — for a foreign
+# thread and refused it (EPERM): a debug build could not place a call, and
+# the check could not tell a real off-thread fd_listen() from the loop's
+# own.  Release builds compile the check out; this changes nothing there.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/main/main.c"
+[=[
+	re_atomic_rlx_set(&re->polling, true);
+
+	re_lock(re);
+	for (;;) {
+]=]
+[=[
+	re_atomic_rlx_set(&re->polling, true);
+
+	/* Medut-patched: the loop's thread is the re thread */
+	re->tid = thrd_current();
+
+	re_lock(re);
+	for (;;) {
+]=]
+"re_main: the loop's thread owns the context")
+
+
+# ---------------------------------------------------------------------------
+# Y. sipreg/reg.c — a replacing client removes the old binding itself
+#
+# The SDK re-creates an account's registration client on every handover,
+# retry and recovery, and frees the old one, which un-REGISTERs its binding.
+# But libre builds every REGISTER's Contact from the socket the request goes
+# out on, and a handover has just flushed the old sockets, so the un-REGISTER
+# named the *new* address: `expires=0` for the binding the successor was
+# about to make, sent just before it.  The old binding was never removed.
+# Seen on the wire (2026-11-04, Asterisk 22, UDP): every network change left
+# one more dead Contact on the AOR — five per account after a few changes —
+# and a Dial() to the account picked one of them: about half the calls
+# rang a closed port and were never answered.  The un-REGISTER also raced
+# the successor's REGISTER for the same Contact under a different Call-ID; a
+# registrar that took the two in the other order deleted the live binding.
+#
+# sipreg_takeover() moves the old client's binding to its successor, as
+# hunk O does for an instance Contact.  The old client sends nothing (no
+# un-REGISTER, deferred or challenged).  The successor's REGISTER carries,
+# after its own Contact, the old one with `expires=0`, until a 2xx: the
+# same request adds the new binding and removes the old (RFC 3261 s10.2.2;
+# pjsip updates a Contact the same way).  Nothing extra is sent when the
+# Contact URI, parameters included, did not change: the REGISTER refreshes
+# that binding in place.  A new push token is a new URI, so the old token's
+# binding is removed this way too (it was un-REGISTERed before).  A
+# REGISTER that fails without reaching the registrar (a network that does
+# not pass traffic yet, a timeout, a server error) leaves the removal owed:
+# the client that retries takes it over with the rest, so a chain of
+# replacements removes every binding none of them got to remove (at most
+# four kept).  A registrar that refuses the request outright (4xx) gets the
+# next one without the extra Contacts.  A push binding handed over (hunk R)
+# and an instance Contact (hunk O) are left as they were.  Behind a NAT the registrar keys the old
+# binding on its public address, which the client does not know; the
+# `expires=0` then matches nothing and the old binding expires as before.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	int regid;
+	uint16_t srcport;
+};
+]=]
+[=[
+	int regid;
+	uint16_t srcport;
+	/* Medut-patched: Contact URIs, one per line, of the bindings the
+	 * clients this one took over left behind, removed by its REGISTERs
+	 * until a 2xx; see sipreg_takeover() */
+	char *medut_prev;
+};
+]=]
+"sipreg: the replaced client's binding")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	mem_deref(reg->params);
+	mem_deref(reg->cparams);
+}
+]=]
+[=[
+	mem_deref(reg->params);
+	mem_deref(reg->cparams);
+	mem_deref(reg->medut_prev);   /* Medut-patched */
+}
+]=]
+"sipreg destructor: free the replaced binding")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+		reg->pexpires = reg->wait;
+		reg->wait *= reg->rwait * (1000 / 100);
+		reg->failc = 0;
+]=]
+[=[
+		reg->pexpires = reg->wait;
+		reg->wait *= reg->rwait * (1000 / 100);
+		reg->failc = 0;
+
+		/* Medut-patched: the replaced bindings are gone */
+		reg->medut_prev = mem_deref(reg->medut_prev);
+]=]
+"sipreg: a 2xx removed the replaced binding")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+	++reg->failc;
+
+ out:
+	if (!reg->expires) {
+]=]
+[=[
+	/* Medut-patched: a registrar that refuses the request outright may
+	 * be refusing the extra Contacts; the next try goes without them.  A
+	 * timeout or a server error keeps them: those bindings still have to
+	 * go (a transport error does not get here). */
+	if (msg->scode >= 400 && msg->scode < 500 && msg->scode != 408)
+		reg->medut_prev = mem_deref(reg->medut_prev);
+
+	++reg->failc;
+
+ out:
+	if (!reg->expires) {
+]=]
+"sipreg: a refused REGISTER drops the extra Contact")
+
+# send_handler() is wholly hunk O's text, so the extra Contact is added by a
+# wrapper that request() calls in its place.
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+static int request(struct sipreg *reg, bool reset_ls)
+{
+]=]
+[=[
+/* Medut-patched: send_handler(), then each binding the replaced clients
+ * left behind, with expires=0 — except the one this REGISTER refreshes: the
+ * same URI, parameters included (a new push token is a new binding). */
+static int medut_send_handler(enum sip_transp tp, struct sa *src,
+				const struct sa *dst, struct mbuf *mb,
+				struct mbuf **contp, void *arg)
+{
+	struct sipreg *reg = arg;
+	const size_t start = mb->pos;
+	const char *own, *gt = NULL, *p, *e;
+	size_t own_len = 0;
+	int err;
+
+	err = send_handler(tp, src, dst, mb, contp, arg);
+	if (err)
+		return err;
+
+	if (!reg->medut_prev || !reg->expires)
+		return 0;
+
+	/* send_handler() wrote "Contact: <uri>;expires=..." from `start`. */
+	own = (const char *)mb->buf + start + 9;
+	if (mb->pos > start + 9)
+		gt = memchr(own, '>', mb->pos - start - 9);
+	if (gt)
+		own_len = (size_t)(gt - own) + 1;
+
+	for (p = reg->medut_prev; *p && (e = strchr(p, '\n')); p = e + 1) {
+
+		if ((size_t)(e - p) == own_len && !memcmp(p, own, own_len))
+			continue;
+
+		err |= mbuf_printf(mb, "Contact: %b;expires=0\r\n",
+				   p, (size_t)(e - p));
+	}
+
+	return err;
+}
+
+
+static int request(struct sipreg *reg, bool reset_ls)
+{
+]=]
+"sipreg: send_handler wrapper adding the replaced binding")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+			     0, reg->auth, send_handler, response_handler, reg,
+]=]
+[=[
+			     0, reg->auth, medut_send_handler,  /* Medut */
+			     response_handler, reg,
+]=]
+"request(): send through the wrapper")
+
+medut_patch("${SOURCE_DIR}/src/sipreg/reg.c"
+[=[
+int sipreg_send(struct sipreg *reg)
+{
+]=]
+[=[
+/* Medut-patched: add a Contact URI to a client's removal list, once; at
+ * most four are kept. */
+static void medut_prev_add(struct sipreg *reg, const char *uri, size_t len)
+{
+	const char *p, *e;
+	char *list = NULL;
+	unsigned n = 0;
+
+	for (p = reg->medut_prev; p && *p && (e = strchr(p, '\n'));
+	     p = e + 1) {
+
+		if ((size_t)(e - p) == len && !memcmp(p, uri, len))
+			return;
+		++n;
+	}
+
+	if (n >= 4 || re_sdprintf(&list, "%s%b\n",
+				  reg->medut_prev ? reg->medut_prev : "",
+				  uri, len))
+		return;
+
+	mem_deref(reg->medut_prev);
+	reg->medut_prev = list;
+}
+
+
+/**
+ * Medut-patched: let a new registration client take over an old one's
+ * binding
+ *
+ * Call before freeing the old client (sipreg_release()).  The old client
+ * then sends nothing: no un-REGISTER, and none deferred until a request in
+ * flight is answered.  The new client's REGISTER removes (`expires=0`),
+ * alongside its own Contact and until a 2xx, the old client's binding — if
+ * it held one or had a REGISTER out for one — and whatever bindings the old
+ * client was itself still to remove, so a replacement whose REGISTER failed
+ * passes them on.  A Contact equal to the new one is refreshed, not
+ * removed.  An instance Contact (WebSocket) is the same binding on every
+ * network and is left to sipreg_release().
+ *
+ * @param reg  The new SIP Registration client, not yet sent
+ * @param old  The client it replaces
+ */
+void sipreg_takeover(struct sipreg *reg, struct sipreg *old)
+{
+	const char *p, *e;
+	char *uri = NULL;
+
+	if (!reg || !old || reg == old)
+		return;
+
+	if (medut_contact_is_instance(old))
+		return;
+
+	for (p = old->medut_prev; p && *p && (e = strchr(p, '\n'));
+	     p = e + 1)
+		medut_prev_add(reg, p, (size_t)(e - p));
+
+	/* The URI exactly as send_handler() printed it for the old client. */
+	if ((old->registered || old->req) && sa_isset(&old->laddr, SA_ALL) &&
+	    0 == re_sdprintf(&uri, "<sip:%s@%J%s%s%s>",
+			     old->cuser, &old->laddr,
+			     sip_transp_param(old->tp),
+			     old->cparams ? ";" : "",
+			     old->cparams ? old->cparams : ""))
+		medut_prev_add(reg, uri, str_len(uri));
+
+	mem_deref(uri);
+
+	old->registered      = false;
+	old->medut_handoff = true;
+}
+
+
+int sipreg_send(struct sipreg *reg)
+{
+]=]
+"sipreg_takeover(): a new client takes over the old one's binding")
+
+medut_patch("${SOURCE_DIR}/include/re_sipreg.h"
+[=[
+int sipreg_send(struct sipreg *reg);
+]=]
+[=[
+int sipreg_send(struct sipreg *reg);
+/* Medut-patched: see src/sipreg/reg.c */
+void sipreg_takeover(struct sipreg *reg, struct sipreg *old);
+]=]
+"sipreg_takeover() declaration")
+
+
+# ---------------------------------------------------------------------------
+# Z. sip/transp.c, mqueue/mqueue.c — no console output; through dbg
+#
+# libre reports an unhandled or undecodable SIP message, each WebSocket
+# connect / close / send failure, and a damaged mqueue read with re_printf()
+# or re_fprintf(stderr) — onto the host application's stdout and stderr,
+# where an embedded SDK has no business writing, and out of reach of the
+# SDK's log.  The SDK used to hide stderr by pointing the whole process's
+# stderr at /dev/null (and could not hide stdout): the host app lost its own
+# stderr too.  These files now print through dbg, which the SDK delivers as
+# MEDUT_EV_LOG (dbg_handler_set()); a stderr message becomes a warning, a
+# stdout one a notice.  Without a dbg handler, dbg prints to stderr as
+# before.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+#define DEBUG_MODULE "transp"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+]=]
+[=[
+#define DEBUG_MODULE "transp"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+
+/* Medut-patched: no console output — see patch Z */
+#define re_printf(...)          dbg_printf(DBG_NOTICE, __VA_ARGS__)
+#define re_fprintf(stream, ...) dbg_printf(DBG_WARNING, __VA_ARGS__)
+]=]
+"transp: console prints through dbg")
+
+medut_patch("${SOURCE_DIR}/src/mqueue/mqueue.c"
+[=[
+#include "mqueue.h"
+]=]
+[=[
+#include "mqueue.h"
+
+/* Medut-patched: no console output — see patch Z */
+#define DEBUG_MODULE "mqueue"
+#define DEBUG_LEVEL 5
+#include <re_dbg.h>
+#define re_fprintf(stream, ...) dbg_printf(DBG_WARNING, __VA_ARGS__)
+]=]
+"mqueue: console prints through dbg")

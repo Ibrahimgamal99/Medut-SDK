@@ -1,2 +1,0 @@
-struct dtls_srtp {
-	struct comp compv[2];

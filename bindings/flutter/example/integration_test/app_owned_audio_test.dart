@@ -10,7 +10,7 @@
 /// Needs a registrar and a callee that returns audio (an echo service), passed
 /// in so no credentials live in the repo:
 ///
-///   flutter test integration_test/app_owned_audio_test.dart -d <device> \
+///   flutter test integration_test/app_owned_audio_test.dart -d DEVICE_ID \
 ///     --dart-define=SIP_URI=100@example.com \
 ///     --dart-define=SIP_PASS=secret \
 ///     --dart-define=SIP_WS=wss://example.com:443 \
@@ -133,6 +133,13 @@ void main() {
     expect(fmt.ptimeMs, greaterThan(0));
 
     // 4 ── The native engine opened the hardware at that same format.
+    //      Not at once: the engine opens its streams only once the call's
+    //      audio mode is in force — under Telecom, when Telecom makes the
+    //      call active.  Media can be up ~100 ms before that (an answer and
+    //      a DTLS handshake in 25 ms on a LAN path), so wait for it.
+    await _untilAsync(
+        () async => (await sdk.appOwnedAudioStatus())['running'] == true,
+        timeout: const Duration(seconds: 5));
     st = await sdk.appOwnedAudioStatus();
     note('status with media: $st');
     expect(st['running'], isTrue,

@@ -120,6 +120,7 @@ link_dylib() {
     -isysroot "${SDK_PATH}" \
     -target "${ARCH}-apple-ios${MIN_IOS}${TARGET_SUFFIX}" \
     -Wl,-all_load "${ARCHIVE}" \
+    -Wl,-exported_symbol,'_medut_*' \
     "${FRAMEWORKS_FOR_LINK[@]}" \
     -lc++ \
     -install_name @rpath/Medut.framework/Medut \
@@ -130,6 +131,9 @@ link_dylib() {
 # Helper: assemble Medut.framework for one slice from a (fat) dylib
 # ---------------------------------------------------------------------------
 make_framework() {
+  # CFBundleShortVersionString: the SDK version, from include/medut.h
+  local SDK_VERSION
+  SDK_VERSION=$(awk '/#define MEDUT_VERSION_(MAJOR|MINOR|PATCH) / {v = v (v ? "." : "") $3} END {print v}' "${ROOT}/include/medut.h")
   local DYLIB="$1"; local FW_DIR="$2"
   rm -rf "${FW_DIR}"
   mkdir -p "${FW_DIR}/Headers" "${FW_DIR}/Modules"
@@ -153,7 +157,7 @@ MODMAP
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleName</key><string>Medut</string>
 	<key>CFBundlePackageType</key><string>FMWK</string>
-	<key>CFBundleShortVersionString</key><string>1.0.0</string>
+	<key>CFBundleShortVersionString</key><string>${SDK_VERSION}</string>
 	<key>CFBundleVersion</key><string>1</string>
 	<key>MinimumOSVersion</key><string>${MIN_IOS}</string>
 </dict>
@@ -231,6 +235,14 @@ for SLICE in device simulator; do
   fi
   if ! grep -q '___real_sip_dialog_route' <<<"${DEFINED}"; then
     echo "ERROR: ${SLICE}: sip_dialog_route rename missing (patch-re-sources.cmake not applied?)" >&2
+    exit 1
+  fi
+  # libre hunk U and the stack's mdt_call_reinvite_abandon(): without them a
+  # call whose WebSocket died can never be re-INVITEd onto a new one
+  # (src/api/netmon.c).
+  if ! grep -q '_sipsess_reinvite_abandon' <<<"${DEFINED}" ||
+     ! grep -q '_echo_call_reinvite_abandon' <<<"${DEFINED}"; then
+    echo "ERROR: ${SLICE}: re-INVITE abandon missing (libre hunk U / src/core not built?)" >&2
     exit 1
   fi
   if ! grep -q '_bsdk_ice_module_init' <<<"${DEFINED}"; then

@@ -23,7 +23,7 @@
 #   MEDUT_INCREMENTAL  Set to 1 to keep existing build dirs (default: clean).
 #                        Only medut_core is BUILD_ALWAYS, so an incremental
 #                        build picks up src/ and platform/ changes but NOT a
-#                        change under third_party/ (a libre or baresip patch):
+#                        change under third_party/ (a libre patch):
 #                        those ExternalProjects are stamped and skipped, and the
 #                        result silently ships the previous objects.  After
 #                        touching cmake/patches/, build clean.  CI always does.
@@ -99,10 +99,19 @@ for ABI in ${ABIS}; do
   # (grep -q + pipefail is a footgun: grep exits at first match and llvm-nm
   #  dies with SIGPIPE — capture the symbol table once instead.)
   echo "  === Verifying ${SO} ==="
-  DEFINED=$("${LLVM_BIN}/llvm-nm" -D --defined-only "${SO}")
-  EXPORTS=$(grep -c ' T medut_' <<<"${DEFINED}" || true)
+  # Exported: the public API and the JNI entry points, nothing else
+  # (scripts/exports.ver).  The checks below look at the full symbol table
+  # of this unstripped copy, where the stack's own symbols still are.
+  EXPORTED=$("${LLVM_BIN}/llvm-nm" -D --defined-only "${SO}")
+  DEFINED=$("${LLVM_BIN}/llvm-nm" --defined-only "${SO}")
+  EXPORTS=$(grep -c ' T medut_' <<<"${EXPORTED}" || true)
   if [ "${EXPORTS}" -lt 40 ]; then
     echo "ERROR: only ${EXPORTS} medut_* symbols exported" >&2; exit 1
+  fi
+  LEAKED=$(awk '$3 !~ /^(medut_|Java_)/ {print $3}' <<<"${EXPORTED}" | head -5)
+  if [ -n "${LEAKED}" ]; then
+    echo "ERROR: internal symbols exported (scripts/exports.ver not applied?):" >&2
+    echo "${LEAKED}" >&2; exit 1
   fi
   # The SIP fixes ride the patched libre sources (cmake/patch-re-sources.cmake):
   # libre's definitions are renamed to __real_* and ws_path.c owns the public
@@ -113,6 +122,13 @@ for ABI in ${ABIS}; do
   fi
   if ! grep -q '__real_sip_dialog_route' <<<"${DEFINED}"; then
     echo "ERROR: sip_dialog_route rename missing (patch-re-sources.cmake not applied?)" >&2; exit 1
+  fi
+  # libre hunk U and the stack's mdt_call_reinvite_abandon(): without them a
+  # call whose WebSocket died can never be re-INVITEd onto a new one
+  # (src/api/netmon.c).
+  if ! grep -q 'sipsess_reinvite_abandon' <<<"${DEFINED}" ||
+     ! grep -q 'mdt_call_reinvite_abandon' <<<"${DEFINED}"; then
+    echo "ERROR: re-INVITE abandon missing (libre hunk U / src/core not built?)" >&2; exit 1
   fi
   # Medut's own ICE agent (src/ice/) must be in the archive: without it no
   # account can enable ICE and every WebRTC endpoint fails to register.

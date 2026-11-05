@@ -1,9 +1,9 @@
 /**
  * @file test_audio_external.c  Unit tests for the app-owned audio device
  *
- * Links the real audio_external.c and drives it through baresip's ausrc/auplay
+ * Links the real src/audio/external.c and drives it through the stack's mdt_ausrc/mdt_auplay
  * API, exactly the way the audio stream does.  The device registry itself is
- * reimplemented here rather than linked: baresip_ausrcl() lives in the same
+ * reimplemented here rather than linked: mdt_ausrcl() lives in the same
  * object as the player and recorder, so linking it drags in every audio
  * backend the sysroot was built with (pulse, opus, webrtc_aec, ...) and makes
  * the test's dependencies a function of the build profile.  The registry is a
@@ -29,8 +29,7 @@
 #include <unistd.h>
 #include <re.h>
 #include <rem.h>
-#include <baresip.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 static int g_pass, g_fail;
 
@@ -45,7 +44,7 @@ static int g_pass, g_fail;
 		}                                                            \
 	} while (0)
 
-/* ── baresip logging, standing in for libbaresip ───────────────────────── */
+/* ── the stack logging, standing in for the stack ───────────────────────── */
 
 static void log_va(const char *fmt, va_list ap)
 {
@@ -53,48 +52,45 @@ static void log_va(const char *fmt, va_list ap)
 		re_vfprintf(stderr, fmt, ap);
 }
 
-void _info(bool safe, const char *fmt, ...)
+/* The stack's logger (bsdk.h); core/stack.c is not linked. */
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
 	va_list ap;
-	(void)safe;
+	(void)level;
+	if (!getenv("VERBOSE"))
+		return;
 	va_start(ap, fmt);
-	log_va(fmt, ap);
+	if (safe)
+		re_vfprintf_s(stderr, fmt, ap);
+	else
+		log_va(fmt, ap);
 	va_end(ap);
 }
 
-void _warning(bool safe, const char *fmt, ...)
-{
-	va_list ap;
-	(void)safe;
-	va_start(ap, fmt);
-	log_va(fmt, ap);
-	va_end(ap);
-}
-
-/* ── baresip device registry, standing in for libbaresip ───────────────── */
+/* ── the stack device registry, standing in for the stack ───────────────── */
 
 static struct list g_ausrcl  = LIST_INIT;
 static struct list g_auplayl = LIST_INIT;
 
-struct list *baresip_ausrcl(void)  { return &g_ausrcl; }
-struct list *baresip_auplayl(void) { return &g_auplayl; }
+struct list *mdt_ausrcl(void)  { return &g_ausrcl; }
+struct list *mdt_auplayl(void) { return &g_auplayl; }
 
-static void ausrc_dtor(void *arg)
+static void mdt_ausrc_dtor(void *arg)
 {
-	struct ausrc *as = arg;
+	struct mdt_ausrc *as = arg;
 	list_unlink(&as->le);
 }
 
-static void auplay_dtor(void *arg)
+static void mdt_auplay_dtor(void *arg)
 {
-	struct auplay *ap = arg;
+	struct mdt_auplay *ap = arg;
 	list_unlink(&ap->le);
 }
 
-int ausrc_register(struct ausrc **asp, struct list *ausrcl, const char *name,
-                   ausrc_alloc_h *alloch)
+int mdt_ausrc_register(struct mdt_ausrc **asp, struct list *ausrcl, const char *name,
+                   mdt_ausrc_alloc_h *alloch)
 {
-	struct ausrc *as = mem_zalloc(sizeof(*as), ausrc_dtor);
+	struct mdt_ausrc *as = mem_zalloc(sizeof(*as), mdt_ausrc_dtor);
 	if (!as)
 		return ENOMEM;
 
@@ -106,10 +102,10 @@ int ausrc_register(struct ausrc **asp, struct list *ausrcl, const char *name,
 	return 0;
 }
 
-int auplay_register(struct auplay **pp, struct list *auplayl, const char *name,
-                    auplay_alloc_h *alloch)
+int mdt_auplay_register(struct mdt_auplay **pp, struct list *auplayl, const char *name,
+                    mdt_auplay_alloc_h *alloch)
 {
-	struct auplay *ap = mem_zalloc(sizeof(*ap), auplay_dtor);
+	struct mdt_auplay *ap = mem_zalloc(sizeof(*ap), mdt_auplay_dtor);
 	if (!ap)
 		return ENOMEM;
 
@@ -121,41 +117,41 @@ int auplay_register(struct auplay **pp, struct list *auplayl, const char *name,
 	return 0;
 }
 
-const struct ausrc *ausrc_find(const struct list *ausrcl, const char *name)
+const struct mdt_ausrc *mdt_ausrc_find(const struct list *ausrcl, const char *name)
 {
 	for (struct le *le = list_head(ausrcl); le; le = le->next) {
-		struct ausrc *as = le->data;
+		struct mdt_ausrc *as = le->data;
 		if (!name || !str_cmp(as->name, name))
 			return as;
 	}
 	return NULL;
 }
 
-const struct auplay *auplay_find(const struct list *auplayl, const char *name)
+const struct mdt_auplay *mdt_auplay_find(const struct list *auplayl, const char *name)
 {
 	for (struct le *le = list_head(auplayl); le; le = le->next) {
-		struct auplay *ap = le->data;
+		struct mdt_auplay *ap = le->data;
 		if (!name || !str_cmp(ap->name, name))
 			return ap;
 	}
 	return NULL;
 }
 
-int ausrc_alloc(struct ausrc_st **stp, struct list *ausrcl, const char *name,
-                struct ausrc_prm *prm, const char *device,
-                ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
+int mdt_ausrc_alloc(struct mdt_ausrc_st **stp, struct list *ausrcl, const char *name,
+                struct mdt_ausrc_prm *prm, const char *device,
+                mdt_ausrc_read_h *rh, mdt_ausrc_error_h *errh, void *arg)
 {
-	const struct ausrc *as = ausrc_find(ausrcl, name);
+	const struct mdt_ausrc *as = mdt_ausrc_find(ausrcl, name);
 	if (!as)
 		return ENOENT;
 	return as->alloch(stp, as, prm, device, rh, errh, arg);
 }
 
-int auplay_alloc(struct auplay_st **stp, struct list *auplayl, const char *name,
-                 struct auplay_prm *prm, const char *device,
-                 auplay_write_h *wh, void *arg)
+int mdt_auplay_alloc(struct mdt_auplay_st **stp, struct list *auplayl, const char *name,
+                 struct mdt_auplay_prm *prm, const char *device,
+                 mdt_auplay_write_h *wh, void *arg)
 {
-	const struct auplay *ap = auplay_find(auplayl, name);
+	const struct mdt_auplay *ap = mdt_auplay_find(auplayl, name);
 	if (!ap)
 		return ENOENT;
 	return ap->alloch(stp, ap, prm, device, wh, arg);
@@ -196,23 +192,23 @@ static void write_h(struct auframe *af, void *arg)
 
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 
-static int open_src(struct ausrc_st **stp, uint32_t srate, uint8_t ch,
+static int open_src(struct mdt_ausrc_st **stp, uint32_t srate, uint8_t ch,
                     uint32_t ptime, struct rec *r)
 {
-	struct ausrc_prm prm = {
+	struct mdt_ausrc_prm prm = {
 		.srate = srate, .ch = ch, .ptime = ptime, .fmt = AUFMT_S16LE,
 	};
-	return ausrc_alloc(stp, baresip_ausrcl(), "external", &prm, NULL,
+	return mdt_ausrc_alloc(stp, mdt_ausrcl(), "external", &prm, NULL,
 	                   read_h, NULL, r);
 }
 
-static int open_play(struct auplay_st **stp, uint32_t srate, uint8_t ch,
+static int open_play(struct mdt_auplay_st **stp, uint32_t srate, uint8_t ch,
                      uint32_t ptime, int *base)
 {
-	struct auplay_prm prm = {
+	struct mdt_auplay_prm prm = {
 		.srate = srate, .ch = ch, .ptime = ptime, .fmt = AUFMT_S16LE,
 	};
-	return auplay_alloc(stp, baresip_auplayl(), "external", &prm, NULL,
+	return mdt_auplay_alloc(stp, mdt_auplayl(), "external", &prm, NULL,
 	                    write_h, base);
 }
 
@@ -249,7 +245,7 @@ static void test_idle(void)
  * ptime frames, in order, with nothing dropped or reordered. */
 static void test_reframing(void)
 {
-	struct ausrc_st *st = NULL;
+	struct mdt_ausrc_st *st = NULL;
 	struct rec r = {0};
 	int16_t chunk[512];
 	int err;
@@ -292,7 +288,7 @@ static void test_reframing(void)
  * rather than a hung CI job. */
 static void test_short_ptime_no_hang(void)
 {
-	struct ausrc_st *st = NULL;
+	struct mdt_ausrc_st *st = NULL;
 	struct rec r = {0};
 	int16_t chunk[80];
 	int err;
@@ -318,7 +314,7 @@ static void test_short_ptime_no_hang(void)
  * the older one alive but unreachable — push() returned ENODEV forever. */
 static void test_second_call_returns_the_mic(void)
 {
-	struct ausrc_st *a = NULL, *b = NULL;
+	struct mdt_ausrc_st *a = NULL, *b = NULL;
 	struct rec ra = {0}, rb = {0};
 	int16_t chunk[160] = {0};
 	int err;
@@ -346,8 +342,8 @@ static void test_second_call_returns_the_mic(void)
 
 static void test_format(void)
 {
-	struct ausrc_st *st = NULL;
-	struct auplay_st *pst = NULL;
+	struct mdt_ausrc_st *st = NULL;
+	struct mdt_auplay_st *pst = NULL;
 	struct rec r = {0};
 	int base = 0;
 	uint32_t srate = 0, ptime = 0;
@@ -377,7 +373,7 @@ static void test_format(void)
 
 static void test_playback(void)
 {
-	struct auplay_st *st = NULL;
+	struct mdt_auplay_st *st = NULL;
 	int base = 1000;
 	int16_t buf[160];
 	int err;
@@ -404,7 +400,7 @@ static void test_playback(void)
 }
 
 /* Regression: close() never ran at shutdown, so s_ready stayed true, init()
- * returned early on the next start, and the registration baresip_init() had
+ * returned early on the next start, and the registration the stack's init had
  * already discarded was never replaced — leaving use_external() succeeding
  * against a device that no longer existed. */
 static void test_close_reinit(void)
@@ -413,21 +409,21 @@ static void test_close_reinit(void)
 
 	bsdk_audio_external_close();
 
-	CHECK(ausrc_find(baresip_ausrcl(), "external") == NULL,
+	CHECK(mdt_ausrc_find(mdt_ausrcl(), "external") == NULL,
 	      "close must unregister the capture device");
-	CHECK(auplay_find(baresip_auplayl(), "external") == NULL,
+	CHECK(mdt_auplay_find(mdt_auplayl(), "external") == NULL,
 	      "close must unregister the playback device");
 
 	err = bsdk_audio_external_init();
 	CHECK(err == 0, "re-init after close: %d", err);
 
-	CHECK(ausrc_find(baresip_ausrcl(), "external") != NULL,
+	CHECK(mdt_ausrc_find(mdt_ausrcl(), "external") != NULL,
 	      "re-init must register the capture device again");
-	CHECK(auplay_find(baresip_auplayl(), "external") != NULL,
+	CHECK(mdt_auplay_find(mdt_auplayl(), "external") != NULL,
 	      "re-init must register the playback device again");
 
 	/* And it has to actually work, not merely be findable. */
-	struct ausrc_st *st = NULL;
+	struct mdt_ausrc_st *st = NULL;
 	struct rec r = {0};
 	CHECK(open_src(&st, 8000, 1, 20, &r) == 0, "open after re-init");
 	mem_deref(st);
@@ -437,7 +433,7 @@ static void test_close_reinit(void)
  * channel, which sounds like noise rather than like a bug. */
 static void test_partial_frame_rejected(void)
 {
-	struct ausrc_st *st = NULL;
+	struct mdt_ausrc_st *st = NULL;
 	struct rec r = {0};
 	int16_t chunk[161] = {0};
 	int err;

@@ -238,14 +238,14 @@ far end stays connected. Read the line at teardown:
 ### In-dialog requests routed away from the WebSocket flow
 
 ```
-Medut: ws in-dialog route echo:5060 is not the registration flow;
+Medut: ws in-dialog route pbx:5060 is not the registration flow;
          routing over pbx.example.com:443 instead (RFC 7118 B.2)
 ```
 
 A UAS dialog's route set is only the peer's Record-Route; unlike a UAC's, it
 does not begin with your outbound proxy. A PBX behind a reverse proxy commonly
 Record-Routes its own internal address — or omits Record-Route entirely, leaving
-libre to route to a Contact like `sip:asterisk@echo:5060`, a hostname that
+libre to route to a Contact like `sip:asterisk@pbx:5060`, a hostname that
 resolves nowhere. The lookup then fails *asynchronously*, long after the request
 was accepted. This line means the SDK put it back on the registration flow.
 
@@ -299,7 +299,7 @@ Medut/ice: restart gathering failed (...) — offering the candidates gathered s
 
 The first falls back to the plain re-INVITE and emits `CALL_ICE_STALE`; the
 second still offers, deliberately, because reporting a media-NAT failure to
-baresip would close a call that is up and merely needs a new offer.
+the call would close a call that is up and merely needs a new offer.
 
 ### `STUN Response: 401 Unauthorized` on a restarted call
 
@@ -384,7 +384,7 @@ one way": `mic NaN / spk NaN` with zero RTP counters is a dead call, while
 
 ### "No common audio or video codecs" that is not about codecs
 
-baresip disables a stream whose media profile it cannot match and then reports
+The stack disables a stream whose media profile it cannot match and then reports
 the call as having no common codecs. An account offering `RTP/AVP` against a
 peer offering `UDP/TLS/RTP/SAVPF` fails with a full, perfectly compatible codec
 list on both sides. When the account offers no encryption the SDK says so

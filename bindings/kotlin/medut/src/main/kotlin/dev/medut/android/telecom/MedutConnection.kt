@@ -5,6 +5,7 @@ import android.telecom.CallAudioState
 import android.telecom.Connection
 import android.telecom.DisconnectCause
 import android.telecom.TelecomManager
+import android.util.Log
 import androidx.annotation.RequiresApi
 import dev.medut.Call
 import dev.medut.CallState
@@ -147,6 +148,7 @@ internal class MedutConnection private constructor(
     override fun onAnswer(videoState: Int) = onAnswer()
 
     override fun onReject() {
+        Log.i(TAG, "Telecom rejected $key")
         val call = call
         if (call == null) {
             bridge.ringDeclined(this)
@@ -160,12 +162,18 @@ internal class MedutConnection private constructor(
 
     override fun onReject(replyMessage: String?) = onReject()
 
+    // Telecom ending a call is a local hangup the app never asked for, and
+    // the SDK's own log cannot tell it from one the app did: say so here.
     override fun onDisconnect() {
+        Log.i(TAG, "Telecom disconnected $key (state ${Connection.stateToString(state)})")
         val call = call ?: return onReject()
         runCatching { call.hangup() }
     }
 
-    override fun onAbort() = onDisconnect()
+    override fun onAbort() {
+        Log.i(TAG, "Telecom aborted $key")
+        onDisconnect()
+    }
 
     override fun onHold() {
         runCatching { call?.hold() }
@@ -190,5 +198,9 @@ internal class MedutConnection private constructor(
 
     override fun onStateChanged(state: Int) {
         bridge.connectionStateChanged(this, state)
+    }
+
+    private companion object {
+        const val TAG = "MedutTelecom"
     }
 }

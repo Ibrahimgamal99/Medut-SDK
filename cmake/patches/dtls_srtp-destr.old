@@ -1,4 +1,0 @@
-	struct dtls_srtp *st = arg;
-	size_t i;
-
-	for (i=0; i<2; i++) {

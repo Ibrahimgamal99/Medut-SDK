@@ -1,11 +1,10 @@
 /**
- * @file test_jbuf_adapt.c  Adaptive sizing patch on baresip's jitter buffer
- *                          (cmake/patch-baresip-sources.cmake, job 8)
+ * @file test_jbuf_adapt.c  Adaptive sizing of the jitter buffer
  *
- * Builds the patched third_party/baresip/src/jbuf.c itself, against libre,
- * and drives it the way rtprecv.c does: jbuf_put() as each packet arrives,
- * and a decode timer that drains with jbuf_get() and re-arms from
- * jbuf_next_play() (10 ms when that is negative).  The clock is simulated
+ * Builds src/media/jbuf.c itself, against libre,
+ * and drives it the way rtprecv.c does: mdt_jbuf_put() as each packet arrives,
+ * and a decode timer that drains with mdt_jbuf_get() and re-arms from
+ * mdt_jbuf_next_play() (10 ms when that is negative).  The clock is simulated
  * (tmr_jiffies is wrapped), the streams are generated, so every run is the
  * same.  What it pins:
  *
@@ -25,7 +24,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <re.h>
-#include <baresip.h>
+#include "../../src/media/mdt_media.h"
 
 static int g_pass, g_fail;
 
@@ -43,19 +42,10 @@ static void log_va(const char *fmt, va_list ap)
 		re_vfprintf(stderr, fmt, ap);
 }
 
-void _info(bool safe, const char *fmt, ...)
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
-}
-
-void _warning(bool safe, const char *fmt, ...)
-{
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
-}
-
-void _debug(bool safe, const char *fmt, ...)
-{
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
+	va_list ap; (void)safe; (void)level;
+	va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
 }
 
 static uint64_t g_now;   /* ms */
@@ -103,7 +93,7 @@ static uint64_t g_t0;
 static uint32_t g_ts0;
 static uint16_t g_seq0;
 
-static void stream_start(uint32_t seed)
+static void mdt_stream_start(uint32_t seed)
 {
 	g_rng  = seed;
 	g_n    = 0;
@@ -175,7 +165,7 @@ struct result {
 static struct result run(uint64_t measure_from)
 {
 	struct result r;
-	struct jbuf *jb;
+	struct mdt_jbuf *jb;
 	uint64_t next_dec = 0;
 	int64_t prev = -1;
 	double sum = 0;
@@ -186,10 +176,10 @@ static struct result run(uint64_t measure_from)
 	memset(&r, 0, sizeof(r));
 	qsort(g_pkt, g_n, sizeof(g_pkt[0]), by_arrival);
 
-	if (jbuf_alloc(&jb, MIND, MAXD, 50))
+	if (mdt_jbuf_alloc(&jb, MIND, MAXD, 50))
 		return r;
-	jbuf_set_type(jb, JBUF_ADAPTIVE);
-	jbuf_set_srate(jb, SRATE);
+	mdt_jbuf_set_type(jb, MDT_JBUF_ADAPTIVE);
+	mdt_jbuf_set_srate(jb, SRATE);
 
 	while (i < g_n || next_dec) {
 		if (i < g_n && (!next_dec || g_pkt[i].arrive < next_dec)) {
@@ -202,7 +192,7 @@ static struct result run(uint64_t measure_from)
 			h.ts = g_pkt[i].ts;
 			h.ssrc = 0x1234;
 			h.ts_arrive = g_now * (SRATE / 1000);
-			(void)jbuf_put(jb, &h, mb);
+			(void)mdt_jbuf_put(jb, &h, mb);
 			mem_deref(mb);
 
 			if ((int16_t)(h.seq - seq_hi) > 0)
@@ -218,7 +208,7 @@ static struct result run(uint64_t measure_from)
 		do {
 			struct rtp_header h;
 			void *mb = NULL;
-			int err = jbuf_get(jb, &h, &mb);
+			int err = mdt_jbuf_get(jb, &h, &mb);
 			if (err == EAGAIN)
 				++k;
 			else if (err)
@@ -227,8 +217,8 @@ static struct result run(uint64_t measure_from)
 			mem_deref(mb);
 		} while (--k);
 
-		struct jbuf_stat st;
-		jbuf_stats(jb, &st);
+		struct mdt_jbuf_stat st;
+		mdt_jbuf_stats(jb, &st);
 		if (prev >= 0 && st.c_delay != (uint32_t)prev) {
 			r.moves++;
 			if (st.c_delay < (uint32_t)prev &&
@@ -243,15 +233,15 @@ static struct result run(uint64_t measure_from)
 			nsum++;
 		}
 
-		int32_t d = jbuf_next_play(jb);
+		int32_t d = mdt_jbuf_next_play(jb);
 		if (d < 0)
 			d = 10;
-		next_dec = (i < g_n || jbuf_packets(jb)) ? g_now + (uint64_t)d
+		next_dec = (i < g_n || mdt_jbuf_packets(jb)) ? g_now + (uint64_t)d
 							 : 0;
 	}
 
-	struct jbuf_stat st;
-	jbuf_stats(jb, &st);
+	struct mdt_jbuf_stat st;
+	mdt_jbuf_stats(jb, &st);
 	r.late_lost  = st.n_late_lost;
 	r.depth_last = (uint32_t)prev;
 	r.depth_avg  = nsum ? sum / nsum : 0;
@@ -270,7 +260,7 @@ static struct result run(uint64_t measure_from)
 
 static void test_clean_link(void)
 {
-	stream_start(1);
+	mdt_stream_start(1);
 	gen_clean(0, 1500, 4, 0);                     /* 30 s */
 	struct result r = run(0);
 
@@ -281,7 +271,7 @@ static void test_clean_link(void)
 static void test_spiky_link(void)
 {
 	for (uint32_t seed = 1; seed <= 4; seed++) {
-		stream_start(seed);
+		mdt_stream_start(seed);
 		gen_spiky(0, 3000);                   /* 60 s */
 		struct result r = run(10000);
 		double pct = 100.0 * r.late_lost / r.expected;
@@ -297,7 +287,7 @@ static void test_spiky_link(void)
 
 static void test_shrinks_back(void)
 {
-	stream_start(7);
+	mdt_stream_start(7);
 	gen_spiky(0, 1500);                           /* 30 s of spikes */
 	gen_clean(1500, 4500, 4, 0);                  /* then 60 s clean */
 	struct result r = run(0);
@@ -315,7 +305,7 @@ static void test_ts_jump(void)
 					 -1059 * (SRATE / 1000) };
 
 	for (size_t j = 0; j < RE_ARRAY_SIZE(jumps); j++) {
-		stream_start(3);
+		mdt_stream_start(3);
 		gen_clean(0, 500, 4, 0);
 		gen_clean(500, 1500, 4, jumps[j]);
 		struct result r = run(0);
@@ -331,7 +321,7 @@ static void test_ts_jump(void)
  * reordering, which only late-by-sequence drops reveal at first. */
 static void test_late_packets_grow(void)
 {
-	stream_start(5);
+	mdt_stream_start(5);
 	for (uint32_t i = 0; i < 1500; i++)
 		add(i, 30 + (i % 20 == 19 ? 100 : rnd(0, 4)), 0);
 	struct result r = run(0);

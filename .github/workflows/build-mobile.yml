@@ -1,41 +1,149 @@
-name: Flutter plugin
+name: Build mobile libraries
 
-# The Dart side of the plugin: analyzer and unit tests. The tests fake the
-# native side at the Pigeon channels, so no native build is needed here.
+# Manual only: this workflow is not run on push.  Start it from the Actions tab
+# (or `gh workflow run build-mobile.yml`) when native sources change.
 #
-# The iOS xcframework, MedutKit and the example app are built by
-# ios-xcframework.yml (manual). Android is built locally with
-# scripts/build-android.sh; after a native change, run it and then
-# `flutter build apk --debug` in bindings/flutter/example to prove the
-# jniLibs still line up with the Kotlin SDK's JNI layer.
+# Builds the two native libraries the mobile bindings ship, and nothing else
+# (no example apps — flutter-checks.yml checks those against what this commits):
+#
+#   Android  libmedut.so for arm64-v8a, armeabi-v7a, x86_64
+#            -> bindings/kotlin/medut/src/main/jniLibs/<abi>/
+#   iOS      Medut.xcframework (device arm64 + simulator arm64/x86_64)
+#            -> bindings/flutter/ios/Frameworks/
+#
+# and, unless `commit` is unchecked, commits both to the branch it ran on.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "bindings/flutter/**"
-      - ".github/workflows/build-mobile.yml"
-  pull_request:
-    paths:
-      - "bindings/flutter/**"
+    inputs:
+      commit:
+        description: "Commit the built libraries to this branch"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+# One run per branch at a time: two would race to push the same files.
+concurrency:
+  group: build-mobile-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  dart:
+  # ── Android: libmedut.so for the three ABIs ─────────────────────────────
+  android:
     runs-on: ubuntu-22.04
-    name: Flutter · analyze + tests
+    name: Android · libmedut.so
     steps:
       - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Analyze
-        working-directory: bindings/flutter
+      - name: Install build tools
         run: |
-          flutter pub get
-          dart analyze lib
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
 
-      - name: Tests
-        working-directory: bindings/flutter
-        run: flutter test
+      # The NDK the committed libraries are built with locally, so a CI build
+      # and a local one produce the same code.
+      - name: Install NDK 28.2.13676358
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      # Fetches third_party at the pinned revisions, builds every ABI, checks
+      # the exports (only medut_* and the JNI entry points), and stages the
+      # stripped libraries in jniLibs/.
+      - name: Build
+        run: bash scripts/build-android.sh
+
+      - name: Upload jniLibs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-jniLibs
+          path: bindings/kotlin/medut/src/main/jniLibs/
+          if-no-files-found: error
+
+  # ── iOS: Medut.xcframework ──────────────────────────────────────────────
+  ios:
+    runs-on: macos-15
+    name: iOS · Medut.xcframework
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the core for the three slices, verifies the exports, and
+      # stages the framework in bindings/flutter/ios/Frameworks.
+      - name: Build
+        run: bash scripts/build-ios.sh
+
+      # A ditto zip keeps the framework's symlinks and the exec bit of its
+      # Mach-O binary, which a plain artifact upload loses (a pod vendoring
+      # that framework cannot link).
+      - name: Zip xcframework
+        run: |
+          cd bindings/flutter/ios/Frameworks
+          ditto -c -k --sequesterRsrc --keepParent Medut.xcframework \
+            "$RUNNER_TEMP/Medut.xcframework.zip"
+
+      - name: Upload xcframework
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework-zip
+          path: ${{ runner.temp }}/Medut.xcframework.zip
+          if-no-files-found: error
+
+  # ── Commit both to the branch ─────────────────────────────────────────────
+  commit:
+    needs: [android, ios]
+    if: ${{ inputs.commit }}
+    runs-on: ubuntu-22.04
+    name: Commit libraries
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-jniLibs
+          path: bindings/kotlin/medut/src/main/jniLibs/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-xcframework-zip
+          path: ${{ runner.temp }}
+
+      - name: Unpack xcframework
+        run: |
+          rm -rf bindings/flutter/ios/Frameworks/Medut.xcframework
+          unzip -q "$RUNNER_TEMP/Medut.xcframework.zip" -x '__MACOSX/*' \
+            -d bindings/flutter/ios/Frameworks/
+          for slice in ios-arm64 ios-arm64_x86_64-simulator; do
+            test -x "bindings/flutter/ios/Frameworks/Medut.xcframework/$slice/Medut.framework/Medut"
+          done
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -s "bindings/kotlin/medut/src/main/jniLibs/$abi/libmedut.so"
+          done
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bindings/kotlin/medut/src/main/jniLibs
+          git add -f bindings/flutter/ios/Frameworks/Medut.xcframework
+          if git diff --cached --quiet; then
+            echo "libraries unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "mobile: refresh jniLibs and Medut.xcframework (CI build of ${GITHUB_SHA::12})"
+          # The branch can move during the build.  This commit touches only
+          # the libraries, so rebasing onto the new head is safe — unless the
+          # new commits changed what they are built from; then they no longer
+          # match the branch, and the run must be repeated.
+          for attempt in 1 2 3; do
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            git fetch origin "${GITHUB_REF_NAME}"
+            if ! git diff --quiet "${GITHUB_SHA}" FETCH_HEAD -- \
+                 src include cmake platform CMakeLists.txt scripts; then
+              echo "::error::${GITHUB_REF_NAME} moved to $(git rev-parse --short FETCH_HEAD) with core changes since ${GITHUB_SHA::12}; re-run this workflow on the new head"
+              exit 1
+            fi
+            git rebase FETCH_HEAD
+          done
+          exit 1

@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
-#include "../../src/stats_loss.h"
+#include "../../src/api/stats_loss.h"
 
 static int g_pass, g_fail;
 

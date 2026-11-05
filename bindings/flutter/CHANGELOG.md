@@ -1,9 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 — 2026-11-05
+
+The native libraries underneath the plugin (the Kotlin SDK's `libmedut.so`,
+`Medut.xcframework` on iOS and the desktop library reached over `dart:ffi`)
+now run Medut's own SIP and media stack on libre instead of baresip. The Dart
+API is unchanged; the call and registration behaviour changes that come with
+the new stack are listed in [docs/CHANGELOG.md](../../docs/CHANGELOG.md)
+under 2.0.0.
 
 Added:
 
+- `MedutConfig.logLevel` below 0 now turns log events off on Android and
+  iOS as well as on desktop. The native SDKs gained `LogLevel.OFF` (-1), so
+  the plugin sends any negative value as -1 instead of raising it to 0.
 - `Account.refreshRegistration()`: re-send the REGISTER in place (same
   Call-ID and Contact), as a push wake-up does.
 - `Account.setReliableProvisional(ReliableProvisionalMode)` for 100rel/PRACK.

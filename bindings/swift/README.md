@@ -16,8 +16,8 @@ scripts/build-ios.sh
 
 This stages `Medut.xcframework` (with the header and module map Swift needs)
 in `bindings/flutter/ios/Frameworks`, where it is committed;
-`scripts/fetch-prebuilt.sh` fetches the CI build instead, and the
-`ios-xcframework` workflow can commit one for you. `Sources/` and
+`scripts/fetch-prebuilt.sh` fetches a CI build instead, and the
+"Build mobile libraries" workflow builds and commits one for you. `Sources/` and
 `Frameworks/` here are symlinks into `bindings/flutter/ios`: the Flutter
 plugin's pod compiles the same files, and CocoaPods cannot see through a
 symlink, so the real directories live on its side. Then add the package by

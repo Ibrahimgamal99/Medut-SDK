@@ -3,7 +3,7 @@
  *
  * A port is a socket the generation can send and receive on.  The stream's
  * own RTP/RTCP sockets are attached with is_stream_sock=true: they are
- * shared with baresip, their receive helper belongs to the media (see
+ * shared with the media layer, their receive helper belongs to the media (see
  * ice_route.c), and sends must go through udp_send_helper so the DTLS/SRTP
  * layers above are bypassed rather than re-entered.  Ports the agent
  * allocates itself (relay in PR1, per-interface in PR3) carry their own
@@ -15,8 +15,14 @@
  */
 
 #include <string.h>
+#ifdef WIN32
+#include <winsock2.h>
+#define sock_close(fd) closesocket(fd)
+#else
 #include <unistd.h>
 #include <sys/socket.h>
+#define sock_close(fd) close(fd)
+#endif
 #include "ice_internal.h"
 
 
@@ -191,25 +197,25 @@ int icea_port_alloc(struct icea_gen *gen, unsigned compid,
 			re_sock_t fd = socket(sa_af(&bind_addr), SOCK_DGRAM,
 					      IPPROTO_UDP);
 			if (fd == RE_BAD_SOCK) {
-				err = errno ? errno : EIO;
+				err = RE_ERRNO_SOCK ? RE_ERRNO_SOCK : EIO;
 				break;
 			}
 			err = gen->conf->pin_fd(fd, ifname, sa_af(&bind_addr));
 			if (err) {
-				(void)close(fd);
+				(void)sock_close(fd);
 				break;
 			}
 			(void)net_sockopt_blocking_set(fd, false);
 			if (bind(fd, &bind_addr.u.sa, bind_addr.len) < 0) {
-				err = errno;
-				(void)close(fd);
+				err = RE_ERRNO_SOCK;
+				(void)sock_close(fd);
 				if (err == EADDRINUSE || err == EACCES)
 					continue;
 				break;
 			}
 			err = udp_alloc_fd(&us, fd, icea_route_port_recv, port);
 			if (err) {
-				(void)close(fd);
+				(void)sock_close(fd);
 				break;
 			}
 			err = udp_thread_attach(us);

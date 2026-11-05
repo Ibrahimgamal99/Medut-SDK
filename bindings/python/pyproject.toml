@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medut"
-version = "1.0.0"
+version = "2.0.0"
 description = "Python binding for Medut — SIP/WebRTC/NAT SDK"
 readme = "README.md"
 license = { text = "BSD-3-Clause" }

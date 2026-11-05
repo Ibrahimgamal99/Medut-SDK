@@ -1,11 +1,11 @@
 /**
- * @file test_ice_mod.c  medut-ice: the baresip media-NAT module, driven as
- *                        baresip drives it
+ * @file test_ice_mod.c  medut-ice: the ICE media-NAT, driven as the
+ *                        stack drives it
  *
- * Two "calls" on loopback with real UDP sockets.  The test plays baresip:
+ * Two "calls" on loopback with real UDP sockets.  The test plays the stack:
  * it calls sessh / mediah / updateh through the registered vtable, moves
  * SDP between the two sides with sdp_encode/sdp_decode, and stubs the few
- * baresip symbols the module touches (call state, streams, log, config,
+ * stack symbols the module touches (call state, streams, log, config,
  * the media-NAT registry).  Links libre only.
  *
  * Build: make -C test/unit test_ice_mod && ./test/unit/test_ice_mod
@@ -14,8 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <re.h>
-#include <baresip.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 #include "../../src/ice/ice_internal.h"
 
 struct bsdk_ctx g_bsdk;
@@ -24,7 +23,7 @@ static int g_pass, g_fail;
 #define CHECK(cond) do { if (cond) g_pass++; else { g_fail++; \
 	fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
 
-/* ── baresip stubs ───────────────────────────────────────────────────────── */
+/* ── stack stubs (core/mdt_mod.h, core/mdt.h) ─────────────────────────── */
 
 #include <stdlib.h>
 #include <stdarg.h>
@@ -37,36 +36,35 @@ static void vlog_stub(const char *lvl, const char *fmt, va_list ap)
 	fprintf(stderr, "[%s] %s%s", lvl, buf,
 		buf[strlen(buf) ? strlen(buf) - 1 : 0] == '\n' ? "" : "\n");
 }
-void _debug(bool safe, const char *fmt, ...)
-{ va_list ap; (void)safe; va_start(ap, fmt); vlog_stub("dbg", fmt, ap); va_end(ap); }
-void _info(bool safe, const char *fmt, ...)
-{ va_list ap; (void)safe; va_start(ap, fmt); vlog_stub("inf", fmt, ap); va_end(ap); }
 /* the media-start watchdog's two warnings, counted */
 static unsigned g_warn_no_pair, g_warn_never_started;
-void _warning(bool safe, const char *fmt, ...)
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
+	static const char *lvl[] = { "dbg", "inf", "WRN", "ERR" };
 	va_list ap;
 	(void)safe;
-	if (strstr(fmt, "no writable ICE pair"))
-		g_warn_no_pair++;
-	if (strstr(fmt, "never started"))
-		g_warn_never_started++;
-	va_start(ap, fmt); vlog_stub("WRN", fmt, ap); va_end(ap);
+	if (level == MDT_LOG_WARN) {
+		if (strstr(fmt, "no writable ICE pair"))
+			g_warn_no_pair++;
+		if (strstr(fmt, "never started"))
+			g_warn_never_started++;
+	}
+	va_start(ap, fmt); vlog_stub(lvl[level & 3], fmt, ap); va_end(ap);
 }
 
 static struct list g_mnatl;
-struct list *baresip_mnatl(void) { return &g_mnatl; }
+struct list *mdt_mnatl(void) { return &g_mnatl; }
 
-void mnat_register(struct list *mnatl, struct mnat *mnat)
+void mdt_mnat_register(struct list *mnatl, struct mdt_mnat *mdt_mnat)
 {
-	list_append(mnatl, &mnat->le, mnat);
+	list_append(mnatl, &mdt_mnat->le, mdt_mnat);
 }
-void mnat_unregister(struct mnat *mnat) { list_unlink(&mnat->le); }
-const struct mnat *mnat_find(const struct list *mnatl, const char *id)
+void mdt_mnat_unregister(struct mdt_mnat *mdt_mnat) { list_unlink(&mdt_mnat->le); }
+const struct mdt_mnat *mdt_mnat_find(const struct list *mnatl, const char *id)
 {
 	struct le *le;
 	LIST_FOREACH(mnatl, le) {
-		struct mnat *m = le->data;
+		struct mdt_mnat *m = le->data;
 		if (0 == str_cmp(m->id, id))
 			return m;
 	}
@@ -75,42 +73,45 @@ const struct mnat *mnat_find(const struct list *mnatl, const char *id)
 
 struct fake_stream { bool secure; };
 struct fake_call {
-	enum call_state st;
+	enum mdt_call_state st;
+	enum sdp_neg_state neg;
 	struct list streaml;
 	struct le sle;
 	struct fake_stream strm;
 };
-enum call_state call_state(const struct call *call)
+enum mdt_call_state mdt_call_state(const struct mdt_call *call)
 {
 	return ((const struct fake_call *)call)->st;
 }
-struct list *call_streaml(const struct call *call)
+enum sdp_neg_state mdt_call_sdp_neg_state(const struct mdt_call *call)
+{
+	return ((const struct fake_call *)call)->neg;
+}
+struct list *mdt_call_streaml(const struct mdt_call *call)
 {
 	return &((struct fake_call *)call)->streaml;
 }
-bool stream_is_secure(const struct stream *strm)
+bool mdt_stream_is_secure(const struct mdt_stream *strm)
 {
 	return ((const struct fake_stream *)strm)->secure;
 }
-static int g_net_dummy;      /* struct network is opaque; only compared */
-struct network *baresip_network(void) { return (struct network *)&g_net_dummy; }
 static struct sa g_default_laddr;
-const struct sa *net_laddr_af(const struct network *net, int af)
+const struct sa *mdt_net_laddr_af(int af)
 {
-	(void)net; (void)af;
+	(void)af;
 	return &g_default_laddr;
 }
-static struct config g_cfg;
-struct config *conf_config(void) { return &g_cfg; }
+static struct mdt_port_range g_ports;
+const struct mdt_port_range *mdt_rtp_ports(void) { return &g_ports; }
 
-/* baresip's: a remote format was negotiated and the remote port is not 0 */
-bool sdp_media_has_media(const struct sdp_media *m)
+/* The stack's: a remote format was negotiated and the remote port is not 0 */
+bool mdt_sdp_media_has_media(const struct sdp_media *m)
 {
 	return sdp_media_rformat(m, NULL) != NULL && sdp_media_rport(m) != 0;
 }
 
 static int g_ice_failed_calls;
-int bsdk_ice_servers_for_call(const struct call *bc,
+int bsdk_ice_servers_for_call(const struct mdt_call *bc,
                               struct bsdk_ice_server_snap *snap)
 {
 	(void)bc;
@@ -122,6 +123,17 @@ void bsdk_ice_server_snap_clear(struct bsdk_ice_server_snap *snap)
 {
 	if (snap) snap->v = mem_deref(snap->v);
 }
+
+/* The server address cache's pre-warm (bsdk_ice_prewarm): no DNS here. */
+int bsdk_ice_servers_for_account(const struct medut_account *acct,
+                                 struct bsdk_ice_server_snap *snap)
+{
+	(void)acct;
+	memset(snap, 0, sizeof(*snap));
+	return 0;
+}
+struct dnsc *mdt_net_dnsc(void) { return NULL; }
+int mdt_net_af(void) { return AF_INET; }
 
 int bsdk_net_bind_socket(re_sock_t fd, const char *ifname, int af)
 {
@@ -146,7 +158,7 @@ int bsdk_net_if_cost(const char *ifname)
 	return 0;
 }
 
-void bsdk_netmon_call_ice_failed(struct call *bc, int err)
+void bsdk_netmon_call_ice_failed(struct mdt_call *bc, int err)
 {
 	(void)bc; (void)err;
 	g_ice_failed_calls++;
@@ -154,17 +166,17 @@ void bsdk_netmon_call_ice_failed(struct call *bc, int err)
 
 static int g_ice_state_reports;
 static int g_last_ice_state = -1;
-void bsdk_netmon_call_ice_state(struct call *bc, int prev, int now)
+void bsdk_netmon_call_ice_state(struct mdt_call *bc, int prev, int now)
 {
 	(void)bc; (void)prev;
 	g_ice_state_reports++;
 	g_last_ice_state = now;
 }
 
-/* The SDK's call registry and event queue: the module looks the baresip
+/* The SDK's call registry and event queue: the module looks the stack's
  * call up to record its ICE state and to post MEDUT_EV_ICE_STATE.  No
  * wrappers exist here, so nothing is found and nothing is posted. */
-struct medut_call *bsdk_call_find(const struct call *bc)
+struct medut_call *bsdk_call_find(const struct mdt_call *bc)
 {
 	(void)bc;
 	return NULL;
@@ -187,8 +199,8 @@ struct side {
 	struct sdp_media *sdpm;
 	struct udp_sock *sock;
 	struct sa laddr;
-	struct mnat_sess *sess;
-	struct mnat_media *media;
+	struct mdt_mnat_sess *sess;
+	struct mdt_mnat_media *media;
 	unsigned estab_calls;
 	int estab_err;
 	unsigned connh_calls;
@@ -222,7 +234,7 @@ static void app_recv(const struct sa *src, struct mbuf *mb, void *arg)
 	sd->app_last_src = *src;
 }
 
-static int side_init(struct side *sd, enum call_state st)
+static int side_init(struct side *sd, enum mdt_call_state st)
 {
 	struct sa lo;
 	int err;
@@ -250,7 +262,7 @@ static int side_init(struct side *sd, enum call_state st)
 
 static void side_close(struct side *sd)
 {
-	/* baresip order: media (stream->mns) then session (call->mnats)
+	/* The stack order: media (stream->mns) then session (call->mnats)
 	 * — and the reverse is tolerated too */
 	sd->media = mem_deref(sd->media);
 	sd->sess  = mem_deref(sd->sess);
@@ -258,9 +270,9 @@ static void side_close(struct side *sd)
 	sd->sock  = mem_deref(sd->sock);
 }
 
-static const struct mnat *vt(void)
+static const struct mdt_mnat *vt(void)
 {
-	return mnat_find(baresip_mnatl(), "ice");
+	return mdt_mnat_find(mdt_mnatl(), "ice");
 }
 
 static int side_attach(struct side *sd, bool offerer)
@@ -337,7 +349,7 @@ static void connect_call_from(struct side *a, struct side *b)
 }
 
 
-/* The full baresip choreography for an A→B call on loopback. */
+/* The stack's full choreography for an A→B call on loopback. */
 static void connect_call(struct side *a, struct side *b)
 {
 	CHECK(0 == side_attach(a, true));
@@ -365,7 +377,7 @@ static void test_gather_release_and_sdp(void)
 	struct side a;
 	struct mbuf *mb = NULL;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
 	CHECK(0 == side_attach(&a, true));
 	CHECK(a.estab_calls == 0);                   /* never inside sessh */
 	CHECK(run_until(estab_once, &a, 1000));
@@ -397,7 +409,7 @@ static void test_deadline_releases_offer_without_media(void)
 	struct side a;
 
 	g_bsdk.cfg.ice_gathering_timeout_ms = 120;
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
 	CHECK(0 == vt()->sessh(&a.sess, vt(), NULL, AF_INET, NULL, NULL, NULL,
 			       a.sdp, true, estab_h, &a));
 	/* no mediah */
@@ -417,8 +429,8 @@ static void test_full_call_virtual_peer(void)
 	struct mbuf *mb;
 
 	fprintf(stderr, "===== test_full_call_virtual_peer =====\n");
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
 	connect_call(&a, &b);
 	if (getenv("ICE_MOD_VERBOSE")) {
 		fprintf(stderr, "----- A: state=%d active=%d\n",
@@ -486,11 +498,11 @@ static void test_restart_contract(void)
 {
 	struct side a, b;
 	struct fake_call nobody;
-	struct mnat_media *media_before;
+	struct mdt_mnat_media *media_before;
 	uint32_t gen_before = 0, gen_after = 0;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
 	connect_call(&a, &b);
 	media_before = a.media;
 	CHECK(bsdk_ice_call_selected(&a.call, NULL, NULL, NULL, NULL, NULL,
@@ -526,14 +538,50 @@ static void test_restart_contract(void)
 }
 
 
+/* The stack's call_modify() sends the offer, then applies the SDP — with the
+ * peer's previous answer still in it — before any answer arrives.  The
+ * answer to our restart must still read as that answer, not as the peer
+ * restarting (which made both sides CONTROLLED, 2026-10-31). */
+static void test_restart_answer_after_local_apply(void)
+{
+	struct side a, b;
+
+	fprintf(stderr, "===== test_restart_answer_after_local_apply =====\n");
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
+	connect_call(&a, &b);
+
+	CHECK(0 == bsdk_ice_restart(&a.call, NULL));
+	CHECK(run_until(estab_twice, &a, 2000));
+	a.call.neg = SDP_NEG_LOCAL_OFFER;            /* offer out, unanswered */
+	CHECK(0 == vt()->updateh(a.sess));           /* call_modify()'s apply */
+	CHECK(bsdk_ice_call_role(&a.call) == 1);
+	CHECK(0 == sdp_transfer(&a, &b, true));
+	CHECK(0 == vt()->updateh(b.sess));
+	/* Asterisk (pjnath) answers a restart with credentials of its own. */
+	CHECK(0 == sdp_session_set_lattr(b.sdp, true, "ice-ufrag", "%s", "AstRestart"));
+	CHECK(0 == sdp_session_set_lattr(b.sdp, true, "ice-pwd", "%s",
+					 "AsteriskRestartPassword0123"));
+	CHECK(0 == sdp_transfer(&b, &a, false));
+	a.call.neg = SDP_NEG_DONE;                   /* the answer is in */
+	CHECK(0 == vt()->updateh(a.sess));
+	/* The restart's offerer stays CONTROLLING.  Misread as the peer
+	 * restarting, A turned CONTROLLED against a CONTROLLED answerer. */
+	CHECK(bsdk_ice_call_role(&a.call) == 1);
+
+	side_close(&a);
+	side_close(&b);
+}
+
+
 static void test_plain_rtp_peer(void)
 {
 	/* B has no ICE at all: A must start media on the signalled address
 	 * and pass packets through untouched. */
 	struct side a, b;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
 	CHECK(0 == side_attach(&a, true));
 	CHECK(run_until(estab_once, &a, 1000));
 	CHECK(0 == sdp_transfer(&a, &b, true));
@@ -550,8 +598,8 @@ static void test_plain_rtp_peer(void)
 }
 
 
-/* Both incoming tests keep B in CALL_STATE_INCOMING across updateh, because
- * baresip does: call_answer() runs call_apply_sdp() — and so updateh — one
+/* Both incoming tests keep B in MDT_CALL_INCOMING across updateh, because
+ * the stack does: call_answer() runs call_apply_sdp() — and so updateh — one
  * step before sdp_encode() and sipsess_answer(), and the state only becomes
  * ESTABLISHED on the ACK, which brings no updateh with it.  Answering by
  * flipping the state first is what hid the bug below until 2026-09-15. */
@@ -563,8 +611,8 @@ static void test_incoming_holds_connh_until_answer(void)
 	 * soon as it is. */
 	struct side a, b;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_INCOMING));
 
 	CHECK(0 == side_attach(&a, true));
 	CHECK(run_until(estab_once, &a, 1000));
@@ -583,7 +631,7 @@ static void test_incoming_holds_connh_until_answer(void)
 	/* B answers.  Still INCOMING here, and nothing calls updateh again. */
 	CHECK(0 == vt()->updateh(b.sess));
 	CHECK(run_until(connh_fired, &b, 1000));
-	CHECK(b.call.st == CALL_STATE_INCOMING);
+	CHECK(b.call.st == MDT_CALL_INCOMING);
 
 	side_close(&a);
 	side_close(&b);
@@ -599,8 +647,8 @@ static void test_incoming_connh_when_checks_conclude_after_answer(void)
 	struct side a, b;
 	struct side *ab[2] = { &a, &b };
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_INCOMING));
 
 	CHECK(0 == side_attach(&a, true));
 	CHECK(run_until(estab_once, &a, 1000));
@@ -614,7 +662,7 @@ static void test_incoming_connh_when_checks_conclude_after_answer(void)
 
 	CHECK(run_until(both_completed, ab, 4000));
 	CHECK(run_until(connh_fired, &b, 1000));
-	CHECK(b.call.st == CALL_STATE_INCOMING);
+	CHECK(b.call.st == MDT_CALL_INCOMING);
 
 	side_close(&a);
 	side_close(&b);
@@ -718,8 +766,8 @@ static void test_incoming_long_ring_backlog(void)
 	struct holdq q;
 	unsigned no_pair = g_warn_no_pair, never = g_warn_never_started;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_INCOMING));
 	holdq_init(&q, a.sock);
 
 	CHECK(0 == side_attach(&a, true));
@@ -757,8 +805,8 @@ static void test_media_watchdog_reports_no_pair(void)
 	struct holdq q;
 	unsigned no_pair = g_warn_no_pair, never = g_warn_never_started;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_INCOMING));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_INCOMING));
 	holdq_init(&q, a.sock);
 
 	CHECK(0 == side_attach(&a, true));
@@ -799,8 +847,8 @@ static void test_pr2_seams(void)
 	struct sa base, l, r;
 	int before;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
 
 	/* before anything is selected */
 	CHECK(!bsdk_ice_call_laddr(&a.call, &base));
@@ -860,8 +908,8 @@ static void test_teardown_either_order(void)
 {
 	struct side a, b;
 
-	CHECK(0 == side_init(&a, CALL_STATE_OUTGOING));
-	CHECK(0 == side_init(&b, CALL_STATE_ESTABLISHED));
+	CHECK(0 == side_init(&a, MDT_CALL_OUTGOING));
+	CHECK(0 == side_init(&b, MDT_CALL_ESTABLISHED));
 	connect_call(&a, &b);
 
 	/* session before media on one side, media before session on the
@@ -897,9 +945,8 @@ int main(void)
 	memset(&g_bsdk, 0, sizeof(g_bsdk));
 	g_bsdk.cfg.ice_gathering_timeout_ms = 2000;
 	g_bsdk.cfg.log_level = getenv("ICE_MOD_VERBOSE") ? 3 : 0;
-	memset(&g_cfg, 0, sizeof(g_cfg));
-	g_cfg.avt.rtp_ports.min = 40000;
-	g_cfg.avt.rtp_ports.max = 40100;
+	g_ports.min = 40000;
+	g_ports.max = 40100;
 	sa_set_str(&g_default_laddr, "127.0.0.1", 0);
 
 	test_module_registers_once();
@@ -907,6 +954,7 @@ int main(void)
 	test_deadline_releases_offer_without_media();
 	test_full_call_virtual_peer();
 	test_restart_contract();
+	test_restart_answer_after_local_apply();
 	test_plain_rtp_peer();
 	test_incoming_holds_connh_until_answer();
 	test_incoming_connh_when_checks_conclude_after_answer();

@@ -78,7 +78,7 @@ static int decode_remote(struct sdp_session *sdp, const char *body)
 	int err;
 
 	/* libre keeps freshly added media on a pending list until an offer
-	 * has been encoded — the order baresip follows.  Do the same. */
+	 * has been encoded — the order the stack follows.  Do the same. */
 	err = sdp_encode(&offer, sdp, true);
 	mem_deref(offer);
 	if (err)

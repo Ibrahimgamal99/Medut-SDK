@@ -2,7 +2,7 @@
  * @file medut.h  Medut public API
  *
  * Single header for all platforms. Include this and link medut.a.
- * Never include re.h or baresip.h directly from consumer code.
+ * Never include re.h or the SDK's internal headers from consumer code.
  *
  * ABI stability contract:
  *   - Fields are only appended to structs; never reordered or removed.
@@ -36,7 +36,7 @@ extern "C" {
 
 /* ── Version ─────────────────────────────────────────────────────────────── */
 
-#define MEDUT_VERSION_MAJOR 1
+#define MEDUT_VERSION_MAJOR 2
 #define MEDUT_VERSION_MINOR 0
 #define MEDUT_VERSION_PATCH 0
 
@@ -720,10 +720,10 @@ typedef struct {
 /**
  * An outgoing REFER was refused (blind or attended).
  *
- * The call is still up.  baresip does not close a call whose transfer failed,
- * and neither does Medut: the caller is still on the line, usually on hold,
- * and the app's remedy is to resume them and report the failure — not to hang
- * up.  `reason` is the status line or cause text when the stack supplied one.
+ * The call is still up.  Medut does not close a call whose transfer failed:
+ * the caller is still on the line, usually on hold, and the app's remedy is to
+ * resume them and report the failure — not to hang up.  `reason` is the status
+ * line or cause text when the stack supplied one.
  */
 typedef struct {
 	medut_account_handle_t account;
@@ -901,7 +901,8 @@ typedef struct {
 	 * SIP domain is "pbx.internal").
 	 */
 	const char  *sni_hostname;
-	const char  *user_agent;    /* SIP User-Agent header value */
+	const char  *user_agent;    /* SIP User-Agent / Server header value;
+	                               NULL or "" = "Medut/<version>" */
 
 	/* ── WebSocket-specific ───────────────────────────────────────── */
 	const char  *ws_origin;         /* NULL = auto-derived from server_url */
@@ -1032,7 +1033,7 @@ typedef struct {
 	 * MEDUT_EV_MEDIA_STATS poll interval in ms.  Default 2000; 0 disables.
 	 *
 	 * This is also the master switch for RTCP accounting
-	 * (baresip `avt.rtp_stats`), so with 0 the loss/jitter/RTT/MOS fields
+	 * (in the stack's RTP streams), so with 0 the loss/jitter/RTT/MOS fields
 	 * read back as zero from medut_call_get_stats() too, and every
 	 * feature derived from them — quality alerts, media-stall detection and
 	 * adaptive bitrate — is inert.
@@ -1120,8 +1121,8 @@ typedef struct {
 	 * String form of audio_codecs[] above; takes precedence over it
 	 * when audio_codec_name_count > 0.  Names are matched
 	 * case-insensitively and an unrecognized name is passed through
-	 * to baresip as-is, so a codec registered by a module added to the
-	 * build can be selected even without a medut_codec_t constant.
+	 * to the codec lookup as-is, so a codec registered by a module added to
+	 * the build can be selected even without a medut_codec_t constant.
 	 * Same accepted spellings as the per-account
 	 * medut_account_config_t.audio_codec_names: "opus", "ulaw"/"pcmu",
 	 * "alaw"/"pcma".
@@ -1176,7 +1177,7 @@ typedef struct {
 	 * Terminate a call after this many seconds without inbound RTP.
 	 * 0 (default) = never.
 	 *
-	 * Maps to baresip's `avt.rtp_timeout`.  This is the hard, fatal bound:
+	 * The stream's RTP timeout.  This is the hard, fatal bound:
 	 * the stream is closed with ETIMEDOUT and the call ends with
 	 * MEDUT_ERR_TIMEOUT.  Only sendrecv streams are checked, so a held
 	 * call is never torn down by it.
@@ -1196,7 +1197,7 @@ typedef struct {
 	 * again with `recovering` = true when it resumes.  This is what turns
 	 * "the user says they can't hear anything" into an event — a stall that
 	 * is not accompanied by an address change is invisible to handover and,
-	 * with rtp_timeout_s at 0, invisible to baresip.
+	 * with rtp_timeout_s at 0, invisible to the stream.
 	 *
 	 * Requires stats_interval_ms > 0.  Values below one stats interval
 	 * cannot be detected any sooner than that interval.
@@ -1473,7 +1474,7 @@ typedef struct {
 	 *   "ulaw" / "pcmu"     — G.711 µ-law
 	 *   "alaw" / "pcma"     — G.711 A-law
 	 *
-	 * Any other name is passed through to baresip unchanged, so a codec
+	 * Any other name is passed through to the codec lookup unchanged, so a codec
 	 * registered by a module added to the build can be selected too.  A name
 	 * nothing registers is dropped from the offer with a warning.
 	 *
@@ -1764,13 +1765,17 @@ MEDUT_EXPORT int medut_call_hangup(medut_call_handle_t call);
 MEDUT_EXPORT int medut_call_reject(medut_call_handle_t call,
                                         uint16_t scode, const char *reason);
 
-/** Put call on hold (re-INVITE with sendonly). */
+/** Put call on hold (re-INVITE with sendonly).  MEDUT_EV_CALL_STATE
+ *  reports HELD once the peer accepts it; a refused hold is undone. */
 MEDUT_EXPORT int medut_call_hold(medut_call_handle_t call);
 
-/** Resume a held call (re-INVITE with sendrecv). */
+/** Resume a held call (re-INVITE with sendrecv).  The state returns to
+ *  ESTABLISHED once the peer accepts it, unless the peer holds us too. */
 MEDUT_EXPORT int medut_call_resume(medut_call_handle_t call);
 
-/** Return true if the call is currently on local hold. */
+/** True while the call is on hold: our own hold (from the request on,
+ *  false again if the peer refuses it) or the peer's
+ *  (medut_call_info_t.is_remote_hold tells which). */
 MEDUT_EXPORT bool medut_call_is_held(medut_call_handle_t call);
 
 /** Send DTMF digit via RFC 4733 RTP events. digit: '0'-'9', '*', '#', 'A'-'D'. */
@@ -1909,7 +1914,7 @@ MEDUT_EXPORT int medut_account_set_100rel(medut_account_handle_t account,
  * platform, so an app that shuts the stack down and brings it back up has to
  * ask for the app-owned device again.
  *
- * One microphone, one speaker: baresip opens a device per call, but the app
+ * One microphone, one speaker: the stack opens a device per call, but the app
  * has only one of each.  The most recently opened call owns them; a second
  * concurrent call gets silence rather than a share.
  *

@@ -2,7 +2,7 @@
  * @file test_codec_str.c  Unit tests for codec list string builder
  *
  * Tests the codec_list_str function that converts codec enum arrays
- * to baresip-compatible codec strings like "opus/48000/2,PCMU/8000/1".
+ * to codec strings the stack's lookup takes like "opus/48000/2,PCMU/8000/1".
  */
 
 #include <stdio.h>

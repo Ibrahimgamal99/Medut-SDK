@@ -1,9 +1,10 @@
 name: medut
 description: >-
-  Flutter SIP softphone SDK for Android, iOS and desktop (baresip-based): UDP/TCP/TLS/
-  WS/WSS registration, calls, codec control, reconnection & network handover,
-  media statistics and quality alerts.
-version: 1.0.0
+  Flutter SIP softphone SDK on Medut's own SIP/media stack:
+  UDP/TCP/TLS/WS/WSS registration, calls, codec control, reconnection &
+  network handover, media statistics and quality alerts. Native Kotlin/Swift
+  SDKs on Android/iOS, dart:ffi on desktop.
+version: 2.0.0
 homepage: https://github.com/Ibrahimgamal99/Medut-SDK
 repository: https://github.com/Ibrahimgamal99/Medut-SDK
 issue_tracker: https://github.com/Ibrahimgamal99/Medut-SDK/issues
@@ -14,7 +15,6 @@ topics:
   - softphone
   - webrtc
   - pigeon
-  - ffi
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
@@ -34,18 +34,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   # Mobile glue: dart run pigeon --input pigeons/messages.dart
-  pigeon: ^29.0.8
+  # Pinned exactly: CI regenerates the glue and fails on any diff, and
+  # pubspec.lock is not committed, so a caret range let each new Pigeon
+  # release (29.0.10 -> 29.1.0) break the check with cosmetic changes.
+  pigeon: 29.1.0
 
 flutter:
   plugin:
     platforms:
-      # Pigeon over the native SDKs, which own the stack: the Kotlin SDK
-      # (bindings/kotlin) on Android and MedutKit (bindings/swift) on iOS.
+      # Pigeon over the native SDKs, which own the stack for the process
+      # lifetime: the Kotlin SDK (bindings/kotlin/medut) on Android and
+      # MedutKit (ios/MedutKit, also bindings/swift) on iOS.
       android:
         package: dev.medut.flutter
         pluginClass: MedutPlugin
       ios:
         pluginClass: MedutPlugin
-      # Linux, macOS and Windows are not declared: there the Dart side drives
-      # the C library over dart:ffi (lib/src/ffi_backend.dart), and the app
-      # ships medut.so / medut.dylib / medut.dll or passes Medut.start(libPath:).
+      # Linux / macOS / Windows are not declared: there the Dart side drives
+      # the C library directly over dart:ffi (lib/src/ffi_backend.dart) and
+      # the app bundles medut.so / .dylib / .dll itself, or passes
+      # Medut.start(libPath: ...). See lib/src/sdk.dart loadLib().

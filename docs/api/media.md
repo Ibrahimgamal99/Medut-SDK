@@ -26,10 +26,10 @@ has no effect beyond a warning.
 
 ### By name
 
-Codecs can also be listed by name, which reaches any codec a loaded baresip
-module registers. Names are matched case-insensitively; aliases: `opus`,
+Codecs can also be listed by name, which reaches any codec the stack
+registers. Names are matched case-insensitively; aliases: `opus`,
 `ulaw`/`g711u`/`pcmu`, `alaw`/`g711a`/`pcma`. An unrecognized name is passed
-through to baresip as-is.
+through to the codec lookup as-is.
 
 ```c
 strcpy(cfg.audio_codec_names[0], "ulaw");
@@ -54,8 +54,8 @@ identical on desktop and mobile:
 opus/48000/2, PCMU/8000/1, PCMA/8000/1
 ```
 
-This is pinned in `src/account.c` rather than left to baresip, which would
-otherwise offer whatever codecs the linked modules happen to register. If a
+This is pinned in `src/api/account.c` rather than left to the stack, which would
+otherwise offer every codec it registers. If a
 build ever ships without Opus or G.711, the SDK logs `codec list "…" matched
 no loaded codec` at account setup instead of silently offering something else.
 
@@ -341,7 +341,7 @@ brings it back up has to ask again.
 
 ### One device, one call
 
-baresip opens a device per call, but the app has one microphone and one speaker.
+The stack opens a device per call, but the app has one microphone and one speaker.
 The most recently opened call owns them; a second concurrent call gets silence
 rather than a share of the mic, which is the honest outcome — the app cannot
 capture twice. Ending the newer call hands the devices back to the one still up.
@@ -432,7 +432,7 @@ medut_set_jitter_buffer_type(MEDUT_JBUF_FIXED);    // switch to fixed depth
 medut_set_jitter_buffer_type(MEDUT_JBUF_ADAPTIVE); // back to adaptive
 ```
 
-Both bounds default to baresip's built-in values when left at zero.
+A bound left at zero takes the default: 40–400 ms adaptive, 100–200 ms fixed.
 
 ---
 

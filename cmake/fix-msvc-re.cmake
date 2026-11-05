@@ -4,7 +4,8 @@
 # libre's websock.c at build time so ws_path.c could provide websock_connect
 # as the MSVC wrapper without a duplicate symbol.  The in-place edit caused
 # the patched version to be accidentally committed to the re submodule, which
-# broke Linux builds (websock_connect became undefined for baresip_exe).
+# broke Linux builds (websock_connect became undefined for the executables
+# linked against it).
 #
 # The rename is now controlled by the RE_WEBSOCK_CONNECT_OVERRIDE compile
 # definition, which is passed via CMAKE_C_FLAGS in the re_project ExternalProject

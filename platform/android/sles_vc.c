@@ -1,10 +1,10 @@
 /**
  * @file sles_vc.c  Android OpenSLES audio driver, voice-communication tuned
  *
- * baresip's stock `opensles` module records with the default (generic) input
- * preset and plays on the media stream, so the platform's built-in echo
- * cancellation and noise suppression never engage.  This driver is Medut's
- * own replacement (third_party is never patched):
+ * A plain OpenSL ES driver records with the default (generic) input preset
+ * and plays on the media stream, so the platform's built-in echo
+ * cancellation and noise suppression never engage.  This driver is
+ * Medut's own, tuned for calls:
  *
  *   recorder — requests SL_IID_ANDROIDCONFIGURATION and sets
  *              SL_ANDROID_KEY_RECORDING_PRESET =
@@ -15,9 +15,10 @@
  *              so playback uses the voice-call volume/routing domain
  *              (matches AudioManager.MODE_IN_COMMUNICATION).
  *
- * Registered directly via ausrc_register()/auplay_register() as "sles_vc"
- * (no baresip module-table entry needed).  modules_init.c prefers this
- * driver and falls back to the stock "opensles" module if init fails.
+ * Registered with mdt_ausrc_register()/mdt_auplay_register() as "sles_vc";
+ * src/audio/device.c makes it the platform driver.  If it cannot
+ * initialise, calls use the silent device until the app supplies its own
+ * (medut_audio_use_external()).
  *
  * Both configuration keys are best-effort: if SetConfiguration is rejected
  * (some vendor libs), the stream still opens with defaults — identical
@@ -29,7 +30,7 @@
 #include <SLES/OpenSLES_Android.h>
 #include <re.h>
 #include <rem.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 /* Queue depth per direction, in PTIME slices.
  *
@@ -42,13 +43,13 @@
  * is full either way, so depth here is not added latency.
  *
  * What prompted it, from the device on 2026-08-31: recurring "tx aubuf
- * underrun" from baresip plus a TX level reading exactly -127 dBov — all-zero
+ * underrun" from the stack plus a TX level reading exactly -127 dBov — all-zero
  * PCM — through most ticks of a call whose RX level moved normally.  Capture
  * was running and delivering frames, and a fraction of those frames were
  * digital silence.  Starvation is the likeliest reading of that and this is
  * the cheap, safe response to it, but it is not proof: TX mute produces the
- * identical -127 (baresip mutes in ausrc_read_handler(), upstream of where the
- * level is measured), so validate against a call whose mute state is known —
+ * identical -127 (the stack mutes in its source read handler, upstream of
+ * where the level is measured), so validate against a call whose mute state is known —
  * the example app now prints it next to the level for exactly this reason.
  *
  * Playback stays at two.  Its queue is primed full before the player starts,
@@ -61,18 +62,18 @@
 static SLObjectItf s_engine_obj = NULL;
 static SLEngineItf s_engine     = NULL;
 
-static struct ausrc  *s_ausrc  = NULL;
-static struct auplay *s_auplay = NULL;
+static struct mdt_ausrc  *s_ausrc  = NULL;
+static struct mdt_auplay *s_auplay = NULL;
 
 /* ── Recorder ────────────────────────────────────────────────────────────── */
 
-struct ausrc_st {
+struct mdt_ausrc_st {
 	int16_t      *sampv[N_REC_BUFFERS];
 	size_t        sampc;
 	uint8_t       buffer_id;
-	ausrc_read_h *rh;
+	mdt_ausrc_read_h *rh;
 	void         *arg;
-	struct ausrc_prm prm;
+	struct mdt_ausrc_prm prm;
 	bool          first_frame;   /* logged once — see rec_bq_callback */
 
 	SLObjectItf                   rec_obj;
@@ -80,9 +81,9 @@ struct ausrc_st {
 	SLAndroidSimpleBufferQueueItf rec_bq;
 };
 
-static void ausrc_destructor(void *arg)
+static void mdt_ausrc_destructor(void *arg)
 {
-	struct ausrc_st *st = arg;
+	struct mdt_ausrc_st *st = arg;
 
 	if (st->rec_obj) {
 		SLuint32 state;
@@ -96,11 +97,11 @@ static void ausrc_destructor(void *arg)
 		mem_deref(st->sampv[i]);
 }
 
-static int start_recording(struct ausrc_st *st);
+static int start_recording(struct mdt_ausrc_st *st);
 
 static void rec_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
-	struct ausrc_st *st = context;
+	struct mdt_ausrc_st *st = context;
 	struct auframe af;
 	SLresult r;
 	(void)bq;
@@ -109,12 +110,12 @@ static void rec_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 	 * worth naming: SetRecordState() succeeds without RECORD_AUDIO, and the
 	 * queue then simply never completes a buffer.  There is no error to
 	 * report anywhere — the call comes up, the far end hears nothing, and
-	 * the only trace is baresip's "tx aubuf underrun".  So say plainly, once,
+	 * the only trace is the stack's "tx aubuf underrun".  So say plainly, once,
 	 * that capture actually produced a frame; the absence of this line is
 	 * the diagnosis. */
 	if (!st->first_frame) {
 		st->first_frame = true;
-		info("sles_vc: capture delivering (%u Hz, %u ch)\n",
+		MDT_INFO("sles_vc: capture delivering (%u Hz, %u ch)\n",
 		     st->prm.srate, st->prm.ch);
 	}
 
@@ -148,14 +149,14 @@ static void rec_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 		return;
 	}
 
-	warning("sles_vc: capture Enqueue failed (0x%x) — restarting\n",
+	MDT_WARN("sles_vc: capture Enqueue failed (0x%x) — restarting\n",
 	        (unsigned)r);
 
 	if (start_recording(st))
-		warning("sles_vc: capture restart failed; mic is now silent\n");
+		MDT_WARN("sles_vc: capture restart failed; mic is now silent\n");
 }
 
-static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
+static int create_recorder(struct mdt_ausrc_st *st, struct mdt_ausrc_prm *prm)
 {
 	SLDataLocator_IODevice loc_dev = {SL_DATALOCATOR_IODEVICE,
 	                                  SL_IODEVICE_AUDIOINPUT,
@@ -175,9 +176,9 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 	 *                  to Android mask 0 loses channels
 	 *
 	 * before falling back to a guess based on the channel count.  FRONT_LEFT
-	 * maps cleanly to AUDIO_CHANNEL_IN_MONO and needs no guess.  (The stock
-	 * baresip opensles module uses FRONT_CENTER here, which is where this
-	 * came from.) */
+	 * maps cleanly to AUDIO_CHANNEL_IN_MONO and needs no guess.  (baresip's
+	 * opensles module uses FRONT_CENTER here, which is where this came
+	 * from.) */
 	int chmask = prm->ch > 1
 		? SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT
 		: SL_SPEAKER_FRONT_LEFT;
@@ -200,7 +201,7 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 	                                     &audio_src, &audio_snk,
 	                                     2, id, req);
 	if (SL_RESULT_SUCCESS != r) {
-		warning("sles_vc: CreateAudioRecorder failed: %d\n", (int)r);
+		MDT_WARN("sles_vc: CreateAudioRecorder failed: %d\n", (int)r);
 		return ENODEV;
 	}
 
@@ -215,14 +216,14 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 		                             SL_ANDROID_KEY_RECORDING_PRESET,
 		                             &preset, sizeof(preset));
 		if (SL_RESULT_SUCCESS != r)
-			warning("sles_vc: voice-comm preset rejected (%d); "
+			MDT_WARN("sles_vc: voice-comm preset rejected (%d); "
 			        "recording with default preset\n", (int)r);
 		else
 			voice_path = true;
 	}
 	else {
 		cfg = NULL;
-		warning("sles_vc: no ANDROIDCONFIGURATION itf (%d); "
+		MDT_WARN("sles_vc: no ANDROIDCONFIGURATION itf (%d); "
 		        "recording with default preset\n", (int)r);
 	}
 
@@ -240,7 +241,7 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 		                             &size, &got);
 		if (SL_RESULT_SUCCESS == r &&
 		    got != SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION) {
-			warning("sles_vc: recorder runs preset %u, not "
+			MDT_WARN("sles_vc: recorder runs preset %u, not "
 			        "voice-communication\n", (unsigned)got);
 			voice_path = false;
 		}
@@ -268,7 +269,7 @@ static int create_recorder(struct ausrc_st *st, struct ausrc_prm *prm)
 	return 0;
 }
 
-static int start_recording(struct ausrc_st *st)
+static int start_recording(struct mdt_ausrc_st *st)
 {
 	SLresult r;
 
@@ -292,11 +293,11 @@ static int start_recording(struct ausrc_st *st)
 	return 0;
 }
 
-static int recorder_alloc(struct ausrc_st **stp, const struct ausrc *as,
-                          struct ausrc_prm *prm, const char *device,
-                          ausrc_read_h *rh, ausrc_error_h *errh, void *arg)
+static int recorder_alloc(struct mdt_ausrc_st **stp, const struct mdt_ausrc *as,
+                          struct mdt_ausrc_prm *prm, const char *device,
+                          mdt_ausrc_read_h *rh, mdt_ausrc_error_h *errh, void *arg)
 {
-	struct ausrc_st *st;
+	struct mdt_ausrc_st *st;
 	int err = 0;
 	(void)device;
 	(void)errh;
@@ -305,12 +306,12 @@ static int recorder_alloc(struct ausrc_st **stp, const struct ausrc *as,
 		return EINVAL;
 
 	if (prm->fmt != AUFMT_S16LE) {
-		warning("sles_vc: record: unsupported sample format (%s)\n",
+		MDT_WARN("sles_vc: record: unsupported sample format (%s)\n",
 		        aufmt_name(prm->fmt));
 		return ENOTSUP;
 	}
 
-	st = mem_zalloc(sizeof(*st), ausrc_destructor);
+	st = mem_zalloc(sizeof(*st), mdt_ausrc_destructor);
 	if (!st)
 		return ENOMEM;
 
@@ -346,13 +347,13 @@ static int recorder_alloc(struct ausrc_st **stp, const struct ausrc *as,
 
 /* ── Player ──────────────────────────────────────────────────────────────── */
 
-struct auplay_st {
-	auplay_write_h *wh;
+struct mdt_auplay_st {
+	mdt_auplay_write_h *wh;
 	void           *arg;
 	int16_t        *sampv[N_PLAY_BUFFERS];
 	size_t          sampc;
 	uint8_t         buffer_id;
-	struct auplay_prm prm;
+	struct mdt_auplay_prm prm;
 
 	SLObjectItf                   mix_obj;
 	SLObjectItf                   play_obj;
@@ -360,9 +361,9 @@ struct auplay_st {
 	SLAndroidSimpleBufferQueueItf play_bq;
 };
 
-static void auplay_destructor(void *arg)
+static void mdt_auplay_destructor(void *arg)
 {
-	struct auplay_st *st = arg;
+	struct mdt_auplay_st *st = arg;
 
 	if (st->play_obj)
 		(*st->play_obj)->Destroy(st->play_obj);
@@ -373,11 +374,11 @@ static void auplay_destructor(void *arg)
 		mem_deref(st->sampv[i]);
 }
 
-static int start_player(struct auplay_st *st);
+static int start_player(struct mdt_auplay_st *st);
 
 static void play_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
-	struct auplay_st *st = context;
+	struct mdt_auplay_st *st = context;
 	struct auframe af;
 	SLresult r;
 
@@ -391,10 +392,10 @@ static void play_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 	r = (*st->play_bq)->Enqueue(bq, st->sampv[st->buffer_id],
 	                            (unsigned int)(st->sampc * 2));
 	if (SL_RESULT_SUCCESS != r) {
-		warning("sles_vc: playback Enqueue failed (0x%x) — restarting\n",
+		MDT_WARN("sles_vc: playback Enqueue failed (0x%x) — restarting\n",
 		        (unsigned)r);
 		if (start_player(st))
-			warning("sles_vc: playback restart failed; speaker is "
+			MDT_WARN("sles_vc: playback restart failed; speaker is "
 			        "now silent\n");
 		return;
 	}
@@ -402,7 +403,7 @@ static void play_bq_callback(SLAndroidSimpleBufferQueueItf bq, void *context)
 	st->buffer_id = (st->buffer_id + 1) % N_PLAY_BUFFERS;
 }
 
-static int create_player(struct auplay_st *st, struct auplay_prm *prm)
+static int create_player(struct mdt_auplay_st *st, struct mdt_auplay_prm *prm)
 {
 	SLresult r;
 
@@ -441,7 +442,7 @@ static int create_player(struct auplay_st *st, struct auplay_prm *prm)
 	                                   &audio_src, &audio_snk,
 	                                   2, ids, req);
 	if (SL_RESULT_SUCCESS != r) {
-		warning("sles_vc: CreateAudioPlayer failed: %d\n", (int)r);
+		MDT_WARN("sles_vc: CreateAudioPlayer failed: %d\n", (int)r);
 		return ENODEV;
 	}
 
@@ -455,7 +456,7 @@ static int create_player(struct auplay_st *st, struct auplay_prm *prm)
 		                             &stream_type,
 		                             sizeof(stream_type));
 		if (SL_RESULT_SUCCESS != r)
-			warning("sles_vc: voice stream type rejected (%d); "
+			MDT_WARN("sles_vc: voice stream type rejected (%d); "
 			        "playing on default stream\n", (int)r);
 	}
 
@@ -481,7 +482,7 @@ static int create_player(struct auplay_st *st, struct auplay_prm *prm)
 	return 0;
 }
 
-static int start_player(struct auplay_st *st)
+static int start_player(struct mdt_auplay_st *st)
 {
 	SLresult r;
 
@@ -503,11 +504,11 @@ static int start_player(struct auplay_st *st)
 	return 0;
 }
 
-static int player_alloc(struct auplay_st **stp, const struct auplay *ap,
-                        struct auplay_prm *prm, const char *device,
-                        auplay_write_h *wh, void *arg)
+static int player_alloc(struct mdt_auplay_st **stp, const struct mdt_auplay *ap,
+                        struct mdt_auplay_prm *prm, const char *device,
+                        mdt_auplay_write_h *wh, void *arg)
 {
-	struct auplay_st *st;
+	struct mdt_auplay_st *st;
 	int err = 0;
 	(void)device;
 
@@ -515,12 +516,12 @@ static int player_alloc(struct auplay_st **stp, const struct auplay *ap,
 		return EINVAL;
 
 	if (prm->fmt != AUFMT_S16LE) {
-		warning("sles_vc: play: unsupported sample format (%s)\n",
+		MDT_WARN("sles_vc: play: unsupported sample format (%s)\n",
 		        aufmt_name(prm->fmt));
 		return ENOTSUP;
 	}
 
-	st = mem_zalloc(sizeof(*st), auplay_destructor);
+	st = mem_zalloc(sizeof(*st), mdt_auplay_destructor);
 	if (!st)
 		return ENOMEM;
 
@@ -578,9 +579,9 @@ int bsdk_sles_vc_init(void)
 	if (SL_RESULT_SUCCESS != r)
 		goto err_out;
 
-	err  = ausrc_register(&s_ausrc, baresip_ausrcl(), "sles_vc",
+	err  = mdt_ausrc_register(&s_ausrc, mdt_ausrcl(), "sles_vc",
 	                      recorder_alloc);
-	err |= auplay_register(&s_auplay, baresip_auplayl(), "sles_vc",
+	err |= mdt_auplay_register(&s_auplay, mdt_auplayl(), "sles_vc",
 	                       player_alloc);
 	if (err)
 		goto err_out;

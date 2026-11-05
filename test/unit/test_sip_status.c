@@ -1,14 +1,14 @@
 /**
  * @file test_sip_status.c  Unit tests for SIP status → medut_error_t mapping
  *
- * Exercises the real mapping the SDK ships (src/sip_status.h), not a copy:
- * the header is free of re/baresip precisely so this test can include it.
+ * Exercises the real mapping the SDK ships (src/api/sip_status.h), not a copy:
+ * the header is free of libre and the stack precisely so this test can include it.
  */
 
 #include <stdio.h>
 #include <string.h>
 
-#include "../../src/sip_status.h"
+#include "../../src/api/sip_status.h"
 
 #define TEST_PASS 0
 #define TEST_FAIL 1

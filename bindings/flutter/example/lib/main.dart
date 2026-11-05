@@ -67,7 +67,7 @@ class _PhonePageState extends State<PhonePage>
   /// the one the PBX sees, ICE nominates a peer-reflexive candidate that was
   /// never signalled, and a strict peer (Asterisk) drops the media. Re-offering
   /// does not rescue it — Asterisk only re-reads candidates on an ICE restart,
-  /// which needs a new ufrag/pwd that baresip fixes at session creation. A TURN
+  /// which needs a new ufrag/pwd. A TURN
   /// relay candidate is signalled up front and stays put, so it sidesteps the
   /// whole problem.
   final _turnServer = TextEditingController();
@@ -78,7 +78,7 @@ class _PhonePageState extends State<PhonePage>
   Transport _transport = Transport.udp;
   /// DTLS-SRTP, not none: a WSS/WebRTC-facing PBX offers
   /// UDP/TLS/RTP/SAVPF, and an account answering plain RTP/AVP fails every
-  /// incoming call — reported by baresip as "no common audio codecs", which
+  /// incoming call — reported by the stack as "no common audio codecs", which
   /// sends you looking at the codec list instead of the media profile.
   MediaEncryption _mediaEnc = MediaEncryption.dtlsSrtp;
   bool _ice = false;
@@ -508,8 +508,8 @@ class _PhonePageState extends State<PhonePage>
         // private address the phone cannot route to, every packet is counted
         // as sent and then dropped by the local router — which looks identical
         // to a working transmitter from in here.
-        // The mute state belongs on this line. baresip applies TX mute in
-        // ausrc_read_handler(), before the aubuf and so before the filter the
+        // The mute state belongs on this line. The stack applies TX mute in
+        // its source read handler, before the aubuf and so before the filter the
         // level is measured in — so a muted call reports mic -127.0 dBov,
         // which is byte-for-byte what a starved or dead capture path reports.
         // Without the flag here the two are indistinguishable in a log, and
@@ -647,7 +647,7 @@ class _PhonePageState extends State<PhonePage>
       RegState.unregistered => (Colors.grey, 'Not registered'),
     };
     return Material(
-      color: color.withOpacity(.15),
+      color: color.withValues(alpha: .15),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(children: [
@@ -697,8 +697,10 @@ class _PhonePageState extends State<PhonePage>
         obscureText: true,
         enabled: !registered,
       ),
+      // initialValue: the form is built only once _restoreProfile has run
+      // (the spinner above), so the stored choice is already here.
       DropdownButtonFormField<Transport>(
-        value: _transport,
+        initialValue: _transport,
         decoration: const InputDecoration(labelText: 'Transport'),
         items: Transport.values
             .map((t) => DropdownMenuItem(
@@ -717,7 +719,7 @@ class _PhonePageState extends State<PhonePage>
         enabled: !registered,
       ),
       DropdownButtonFormField<MediaEncryption>(
-        value: _mediaEnc,
+        initialValue: _mediaEnc,
         decoration: const InputDecoration(labelText: 'Media encryption'),
         items: const [
           DropdownMenuItem(
@@ -785,10 +787,11 @@ class _PhonePageState extends State<PhonePage>
         height: 72,
         child: ReorderableListView(
           scrollDirection: Axis.horizontal,
-          onReorder: registered
+          // onReorderItem: newIdx already counts the item removed at
+          // oldIdx (onReorder made the caller subtract one).
+          onReorderItem: registered
               ? (a, b) {}
               : (oldIdx, newIdx) => setState(() {
-                    if (newIdx > oldIdx) newIdx--;
                     _codecPrefs.insert(
                         newIdx, _codecPrefs.removeAt(oldIdx));
                   }),

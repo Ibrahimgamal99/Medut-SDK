@@ -647,7 +647,7 @@ class Medut {
   Future<void> forgetAccount(String uri) =>
       _run('forgetAccount', (a) => a.forgetAccount(uri));
 
-  /// Human-readable text for an `MEDUT_ERR_*` code (or errno) from the C
+  /// Human-readable text for a `MEDUT_ERR_*` code (or errno) from the C
   /// library.
   Future<String> strerror(int code) =>
       _run('strerror', (a) => a.strerror(code));

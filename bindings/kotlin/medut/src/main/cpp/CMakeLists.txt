@@ -2,7 +2,7 @@
 #
 # libmedut.so comes prebuilt per ABI (scripts/build-android.sh); only this
 # small shim is compiled here, so building the AAR needs no OpenSSL or
-# baresip toolchain.
+# libre toolchain.
 cmake_minimum_required(VERSION 3.22.1)
 project(medut_jni C)
 

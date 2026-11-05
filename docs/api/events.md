@@ -133,7 +133,7 @@ Fires on every call state transition.
 | `CALLING` | INVITE sent, waiting for response |
 | `RINGING` | 180 Ringing received |
 | `ESTABLISHED` | 200 OK / ACK exchanged; media flowing |
-| `HELD` | Call on hold (re-INVITE sendonly) |
+| `HELD` | Call on hold — ours once the peer accepted it, or the peer's (`medut_call_info_t.is_remote_hold` tells which). Back to `ESTABLISHED` when neither side holds |
 | `ENDED` | BYE sent or received |
 | `CANCELLED` | CANCEL sent before answer |
 | `FAILED` | Error response (4xx, 5xx, 6xx) |
@@ -381,7 +381,8 @@ transfer target and closes our leg, which arrives as
 ## MEDUT_EV_MWI
 **`ev->u.mwi`** — `medut_ev_mwi_t`
 
-Voicemail notification (NOTIFY from MWI subscription).
+Voicemail notification: a NOTIFY of the account's message-summary
+subscription, or one the server sent unsolicited.
 
 | Field | Type |
 |---|---|
@@ -416,8 +417,8 @@ Buddy presence changed (received via SUBSCRIBE/NOTIFY).
 
 | Field | Type |
 |---|---|
-| `account` | handle |
-| `target_uri` | `const char *` |
+| `account` | handle — the account watching |
+| `target_uri` | `const char *` — as passed to `medut_account_subscribe_presence()` |
 | `status` | `medut_presence_status_t`: `UNKNOWN`, `OPEN`, `CLOSED`, `BUSY` |
 
 ## MEDUT_EV_NETWORK

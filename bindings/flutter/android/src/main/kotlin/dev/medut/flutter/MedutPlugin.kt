@@ -520,9 +520,9 @@ private fun ConfigMessage.toSdk(): MedutConfig {
         traceSip = traceSip ?: d.traceSip,
         traceSdpDiff = traceSdpDiff ?: d.traceSdpDiff,
         pcapPath = pcapPath ?: d.pcapPath,
-        // The C library takes any int (-1 = no log events, above 3 = like 3);
-        // LogLevel has 0..3, so clamp rather than refuse.
-        logLevel = logLevel?.let { v -> enumOf(v.coerceIn(0L, 3L), LogLevel.entries) { e -> e.value } }
+        // The C library takes any int (below 0 = no log events, above 3 =
+        // like 3); LogLevel has -1..3, so clamp rather than refuse.
+        logLevel = logLevel?.let { v -> enumOf(v.coerceIn(-1L, 3L), LogLevel.entries) { e -> e.value } }
             ?: d.logLevel,
     )
 }

@@ -227,7 +227,7 @@ Accepted codec name aliases:
 | `"opus"` | Opus 48 kHz stereo |
 | `"ulaw"` / `"pcmu"` / `"g711u"` | G.711 µ-law |
 | `"alaw"` / `"pcma"` / `"g711a"` | G.711 A-law |
-| anything else | passed as-is to baresip |
+| anything else | passed as-is to the codec lookup |
 
 Opus and G.711 are the only codecs compiled into the library.
 

@@ -46,7 +46,7 @@ void main() {
       return;
     }
 
-    // baresip excludes loopback from its local-address list, so dialing
+    // The stack excludes loopback from its local-address list, so dialing
     // 127.0.0.1 fails with "no laddr". Use a real host address instead —
     // the test Asterisk binds 0.0.0.0.
     final ifaces = await NetworkInterface.list(
@@ -126,9 +126,9 @@ void main() {
         timeout: const Duration(seconds: 10));
     expect(stats.stats.codec.toLowerCase(), contains('opus'));
 
-    // DTMF + hold/resume exercise the dialog. baresip emits no bevent for
-    // our own call_hold(), so poll isHeld (tracked natively) rather than
-    // waiting for a CallState.held event (that fires only on REMOTE hold).
+    // DTMF + hold/resume exercise the dialog. isHeld follows the request at
+    // once; CallState.held follows once the peer has accepted the hold (and
+    // also when the peer holds us), so poll isHeld here.
     await call.sendDtmf('5');
     await call.hold();
     await Future.delayed(const Duration(milliseconds: 700));

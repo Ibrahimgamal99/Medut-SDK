@@ -116,6 +116,12 @@ medut_account_add_header(acct, "X-App-Version", "2.1.0");
 Send an out-of-dialog instant message. No call is needed, and the account does
 not have to be in a call for either direction.
 
+The target is written the way a number is dialled: `"bob"` (the account's
+domain is added), `"bob@pbx.example.com"`, `"sip:bob@pbx.example.com"` or
+`"Bob <sip:bob@pbx.example.com>"`. The body goes as `text/plain`. Incoming
+`text/plain` and `application/json` messages are delivered; other types are
+refused with 415.
+
 **C**
 ```c
 medut_message_send(acct, "bob@pbx.example.com", "on my way", "text/plain");
@@ -148,7 +154,14 @@ Tell the server your status:
 medut_account_publish_presence(acct, MEDUT_PRESENCE_OPEN);   // available
 medut_account_publish_presence(acct, MEDUT_PRESENCE_BUSY);   // on a call
 medut_account_publish_presence(acct, MEDUT_PRESENCE_CLOSED); // DND / offline
+medut_account_publish_presence(acct, MEDUT_PRESENCE_UNKNOWN);// withdraw it
 ```
+
+The status goes out as a PIDF document in a PUBLISH (RFC 3903), refreshed
+before it expires, and to anyone subscribed to the account's own presence. A
+server without a presence agent refuses the PUBLISH (Asterisk: 489); that is
+logged and not retried. An account that never published shows as open to its
+watchers while it is registered.
 
 ## Presence — SUBSCRIBE
 
@@ -160,6 +173,19 @@ medut_account_subscribe_presence(acct, "bob@pbx.example.com");
 
 medut_account_unsubscribe_presence(acct, "bob@pbx.example.com");
 ```
+
+The target takes the same forms as a MESSAGE target. The event carries the
+watching account and the target exactly as it was passed here. Its status is
+what the PBX reports: `OPEN`, `BUSY` while bob is on a call, `CLOSED`, or
+`UNKNOWN` when there is no state yet or the subscription failed (it is retried
+after 30 s, 5 min, 1 h, then daily).
+
+## Message waiting (MWI)
+
+Nothing to call: once registered, an account subscribes to its own message
+summary (RFC 3842). Servers that push it unsolicited instead (Asterisk with
+`mailboxes=` on the endpoint) are heard too. Each update arrives as
+`MEDUT_EV_MWI`.
 
 ## Registration retry control
 
@@ -266,12 +292,12 @@ cfg.audio_codec_name_count = 3;
 
 Accepted name aliases:
 
-| You write | Baresip codec |
+| You write | Codec |
 |---|---|
 | `"opus"` | Opus 48 kHz stereo |
 | `"ulaw"` / `"pcmu"` / `"g711u"` | G.711 µ-law (PCMU/8000) |
 | `"alaw"` / `"pcma"` / `"g711a"` | G.711 A-law (PCMA/8000) |
-| anything else | passed as-is to baresip |
+| anything else | passed as-is to the codec lookup |
 
 Opus and G.711 are the only codecs the library compiles in. A name that no
 loaded module registers is offered to nobody and logs a warning.

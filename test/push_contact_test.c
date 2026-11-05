@@ -10,8 +10,9 @@
  *      the URI's angle brackets;
  *   2. medut_account_set_push_token() on a registered account sends a
  *      REGISTER with the new pn-prid at once (RFC 8599 s4.1.3), and over UDP
- *      the old token's binding is removed (expires=0), so the registrar is
- *      not left pushing to a dead token;
+ *      the old token's binding is removed (expires=0, next to the new
+ *      Contact in that REGISTER), so the registrar is not left pushing to a
+ *      dead token;
  *   3. a token changed while a REGISTER is in flight goes out in a REGISTER
  *      of its own once that one is answered;
  *   R. medut_account_refresh_registration() re-sends the REGISTER from the
@@ -83,6 +84,24 @@ static void copy_header(const char *msg, const char *name, char *out,
 	out[have + n] = '\0';
 }
 
+/* The `i`th Contact header of msg (with its line ending) into out; false
+ * when there is none. */
+static bool nth_contact(const char *msg, int i, char *out, size_t sz)
+{
+	const char *p = msg;
+	for (;;) {
+		p = strstr(p, "\r\nContact:");
+		if (!p) return false;
+		p += 2;
+		if (i-- == 0) break;
+	}
+	const char *e = strstr(p, "\r\n");
+	if (!e || (size_t)(e - p) + 3 > sz) return false;
+	memcpy(out, p, (size_t)(e - p) + 2);
+	out[(e - p) + 2] = '\0';
+	return true;
+}
+
 /* A registrar that says yes to everything and remembers what it was told. */
 static int registrar(void *arg)
 {
@@ -109,23 +128,32 @@ static int registrar(void *arg)
 		/* A UDP retransmission is the same request, not a new one. */
 		bool again = !strcmp(txn, last_txn);
 		snprintf(last_txn, sizeof(last_txn), "%s", txn);
-		/* baresip releases a UDP/TCP binding before it registers the
-		 * next one; those un-REGISTERs are kept apart. */
-		bool removal = strstr(contact, ";expires=0") != NULL;
+		/* Each Contact on its own.  The stack removes a replaced binding
+		 * (expires=0) next to the new one in the same REGISTER; a binding
+		 * the app drops is un-REGISTERed alone.  Removals are kept
+		 * apart; `removal` is a REGISTER that adds nothing. */
+		bool removal = true;
 		mtx_lock(&g_lock);
-		if (again)
-			;
-		else if (removal) {
-			if (g_nremoved < MAX_REGS)
-				snprintf(g_removed[g_nremoved++],
-				         sizeof(g_removed[0]), "%s", contact);
-		}
-		else if (g_nregs < MAX_REGS) {
-			g_callids[g_nregs][0] = '\0';
-			copy_header(buf, "Call-ID", g_callids[g_nregs],
-			            sizeof(g_callids[0]));
-			snprintf(g_contacts[g_nregs++], sizeof(g_contacts[0]),
-			         "%s", contact);
+		for (int i = 0; ; i++) {
+			char ct[2048];
+			if (!nth_contact(buf, i, ct, sizeof(ct)))
+				break;
+			if (strstr(ct, ";expires=0")) {
+				if (!again && g_nremoved < MAX_REGS)
+					snprintf(g_removed[g_nremoved++],
+					         sizeof(g_removed[0]), "%s", ct);
+			}
+			else if (removal) {
+				/* The binding this REGISTER adds (one). */
+				removal = false;
+				if (again || g_nregs >= MAX_REGS)
+					continue;
+				g_callids[g_nregs][0] = '\0';
+				copy_header(buf, "Call-ID", g_callids[g_nregs],
+				            sizeof(g_callids[0]));
+				snprintf(g_contacts[g_nregs++],
+				         sizeof(g_contacts[0]), "%s", ct);
+			}
 		}
 		mtx_unlock(&g_lock);
 

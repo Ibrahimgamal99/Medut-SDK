@@ -28,7 +28,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #include <errno.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {
@@ -43,7 +43,7 @@ int bsdk_platform_audio_init(bool activate)
 	         withOptions:opts
 	               error:&error];
 	if (error) {
-		warning("Medut/ios: AVAudioSession setCategory: %s\n",
+		MDT_WARN("Medut/ios: AVAudioSession setCategory: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}
@@ -52,7 +52,7 @@ int bsdk_platform_audio_init(bool activate)
 	 * mic gain appropriate for telephone-quality voice calls. */
 	[session setMode:AVAudioSessionModeVoiceChat error:&error];
 	if (error) {
-		warning("Medut/ios: AVAudioSession setMode: %s\n",
+		MDT_WARN("Medut/ios: AVAudioSession setMode: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}
@@ -60,14 +60,14 @@ int bsdk_platform_audio_init(bool activate)
 	if (!activate) {
 		/* Category and mode are set; CallKit will activate the session
 		 * from -provider:didActivateAudioSession: when the call starts. */
-		info("Medut/ios: AVAudioSession configured, activation left to "
+		MDT_INFO("Medut/ios: AVAudioSession configured, activation left to "
 		     "the app (platform_audio_activate = false)\n");
 		return 0;
 	}
 
 	[session setActive:YES error:&error];
 	if (error) {
-		warning("Medut/ios: AVAudioSession setActive: %s\n",
+		MDT_WARN("Medut/ios: AVAudioSession setActive: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return EINVAL;
 	}

@@ -1,19 +1,28 @@
 # Quick start — Flutter
 
-The `medut` Flutter package (`bindings/flutter/`) is a thin Pigeon layer over
-the native SDKs, which own the SIP stack:
+The `medut` Flutter package (`bindings/flutter/`) is one Dart API over two
+backends:
 
-- **Android:** the Kotlin SDK (`bindings/kotlin`). It bundles the prebuilt
-  `libmedut.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, plus a small JNI
-  layer.
-- **iOS:** MedutKit (`bindings/swift`). It vendors the prebuilt
-  `Medut.xcframework` (device arm64 plus simulator arm64/x86_64).
+- **Android:** a thin Pigeon layer over the Kotlin SDK
+  (`bindings/kotlin/medut`), which owns the SIP stack. It bundles the
+  prebuilt `libmedut.so` for `arm64-v8a`, `armeabi-v7a` and `x86_64`, plus
+  a small JNI layer.
+- **iOS:** a thin Pigeon layer over MedutKit, the Swift SDK
+  (`bindings/flutter/ios/MedutKit`, also published as the `bindings/swift`
+  package). It vendors the prebuilt `Medut.xcframework` (device arm64 plus
+  simulator arm64/x86_64).
+- **Linux, macOS, Windows:** the Dart side drives the C library directly over
+  `dart:ffi` (`lib/src/ffi_backend.dart`). The app bundles
+  `medut.so` / `medut.dylib` / `medut.dll` itself, or passes
+  `Medut.start(libPath: ...)`.
 
-Native code can start the stack at app launch or from a push, and receive and
-answer calls with no Flutter engine running. Dart's `Medut.start()` then
-attaches to the stack that is already up. On Linux, macOS and Windows the
-same Dart API drives the C library over `dart:ffi`; see
-[Desktop](#desktop-linux-macos-windows).
+On mobile, native code can start the stack at app launch or from a push, and
+receive and answer calls with no Flutter engine running. Dart's
+`Medut.start()` then attaches to the stack that is already up. The methods,
+events and errors are the same on every platform; what only a phone has
+(Telecom/CallKit, push, remembered accounts, call-audio routes) is a
+documented no-op or `UNSUPPORTED` error on desktop — see
+[Desktop](#desktop).
 
 ## 1 — Add the package
 
@@ -27,10 +36,9 @@ dependencies:
 ```
 
 You need `path:` because the plugin lives in a subdirectory. The Android
-build compiles the Kotlin SDK from `bindings/kotlin`, and the iOS pod
-compiles MedutKit from the sources under `bindings/flutter/ios` (the Swift
-package in `bindings/swift` points at the same files). A git dependency (or
-a full checkout) has both.
+build compiles the Kotlin SDK from `bindings/kotlin/medut`, and the iOS pod
+compiles MedutKit from the sources under `bindings/flutter/ios`. A git
+dependency (or a full checkout) has both.
 
 **Pin a full SHA before you release.** Without `ref:` the dependency floats
 on the default branch, native libraries included. After moving between refs,
@@ -38,10 +46,12 @@ run `flutter clean` before `flutter run`: Gradle caches native build output.
 
 **Android:**
 - The SDK's manifest already declares the permissions (`INTERNET`,
-  `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `ACCESS_NETWORK_STATE`).
+  `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`, `ACCESS_NETWORK_STATE`, and what
+  Telecom and the call notification need).
 - Request the microphone permission at runtime before the first call, for
   example with `permission_handler`.
-- `minSdkVersion` must be at least 24.
+- `minSdkVersion` must be at least 24; Flutter 3.44 or later (the plugin uses
+  Flutter's built-in Kotlin).
 - The plugin compiles a small JNI layer, so the build needs the Android NDK
   and CMake 3.22.1. AGP installs both automatically when the SDK licenses are
   accepted.
@@ -55,8 +65,11 @@ run `flutter clean` before `flutter run`: Gradle caches native build output.
 <array><string>audio</string><string>voip</string></array>
 ```
 
-`Medut.xcframework` must exist at `bindings/flutter/ios/Frameworks/`. Build it on a
-Mac with `scripts/build-ios.sh`, or fetch the CI build with
+and, for PushKit, the Push Notifications capability (the `aps-environment`
+entitlement) on the Runner target.
+
+`Medut.xcframework` must exist at `bindings/flutter/ios/Frameworks/`. Build
+it on a Mac with `scripts/build-ios.sh`, or fetch the CI build with
 `scripts/fetch-prebuilt.sh`. If it is missing, `pod install` fails with a
 clear error.
 
@@ -73,22 +86,28 @@ final sdk = await Medut.start(
 );
 ```
 
-Every `MedutConfig` field is optional, and anything left `null` keeps the C
-library's default. The native side then:
-- sets the state directory,
+Every `MedutConfig` field is optional, and anything left `null` keeps the
+C library's default (`medut_config_init()`). On Android and iOS the native
+side then:
+- sets the state directory (the app's cache dir),
 - drives network handover from the OS connectivity callback,
 - activates call audio around calls, unless you pass a different
   `audioSession` mode.
 
+The stack is process-wide. While it runs, `Medut.start()` returns the
+running instance and does **not** apply the config and options you pass (a
+debug-console warning says so when they differ); `shutdown()` first to start
+with new ones.
+
 ### When native code owns the stack
 
-The intended setup starts the stack natively, so the push → incoming call →
-answer path never needs Dart:
+The intended mobile setup starts the stack natively, so the push → incoming
+call → answer path never needs Dart:
 
-- **Android:** `MedutAndroid.start(context)` in `Application.onCreate` or in
-  your FCM service.
-- **iOS:** `Medut.shared.start(...)` in the app delegate or the PushKit
-  handler.
+- **Android:** `MedutAndroid.start(context, config, options)` in
+  `Application.onCreate`.
+- **iOS:** `Medut.shared.start(config, options:)` in
+  `application(_:didFinishLaunchingWithOptions:)`.
 
 When Flutter comes up later, `Medut.start()` attaches instead of starting:
 
@@ -124,6 +143,8 @@ changes. On Android request the notification permission on API 33+.
 
 With `Medut.start(telecom: true)` the native side forwards the framework's
 audio activation itself, so `notifyCallKitAudioActive` is not needed.
+`CallStateEvent.endedLocally` tells a call declined from the system UI (or a
+headset, or a watch) from one the far end ended.
 
 ### Your own CallKit or Telecom integration
 
@@ -154,17 +175,29 @@ process is started by a push. On Android:
    `MedutAndroid.start(this, config, AndroidOptions(telecom = TelecomOptions()))`.
    It re-creates and registers the remembered accounts before any UI exists.
 3. Give the account its RFC 8599 push parameters
-   (`AccountConfig.pushProvider` / `pushToken` / `pushParam`,
-   `account.setPushToken()` on refresh) and call `MedutPush.wake(this)` from
-   your `FirebaseMessagingService` — see the
-   [Kotlin README](../../bindings/kotlin/README.md#push-wake-up-fcm).
+   (`AccountConfig.pushProvider` / `pushToken` / `pushParam`) and hand your
+   `FirebaseMessagingService` to the SDK:
+
+   ```kotlin
+   class PushService : FirebaseMessagingService() {
+       override fun onMessageReceived(message: RemoteMessage) {
+           MedutPush.wake(this, message.data)   // blocks up to 10 s
+       }
+       override fun onNewToken(token: String) {
+           MedutPush.onNewToken(token)          // live and remembered accounts
+       }
+   }
+   ```
+
+   See the [Kotlin README](../../bindings/kotlin/README.md#push-wake-up-fcm)
+   and [Push](../guides/push.md) for the payload and the server side.
 
 With Telecom on, the system rings; when Flutter comes up, `Medut.start()`
 attaches (`sdk.reattached`) and finds the account in `sdk.accounts` and the
 call in `sdk.calls`. The example app does all three
 (`example/android/.../MedutApplication.kt`), and its debug build has a
 `FakePushReceiver` that stands in for FCM:
-`adb shell am broadcast -n dev.medut.medut/.FakePushReceiver`.
+`adb shell am broadcast -n dev.medut.medut/.FakePushReceiver --es type call`.
 
 Apps already on `firebase_messaging` can opt into the same path from Dart:
 
@@ -192,8 +225,7 @@ example's `AppDelegate.swift`. `wake` reports the call to CallKit from the
 push payload before the INVITE arrives, as iOS requires, which is why
 `Medut.pushWake` throws `UNSUPPORTED` on iOS: PushKit has to reach the SDK
 natively. `Medut.pushNewToken(hex)` works on iOS too
-(`MedutPush.updatePushToken(hex:)`). Apple kills background sockets, and push
-is the sanctioned wake-up.
+(`MedutPush.updatePushToken(hex:)`).
 
 When the app returns to the foreground, `account.refreshRegistration()` makes
 an account reachable again the way a push does: the REGISTER is re-sent in
@@ -228,6 +260,8 @@ account.events.listen((ev) {
 
 `AccountConfig` also covers auth user, display name, outbound proxy, push
 tokens (RFC 8599), DTMF mode, and per-account codec overrides.
+`account.setReliableProvisional(ReliableProvisionalMode.required)` sets
+100rel/PRACK per account.
 
 Two settings above are worth being deliberate about:
 
@@ -240,11 +274,16 @@ Two settings above are worth being deliberate about:
   not the one your PBX sees. See
   [NAT traversal](../guides/nat_traversal.md#carrier-grade-nat-when-stun-is-not-enough).
 
+`account.destroy()` is idempotent: destroying an account that is already gone
+does nothing.
+
 ## 4 — Calls
 
-Every action is a `Future`, and failures throw `MedutException`. Its `code`
-is the SDK error name, such as `CALL_ENDED`, `NOT_RUNNING` or
-`AUTHENTICATION`.
+Every action is a `Future`, and failures throw `MedutException`. Its
+`code` is the SDK error name — `CALL_ENDED`, `NOT_RUNNING`,
+`ACCOUNT_DESTROYED`, `AUTHENTICATION`, `TIMEOUT`, `INVALID_ARGUMENT`, ... —
+the same on every platform, and `rawValue` the C return value
+(`sdk.strerror(rawValue)` has the C library's text for it).
 
 ```dart
 final call = await account.call('bob@pbx.example.com');
@@ -284,8 +323,10 @@ The target is only completed with a scheme and the account domain. See
 Registration retries automatically with exponential backoff
 (`MedutConfig.regRetry*`, or per account `setRetryPolicy`). On a network
 change (Wi-Fi ↔ cellular) the SDK re-binds transports, re-REGISTERs and
-re-INVITEs active calls. Progress arrives as `NetworkEvent` stages, and the
-native side feeds connectivity changes to the SDK by itself.
+re-INVITEs active calls. Progress arrives as `NetworkEvent` stages. On
+mobile the native side feeds connectivity changes to the SDK by itself; on
+desktop the C library polls the interfaces (`netMonitorIntervalSeconds`,
+default 10) and `sdk.networkChanged()` reports a change at once.
 
 While the SDK recovers, the account reports `RegState.reconnecting`.
 `RegState.failed` is reserved for what the SDK has given up on: bad
@@ -319,6 +360,9 @@ sdk.audioRoutes.listen((routes) => print(routes)); // headset plugged, BT up, ..
 await sdk.setMicGainDb(6);  await sdk.setSpeakerGainDb(-3);
 ```
 
+Routes are a phone concept: on desktop the list is empty and selecting does
+nothing; pick devices with `listOutputDevices()` / `setOutputDevice()`.
+
 Opus can be tuned through `MedutConfig.opus`
 (`OpusConfig(bitrate: 32000, fec: true, dtx: true, ...)`).
 
@@ -348,43 +392,64 @@ The engine is part of the native SDKs:
 - **Android:** `AppOwnedAudioEngine` captures and plays with `AudioRecord` and
   `AudioTrack` through `VOICE_COMMUNICATION`.
 - **iOS:** `MedutAudioEngine` uses a `VoiceProcessingIO` AudioUnit.
+- **Desktop:** only the switch; feeding the device
+  (`medut_audio_external_push/_pull`) is the app's own native code.
 
-Either way, the device opens only once call audio is active. The realtime
-loop stays native on purpose, because a GC pause on the capture path is a
-dropped frame. `appOwnedAudioStatus()` and `appOwnedAudioFormat()` report what
-it is doing. See [App-owned audio device](../api/media.md#app-owned-audio-device)
+On mobile the device opens only once call audio is active. The realtime loop
+stays native on purpose, because a GC pause on the capture path is a dropped
+frame. `appOwnedAudioStatus()` and `appOwnedAudioFormat()` report what it is
+doing. See [App-owned audio device](../api/media.md#app-owned-audio-device)
 for the full contract.
 
 ## 7 — Logging & tracing
 
 The SDK never writes to stdout/stderr. Everything arrives as events:
-- `LogEvent`: log lines.
+- `LogEvent`: log lines, at or below `MedutConfig.logLevel` (0 = errors
+  .. 3 = debug).
 - `SipTraceEvent`: raw SIP messages. Enable `MedutConfig.traceSip`.
 - `SdpNegotiationEvent`: enable `traceSdpDiff`.
 
-For Wireshark captures, use `sdk.pcapStart('/path/trace.pcap')`.
+`LogEvent` and `RegistrarWarningEvent` belong to no account; they arrive on
+`sdk.events` and on every `account.events`. For Wireshark captures, use
+`sdk.pcapStart('/path/trace.pcap')`.
 
-## Desktop (Linux, macOS, Windows)
+## Desktop
 
-The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
-implements the plugin's host API by calling the C library directly, so
-`Medut.start`, accounts, calls, events and errors behave as on mobile. Build
-the library with `scripts/build-linux.sh`, `scripts/build-macos.sh` or
-`scripts/build-windows.ps1`, and ship it with the app (`medut.so`,
-`medut.dylib`, `medut.dll` on the library search path), or pass its location:
+On Linux, macOS and Windows `Medut.start()` loads the C library and runs
+it in-process over `dart:ffi`:
 
 ```dart
-final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
+final sdk = await Medut.start(
+  libPath: '/opt/myapp/lib/medut.so',   // or leave null for the search path
+);
 ```
 
-Mobile-only features do nothing there: `telecom` and `audioSession` are
-ignored, `remember` is ignored and `rememberedAccounts()` is empty, and the
-audio route list is empty. The plugin does not declare desktop platforms in
-`pubspec.yaml`, so Flutter does not bundle the library for you.
+Build the library with `scripts/build-linux.sh` (output in
+`dist/linux/x86_64/medut.so`), `scripts/build-macos.sh` or
+`scripts/build-windows.ps1`, and ship it with the app. The plugin declares no
+desktop platform code, so Flutter does not bundle it for you.
+
+What differs from mobile, predictably:
+
+| Feature | Desktop behaviour |
+|---|---|
+| `start(telecom:, audioSession:)` | ignored |
+| `start(monitorNetwork: false)` | sets `netMonitorIntervalSeconds` to 0 unless the config sets it |
+| `createAccount(remember: true)` | `remember` ignored; `rememberedAccounts()` is empty, `forgetAccount()` a no-op (nothing but Dart starts the stack, so there is nothing to replay) |
+| `listAudioRoutes()` / `setAudioRoute()` | empty list; `setSpeakerphone` / `setExternalRouting` are no-ops; `audioRoutes` never emits |
+| `notifyCallKitAudioActive()` | no-op |
+| `appOwnedAudioStatus()` | empty map; `appOwnedAudioErrors` never emits |
+| `Medut.pushWake()` | throws `UNSUPPORTED` |
+| `Medut.pushNewToken()` | sets the token on the running instance's accounts |
+| `MedutConfig.logLevel` | any int reaches C (`-1` = no log events); mobile clamps to -1..3 |
+
+`sdk.detach()` leaves the C stack running in the process, and the next
+`Medut.start()` reattaches to it (`sdk.reattached`) and adopts its accounts
+and calls, as on mobile.
 
 ## Example app
 
-`bindings/flutter/example/` is a runnable softphone:
+`bindings/flutter/example/` is a runnable softphone (Android, iOS):
 
 ```bash
 cd bindings/flutter/example
@@ -392,7 +457,8 @@ flutter run
 ```
 
 It has three tabs:
-- **Account:** all five transports, codec ordering, retry controls.
+- **Account:** all five transports, codec ordering, retry controls, and
+  "remember this account" for the native account store.
 - **Call:** dial, answer, hold, mute, DTMF, transfer, speaker.
 - **Diagnostics:** live stats, quality alerts, handover timeline, in-app log
   console.
@@ -400,15 +466,23 @@ It has three tabs:
 ## Maintainers
 
 ```bash
-# After editing pigeons/messages.dart:
+# After editing pigeons/messages.dart (Dart, Kotlin and Swift glue):
 cd bindings/flutter && dart run pigeon --input pigeons/messages.dart
+
+# After changing include/medut.h (desktop FFI bindings; adjust the clang
+# include path in ffigen.yaml to your machine):
+cd bindings/flutter && dart run ffigen --config ffigen.yaml
 
 # Android core: builds all ABIs and refreshes the stripped copies the Kotlin
 # SDK packages (bindings/kotlin/medut/src/main/jniLibs):
 ANDROID_NDK=$HOME/Android/Sdk/ndk/<ver> ./scripts/build-android.sh
 
-# iOS core (macOS + Xcode): builds the xcframework into bindings/flutter/ios/Frameworks:
+# iOS core (macOS + Xcode): builds the xcframework into
+# bindings/flutter/ios/Frameworks:
 ./scripts/build-ios.sh
+
+# Linux core, for the desktop backend and its tests:
+./scripts/build-linux.sh
 ```
 
 The prebuilt cores are tracked in git, and a rebuild reaches consumers only
@@ -416,7 +490,11 @@ once it is committed and pushed: apps pin a git SHA. Commit the refreshed
 binaries in the same commit as the C change that motivated them.
 
 Tests:
-- **Dart:** `bindings/flutter/test/medut_test.dart`, with the native side
-  faked at the Pigeon channels.
+- **Dart, mobile backend:** `bindings/flutter/test/medut_test.dart`, with
+  the native side faked at the Pigeon channels.
+- **Dart, desktop backend:** `bindings/flutter/test/medut_smoke_test.dart`
+  against `dist/linux/x86_64/medut.so` (skipped when it is not built), and
+  `test/e2e_asterisk_test.dart` against a local Asterisk (skipped when none
+  listens on 127.0.0.1:8089).
 - **Native SDKs:** tested by their own suites, `bindings/kotlin/desktop-test`
   and `bindings/swift/Tests`.

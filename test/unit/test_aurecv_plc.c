@@ -1,12 +1,11 @@
 /**
- * @file test_aurecv_plc.c  The playout-concealment patch on baresip's audio
- *                          receiver (cmake/patch-baresip-sources.cmake, job 6)
+ * @file test_aurecv_plc.c  Playout concealment in the audio receiver
  *
- * Builds the patched third_party/baresip/src/aureceiver.c itself, against
+ * Builds src/media/aureceiver.c itself, against
  * libre, with a codec whose every frame says what it is: a real frame holds
  * its packet number, a frame rebuilt from the next packet's FEC the number of
  * the slot it rebuilds, a plain concealment frame a constant.  A device reads
- * the receiver every P ms the way an auplay thread does, and the test reads
+ * the receiver every P ms the way an mdt_auplay thread does, and the test reads
  * the played stream back as 20 ms slots.  What it pins:
  *
  *   - every slot plays exactly once and in order: a lost packet is concealed,
@@ -20,7 +19,7 @@
  *
  * The jitter buffer in front of the receiver is modelled, not linked: it
  * hands packets over in sequence order, reports the gap before each as lost,
- * and drops one older than a packet it has already handed over (baresip
+ * and drops one older than a packet it has already handed over (src/media/
  * jbuf.c does all three).
  */
 
@@ -30,8 +29,7 @@
 #include <stdarg.h>
 #include <re.h>
 #include <rem.h>
-#include <baresip.h>
-#include "core.h"
+#include "../../src/media/mdt_media.h"
 
 static int g_pass, g_fail;
 
@@ -49,40 +47,31 @@ static void log_va(const char *fmt, va_list ap)
 		re_vfprintf(stderr, fmt, ap);
 }
 
-void _info(bool safe, const char *fmt, ...)
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
+	va_list ap; (void)safe; (void)level;
+	va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
 }
 
-void _warning(bool safe, const char *fmt, ...)
-{
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
-}
-
-void _debug(bool safe, const char *fmt, ...)
-{
-	va_list ap; (void)safe; va_start(ap, fmt); log_va(fmt, ap); va_end(ap);
-}
-
-int aucodec_print(struct re_printf *pf, const struct aucodec *ac)
+int mdt_aucodec_print(struct re_printf *pf, const struct mdt_aucodec *ac)
 {
 	(void)pf; (void)ac;
 	return 0;
 }
 
-static struct auplay g_auplay = { .name = "test" };
-static auplay_write_h *g_wh;
+static struct mdt_auplay g_auplay = { .name = "test" };
+static mdt_auplay_write_h *g_wh;
 static void *g_wh_arg;
 
-const struct auplay *auplay_find(const struct list *auplayl, const char *name)
+const struct mdt_auplay *mdt_auplay_find(const struct list *auplayl, const char *name)
 {
 	(void)auplayl; (void)name;
 	return &g_auplay;
 }
 
-int auplay_alloc(struct auplay_st **stp, struct list *auplayl,
-		 const char *name, struct auplay_prm *prm, const char *device,
-		 auplay_write_h *wh, void *arg)
+int mdt_auplay_alloc(struct mdt_auplay_st **stp, struct list *auplayl,
+		 const char *name, struct mdt_auplay_prm *prm, const char *device,
+		 mdt_auplay_write_h *wh, void *arg)
 {
 	(void)auplayl; (void)name; (void)prm; (void)device;
 	g_wh     = wh;
@@ -98,7 +87,7 @@ int auplay_alloc(struct auplay_st **stp, struct list *auplayl,
 #define VAL_FEC    4000      /* + number of the slot it rebuilds */
 #define VAL_PLC    9000
 
-struct audec_state {
+struct mdt_audec_state {
 	size_t last_sampc;   /* the last decoded frame's size; 0 before any */
 };
 
@@ -107,7 +96,7 @@ static size_t   g_frame;     /* samples per packet */
 
 static void dec_destructor(void *arg) { (void)arg; }
 
-static int dec_update(struct audec_state **adsp, const struct aucodec *ac,
+static int dec_update(struct mdt_audec_state **adsp, const struct mdt_aucodec *ac,
 		      const char *fmtp)
 {
 	(void)ac; (void)fmtp;
@@ -123,7 +112,7 @@ static void fill(int16_t *p, size_t n, int v)
 		p[i] = (int16_t)v;
 }
 
-static int dec_frame(struct audec_state *ads, int fmt, void *sampv,
+static int dec_frame(struct mdt_audec_state *ads, int fmt, void *sampv,
 		     size_t *sampc, bool marker, const uint8_t *buf, size_t len)
 {
 	(void)fmt; (void)marker;
@@ -137,7 +126,7 @@ static int dec_frame(struct audec_state *ads, int fmt, void *sampv,
 
 /* Like opus_decode_pkloss(): the last packet's duration, an error before
  * there was one; rebuilt from the next packet when it is handed over. */
-static int dec_plc(struct audec_state *ads, int fmt, void *sampv,
+static int dec_plc(struct mdt_audec_state *ads, int fmt, void *sampv,
 		   size_t *sampc, const uint8_t *buf, size_t len)
 {
 	(void)fmt;
@@ -154,11 +143,11 @@ static int dec_plc(struct audec_state *ads, int fmt, void *sampv,
 	return 0;
 }
 
-static struct aucodec g_codec_a = {
+static struct mdt_aucodec g_codec_a = {
 	.name = "test-a", .srate = SRATE, .crate = SRATE, .ch = 1, .pch = 1,
 	.decupdh = dec_update, .dech = dec_frame, .plch = dec_plc,
 };
-static struct aucodec g_codec_b = {
+static struct mdt_aucodec g_codec_b = {
 	.name = "test-b", .srate = SRATE, .crate = SRATE, .ch = 1, .pch = 1,
 	.decupdh = dec_update, .dech = dec_frame, .plch = dec_plc,
 };
@@ -177,24 +166,24 @@ static int64_t  g_at[MAXPKT];      /* delivery time in µs; -1: lost */
 static unsigned g_npkt;
 static uint32_t g_ts0;             /* RTP timestamp of packet 0 */
 
-static struct config_audio g_cfg;
-static struct audio_recv  *g_ar;
+static struct mdt_config_audio g_cfg;
+static struct mdt_audio_recv  *g_ar;
 
-static void recv_open(const struct aucodec *ac, int pt, unsigned ptime)
+static void recv_open(const struct mdt_aucodec *ac, int pt, unsigned ptime)
 {
 	memset(&g_cfg, 0, sizeof(g_cfg));
 	g_cfg.dec_fmt    = AUFMT_S16LE;
 	g_cfg.play_fmt   = AUFMT_S16LE;
-	g_cfg.buffer.min = 20;      /* baresip's default audio_buffer 20-160 */
+	g_cfg.buffer.min = 20;      /* The stack's default playout buffer 20-160 */
 	g_cfg.buffer.max = 160;
 
 	g_outn    = 0;
 	g_plc_err = 0;
 	g_frame   = SRATE / 1000 * ptime;
 
-	int err = aurecv_alloc(&g_ar, &g_cfg, SRATE / 1000 * 120, ptime);
-	err |= aurecv_decoder_set(g_ar, ac, pt, NULL);
-	err |= aurecv_start_player(g_ar, NULL);
+	int err = mdt_aurecv_alloc(&g_ar, &g_cfg, SRATE / 1000 * 120, ptime);
+	err |= mdt_aurecv_decoder_set(g_ar, ac, pt, NULL);
+	err |= mdt_aurecv_start_player(g_ar, NULL);
 	if (err || !g_wh) {
 		printf("receiver would not start (%d)\n", err);
 		exit(2);
@@ -203,7 +192,7 @@ static void recv_open(const struct aucodec *ac, int pt, unsigned ptime)
 
 static void recv_close(void)
 {
-	aurecv_stop(g_ar);
+	mdt_aurecv_stop(g_ar);
 	g_ar = mem_deref(g_ar);
 	g_wh = NULL;
 }
@@ -220,7 +209,7 @@ static void deliver(unsigned k, unsigned lostc, int pt)
 	hdr.ts  = g_ts0 + (uint32_t)(k * g_frame);
 	mbuf_write_mem(mb, b, 2);
 	mb->pos = 0;
-	aurecv_receive(g_ar, &hdr, NULL, 0, mb, lostc);
+	mdt_aurecv_receive(g_ar, &hdr, NULL, 0, mb, lostc);
 	mem_deref(mb);
 }
 
@@ -501,7 +490,7 @@ static void test_codec_change(void)
 	run(10, 3, 50 * 20, PT_A);
 
 	g_plc_err = 0;
-	aurecv_decoder_set(g_ar, &g_codec_b, PT_B, NULL);
+	mdt_aurecv_decoder_set(g_ar, &g_codec_b, PT_B, NULL);
 	for (int i = 0; i < 30; i++)
 		device_read(10);
 	CHECK(g_plc_err == 0,

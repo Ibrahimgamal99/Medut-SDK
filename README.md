@@ -11,9 +11,9 @@ agent, embedded intercom, door station, or a headless call bot are all the same
 API.
 
 One shared library, one header (`include/medut.h`), full thread safety — call
-any API from any thread. Built on [baresip](https://github.com/baresip/baresip)
-and [libre](https://github.com/baresip/re), with the SIP/RTP internals kept out
-of your way.
+any API from any thread. It runs its own SIP and media stack on
+[libre](https://github.com/baresip/re), with the SIP/RTP internals kept out of
+your way — see [Architecture](docs/architecture.md).
 
 ```python
 import medut as sdk
@@ -73,7 +73,7 @@ The same flow in C++ and Dart is in [Quick start](#quick-start) below.
 | **System call UI** | Telecom self-managed ConnectionService (Android) · CallKit provider (iOS) · answer, hold, mute and hang up from the system side · incoming calls ring with the app closed |
 | **Accounts across restarts** | Keystore-encrypted store (Android) · Keychain (iOS) · restored and registered at every start, including one triggered by a push |
 | **Custom headers** | Per-account and per-dialog (call) SIP headers |
-| **Media** | Opus · G.711 · G.722 · G.726 · PCM tap · WAV recording · TX/RX mute · device enumerate + hot-switch · mic/speaker gain · AEC (half-duplex or WebRTC full-duplex) · NS · AGC · app-owned audio device |
+| **Media** | Opus · G.711 (µ-law, A-law) · PCM tap · WAV recording · TX/RX mute · device enumerate + hot-switch · mic/speaker gain · AEC (half-duplex or WebRTC full-duplex) · NS · AGC · app-owned audio device |
 | **Observability** | SIP trace · SDP diff · SIP pcap · RTCP/MOS stats · quality alerts · jitter buffer · audio level · bandwidth · logcat / unified log output from the mobile SDKs |
 | **Multi-account** | Any number of accounts per stack |
 
@@ -106,7 +106,7 @@ common deployments is in [TLS and WSS](docs/guides/tls_wss.md) and
 | Linux x86_64 | `dist/linux/x86_64/medut.so` | `medut.a` | OpenSSL (embedded) |
 | macOS universal | `dist/macos/universal/medut.dylib` | `medut.a` | OpenSSL (embedded) |
 | Windows x64 | `dist\windows\x64\medut.dll` | `bare.lib` | OpenSSL (embedded via vcpkg) |
-| Android arm64-v8a · armeabi-v7a · x86_64 | `dist/android/<ABI>/medut.so` | `medut.a` | OpenSSL (embedded, built from source) |
+| Android arm64-v8a · armeabi-v7a · x86_64 | `dist/android/<ABI>/libmedut.so` | `medut.a` | OpenSSL (embedded, built from source) |
 | iOS device + simulator | `dist/ios/Medut.xcframework` | — | OpenSSL (embedded, built from source) |
 
 Shared libraries are **fully self-contained** — OpenSSL, zlib, and the audio
@@ -120,8 +120,8 @@ dependencies are baked in, so nothing extra is needed at runtime.
 | C++ | `bindings/cpp/medut.hpp` | header-only RAII wrapper |
 | Python | `bindings/python/` | cffi + event decorators |
 | Kotlin (Android) | `bindings/kotlin/` | JNI layer, listener API; Telecom, FCM wake-up, encrypted account store |
-| Swift (iOS) | `bindings/swift/` | Swift package, async event stream; CallKit, PushKit wake-up, Keychain account store |
-| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs on mobile; `dart:ffi` on desktop |
+| Swift (iOS) | `bindings/swift/` | Swift package (MedutKit), async event stream; CallKit, PushKit wake-up, Keychain account store |
+| Flutter | `bindings/flutter/` | Pigeon over the Kotlin and Swift SDKs on Android and iOS; `dart:ffi` on Linux, macOS and Windows — one Dart API |
 
 On mobile the native SDK owns the stack for the life of the process: started
 at launch or by a push, it registers the remembered accounts and rings an
@@ -137,8 +137,8 @@ git clone https://github.com/Ibrahimgamal99/Medut-SDK.git
 cd Medut-SDK
 ```
 
-`third_party/` is not in git. The platform build scripts fetch libre,
-baresip and Opus at the pinned revisions (and OpenSSL for Android and iOS)
+`third_party/` is not in git. The platform build scripts fetch libre and
+Opus at the pinned revisions (and OpenSSL for Android and iOS)
 through [`scripts/fetch-third-party.sh`](scripts/fetch-third-party.sh) on
 first use, and move an existing checkout to the pin when it changes.
 
@@ -303,6 +303,9 @@ Everything lives in [`docs/`](docs/index.md):
 [WebRTC browser interop](docs/guides/webrtc_browser.md) ·
 [Debugging SIP](docs/guides/debugging.md)
 
+**Architecture** — [How the SDK is built](docs/architecture.md): the layers
+under `src/`, threads, and the path of a call
+
 **API reference** — [Overview](docs/api/overview.md) ·
 [Configuration](docs/api/config.md) · [Accounts](docs/api/accounts.md) ·
 [Calls](docs/api/calls.md) · [Media](docs/api/media.md) ·
@@ -316,7 +319,11 @@ Everything lives in [`docs/`](docs/index.md):
 
 Medut SDK is released under the [BSD 3-Clause License](LICENSE).
 
-The shipped libraries statically link baresip, libre and Opus (all BSD-3-Clause)
-and OpenSSL (Apache-2.0), which is built from source on Android and iOS. Each
+The shipped libraries statically link libre and Opus (both BSD-3-Clause) and
+OpenSSL (Apache-2.0), which is built from source on Android and iOS. Each
 dependency's own licence text is in `third_party/<name>/` after
 [`scripts/fetch-third-party.sh`](scripts/fetch-third-party.sh) runs.
+
+Parts of the SIP and media stack are adapted from
+[baresip](https://github.com/baresip/baresip) (BSD-3-Clause); the files and the
+licence text are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

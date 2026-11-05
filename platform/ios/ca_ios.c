@@ -32,7 +32,7 @@
 #include <stddef.h>
 #include <sys/stat.h>
 #include <re.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 /* platform/ios/ca_roots.c (generated) */
 extern const char   bsdk_ca_roots_pem[];
@@ -60,7 +60,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	out = fopen(path, "w");
 	if (!out) {
-		warning("Medut: cannot write CA bundle to %s — TLS server "
+		MDT_WARN("Medut: cannot write CA bundle to %s — TLS server "
 		        "verification will fail unless ca_cert_path is set\n",
 		        path);
 		return NULL;
@@ -68,7 +68,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	n = fwrite(bsdk_ca_roots_pem, 1, bsdk_ca_roots_pem_len, out);
 	if (fclose(out) != 0 || n != bsdk_ca_roots_pem_len) {
-		warning("Medut: short write of CA bundle to %s (%zu/%zu) — "
+		MDT_WARN("Medut: short write of CA bundle to %s (%zu/%zu) — "
 		        "TLS server verification will fail unless ca_cert_path "
 		        "is set\n", path, n, bsdk_ca_roots_pem_len);
 		(void)remove(path);

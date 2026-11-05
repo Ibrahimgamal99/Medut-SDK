@@ -1,9 +1,9 @@
 # Medut SDK
 
-SIP softphone SDK for Flutter. On Android and iOS it is a thin Pigeon layer
-over the native Medut SDKs, which own a self-contained SIP stack
-(baresip/libre) for the whole process lifetime. On Linux, macOS and Windows
-the same Dart API calls the C library over `dart:ffi`.
+SIP softphone SDK for Flutter: one Dart API over a self-contained SIP stack
+(Medut's own, on libre). On Android and iOS it is a thin Pigeon layer over the native
+Medut SDKs, which own the stack for the whole process lifetime; on Linux,
+macOS and Windows the same API drives the C library over `dart:ffi`.
 
 Drop it into any Flutter app. It covers:
 - registration over UDP/TCP/TLS/WS/WSS,
@@ -19,11 +19,12 @@ flow.
 
 | | |
 |---|---|
-| **Android** | `minSdk` 24; arm64-v8a, armeabi-v7a and x86_64. Built on the Kotlin SDK (`bindings/kotlin`): Telecom integration (API 26+), FCM wake-up, an encrypted account store, audio mode and focus, call-audio routes, network callbacks, and an optional app-owned audio device. |
-| **iOS** | 13.0+, device and simulator. Built on MedutKit (`bindings/swift`): CallKit integration, PushKit wake-up, a Keychain account store, `AVAudioSession`, routes, `NWPathMonitor`, and the optional VoiceProcessingIO app-owned device. |
+| **Android** | `minSdk` 24; arm64-v8a, armeabi-v7a and x86_64. Built on the Kotlin SDK (`bindings/kotlin/medut`): Telecom integration (API 26+), FCM wake-up, an encrypted account store, audio mode and focus, call-audio routes, network callbacks, and an optional app-owned audio device. |
+| **iOS** | 13.0+, device and simulator. Built on MedutKit (`ios/MedutKit`, also the `bindings/swift` package): CallKit integration, PushKit wake-up, a Keychain account store, `AVAudioSession`, routes, `NWPathMonitor`, and the optional VoiceProcessingIO app-owned device. |
+| **Linux / macOS / Windows** | `dart:ffi` straight to the C library (`lib/src/ffi_backend.dart`). The app bundles `medut.so` / `.dylib` / `.dll`, or passes `Medut.start(libPath: ...)`. Phone-only features are documented no-ops (see below). |
 
-Because native code owns the stack, it can start the stack at launch or from
-a push, and receive and answer calls with no Flutter engine running.
+Because native code owns the stack on mobile, it can start the stack at launch
+or from a push, and receive and answer calls with no Flutter engine running.
 `Medut.start()` attaches to that running stack (`sdk.reattached`).
 
 ## Install
@@ -37,15 +38,19 @@ dependencies:
       ref: <full-40-char-sha>
 ```
 
-**Android:**
-- The SDK declares `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` and
-  `ACCESS_NETWORK_STATE`.
-- Your app must still request the microphone permission at runtime (for
-  example with `permission_handler`).
-- The plugin compiles a small JNI layer. AGP installs the NDK and CMake it
-  needs automatically.
+Flutter 3.44 or later.
 
-**iOS** needs these entries in your app's `Info.plist`:
+**Android:**
+- The SDK declares `INTERNET`, `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS`,
+  `ACCESS_NETWORK_STATE` and what Telecom and its call notification need.
+- Your app must still request the microphone permission at runtime (for
+  example with `permission_handler`), and the notification permission on
+  API 33+ when it uses Telecom.
+- The plugin compiles the Kotlin SDK and its small JNI layer from source. AGP
+  installs the NDK and CMake it needs automatically.
+
+**iOS** needs these entries in your app's `Info.plist`, plus the Push
+Notifications capability (`aps-environment`) for PushKit:
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
@@ -58,8 +63,13 @@ The pod compiles MedutKit (the Swift SDK, whose sources live under
 `bindings/flutter/ios`) and vendors
 `bindings/flutter/ios/Frameworks/Medut.xcframework`. Produce that framework
 with `scripts/build-ios.sh` on macOS, fetch it with
-`scripts/fetch-prebuilt.sh`, or run the `ios-xcframework` workflow with
-`commit=true`. If it is absent, `pod install` fails with a clear message.
+`scripts/fetch-prebuilt.sh` (from a "Build mobile libraries" CI run, which also
+commits it to its branch by default).
+If it is absent, `pod install` fails with a clear message.
+
+**Desktop:** build the C library (`scripts/build-linux.sh`,
+`build-macos.sh`, `build-windows.ps1`) and ship it next to the app, or point
+`Medut.start(libPath: ...)` at it.
 
 ## Use
 
@@ -96,53 +106,112 @@ account.events.listen((ev) {
 Behaviour worth knowing:
 - **Async actions.** Every action is a `Future`, and failures throw
   `MedutException` (`code`: `CALL_ENDED`, `NOT_RUNNING`, `AUTHENTICATION`,
-  ...).
+  ..., the same names on every platform).
 - **Cached state.** `call.state` and `account.regState` follow the events.
-- **Config defaults.** `MedutConfig` fields left `null` keep the C library's
-  defaults.
-- **Telecom (Android).** `Medut.start(telecom: true)` registers calls with
+- **Config defaults.** `MedutConfig` fields left `null` keep the C
+  library's defaults.
+- **One instance.** The stack is process-wide: while it runs,
+  `Medut.start()` returns the running instance and ignores the config and
+  options passed (a debug warning says so). `shutdown()` first to change them.
+- **Telecom / CallKit.** `Medut.start(telecom: true)` registers calls with
   the system: system call UI, Bluetooth / Auto / Wear, incoming calls that
-  ring with no Flutter engine up. Request the notification permission on
-  API 33+.
-- **Push wake-up** is native: start the stack from `Application.onCreate`
-  and call `MedutPush.wake()` from your FCM service
-  ([Kotlin README](../kotlin/README.md#push-wake-up-fcm)). Register with
-  `createAccount(remember: true)` so that start finds the account; the
-  example app's `MedutApplication` shows the whole arrangement.
+  ring with no Flutter engine up.
+
+## Host-app setup for push and native start
+
+The full arrangement, as the example app has it:
+
+**Android** — start the stack in your `Application` and hand FCM to the SDK:
+
+```kotlin
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // Re-creates and registers the accounts Dart created with
+        // remember: true, before any UI or Flutter engine exists.
+        MedutAndroid.start(this, MedutConfig(),
+            AndroidOptions(telecom = TelecomOptions()))
+    }
+}
+
+class PushService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        MedutPush.wake(this, message.data)     // rings via Telecom, re-registers
+    }
+    override fun onNewToken(token: String) = MedutPush.onNewToken(token)
+}
+```
+
+Declare both in the manifest (`android:name=".MyApplication"` and the
+service with the `com.google.firebase.MESSAGING_EVENT` intent filter). Apps
+that only have `firebase_messaging` in Dart can call
+`Medut.pushWake(message.data)` from the background handler and
+`Medut.pushNewToken(token)` on refresh instead; the stack must still be
+started in `Application.onCreate`. See the
+[Kotlin README](../kotlin/README.md#push-wake-up-fcm).
+
+**iOS** — start the stack in the app delegate and wire PushKit:
+
+```swift
+override func application(_ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+  var options = StartOptions()
+  options.callKit = CallKitOptions()
+  try? Medut.shared.start(MedutConfig(), options: options)
+  let registry = PKPushRegistry(queue: .main)
+  registry.delegate = self
+  registry.desiredPushTypes = [.voIP]
+  pushRegistry = registry
+  return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+}
+
+func pushRegistry(_ r: PKPushRegistry, didUpdate c: PKPushCredentials, for t: PKPushType) {
+  MedutPush.updatePushToken(c.token)
+}
+
+func pushRegistry(_ r: PKPushRegistry, didReceiveIncomingPushWith p: PKPushPayload,
+                  for t: PKPushType, completion: @escaping () -> Void) {
+  MedutPush.wake(payload: p.dictionaryPayload, completion: completion)
+}
+```
+
+(`import medut` gives the app delegate these types.) PushKit must reach
+`MedutPush` natively — iOS requires the call reported to CallKit before the
+handler returns — so `Medut.pushWake` is Android-only. See the
+[Swift README](../swift/README.md#push-wake-up-pushkit).
+
+Register accounts from Dart with `createAccount(..., remember: true)` so
+those native starts find them; `account.destroy(forget: true)` and
+`forgetAccount()` remove them again.
+
+## Desktop
+
+Phone-only features are predictable there: `telecom` and `audioSession` are
+ignored, `remember` is ignored and `rememberedAccounts()` is empty, audio
+routes are an empty list (selecting does nothing; use `setOutputDevice`),
+`notifyCallKitAudioActive` is a no-op, and `Medut.pushWake` throws
+`UNSUPPORTED`. `start(monitorNetwork: false)` turns the C library's interface
+polling off. See
+[docs/quickstart/flutter.md](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md#desktop).
 
 See [`example/`](example/) for a runnable app and
 [`docs/quickstart/flutter.md`](https://github.com/Ibrahimgamal99/Medut-SDK/blob/main/docs/quickstart/flutter.md)
 for the full walkthrough: CallKit/Telecom, transfer, presence, recording,
 handover and stats.
 
-## Desktop (Linux, macOS, Windows)
-
-The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
-implements the plugin's host API by calling the C library directly, so
-`Medut.start`, accounts, calls, events and errors behave as on mobile. Build
-the library with `scripts/build-linux.sh`, `scripts/build-macos.sh` or
-`scripts/build-windows.ps1`, and ship it with the app (`medut.so`,
-`medut.dylib`, `medut.dll` on the library search path), or pass its location:
-
-```dart
-final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
-```
-
-Mobile-only features do nothing there: `telecom` and `audioSession` are
-ignored, `remember` is ignored and `rememberedAccounts()` is empty, and the
-audio route list is empty. The plugin does not declare desktop platforms in
-`pubspec.yaml`, so Flutter does not bundle the library for you.
-
 ## Development
 
-The Dart, Kotlin and Swift glue is generated from `pigeons/messages.dart`:
+The Dart, Kotlin and Swift glue is generated from `pigeons/messages.dart`, the
+desktop FFI bindings from `include/medut.h`:
 
 ```sh
 dart run pigeon --input pigeons/messages.dart
-flutter test
+dart run ffigen --config ffigen.yaml     # adjust the clang include path first
+flutter test                             # desktop tests need scripts/build-linux.sh
 ```
 
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE). The native libraries statically link
-baresip, libre and Opus (BSD-3-Clause) plus OpenSSL (Apache-2.0).
+libre and Opus (BSD-3-Clause) plus OpenSSL (Apache-2.0); parts of the stack
+are adapted from baresip (BSD-3-Clause) — see the SDK's THIRD_PARTY_NOTICES.

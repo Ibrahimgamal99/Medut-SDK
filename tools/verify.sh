@@ -33,10 +33,16 @@ echo "--- Symbol presence ---"
 # (which pipefail would then misreport as a pipeline failure)
 NM_CACHE="$(nm -A "${ARCHIVE}" 2>/dev/null)"
 
+# Apple's nm prints C symbols with a leading underscore (_medut_init),
+# GNU nm without: match both.
+has_sym() {
+  # Use here-string (<<<) to avoid echo|grep SIGPIPE → pipefail false-negative
+  grep -qE " T _?${1}\$" <<< "${NM_CACHE}"
+}
+
 check_sym() {
   local SYM="$1"
-  # Use here-string (<<<) to avoid echo|grep SIGPIPE → pipefail false-negative
-  if grep -q " T ${SYM}\b" <<< "${NM_CACHE}"; then
+  if has_sym "${SYM}"; then
     printf "  %-40s  [OK]\n" "${SYM}"
   else
     printf "  %-40s  [MISSING]\n" "${SYM}"
@@ -95,18 +101,45 @@ check_sym "medut_set_adaptive_bitrate"
 check_sym "medut_account_keepalive_now"
 check_sym "medut_account_refresh_registration"
 
-# Underlying baresip/libre internals (should still be in the merged archive)
-check_sym "baresip_init"
-check_sym "ua_init"
+# The Medut stack and the libre it is built on (in the merged archive)
+check_sym "mdt_stack_init"
+check_sym "mdt_ua_alloc"
+check_sym "mdt_call_connect"
+check_sym "mdt_stream_alloc"
+check_sym "mdt_opus_init"
+check_sym "mdt_dtls_srtp_init"
+check_sym "bsdk_ice_module_init"
 check_sym "re_main"
 check_sym "websock_connect"
 check_sym "sip_transp_add_websock"
 check_sym "srtp_decrypt"
 
+# The platform's own audio driver (platform/<os>/): exactly the one this
+# archive was built for
+DRIVERS=""
+for _drv in mdt_pulse_init mdt_coreaudio_init mdt_wasapi_init \
+            mdt_audiounit_init bsdk_sles_vc_init; do
+  has_sym "${_drv}" && DRIVERS="${DRIVERS} ${_drv}"
+done
+if [ -z "${DRIVERS}" ]; then
+  printf "  %-40s  [MISSING]\n" "platform audio driver"
+  MISSING_SYMS=$((MISSING_SYMS + 1))
+else
+  printf "  %-40s  [OK]\n" "audio driver:${DRIVERS}"
+fi
+
+# Nothing of baresip may be left in a build
+for _bs in baresip_init ua_init bevent_register; do
+  if has_sym "${_bs}"; then
+    echo "  [FAIL] ${_bs} — a baresip symbol is in the archive"
+    MISSING_SYMS=$((MISSING_SYMS + 1))
+  fi
+done
+
 echo ""
 if [ "${MISSING_SYMS}" -gt 0 ]; then
   echo "WARNING: ${MISSING_SYMS} expected symbol(s) not found."
-  echo "         Check that STATIC=ON and the correct modules were built."
+  echo "         Check that every src/ layer was compiled into the archive."
 else
   echo "All expected symbols present."
 fi
@@ -126,15 +159,13 @@ fi
 # 3. Header parseability (preprocessor sanity)
 # ---------------------------------------------------------------------------
 INCLUDE_DIR="$(dirname "${ARCHIVE}")/include"
-if [ -f "${INCLUDE_DIR}/baresip.h" ]; then
+if [ -f "${INCLUDE_DIR}/medut.h" ]; then
   echo ""
   echo "--- Header parseability ---"
-  if clang -E -x c "${INCLUDE_DIR}/baresip.h" -I "${INCLUDE_DIR}" > /dev/null 2>&1; then
-    echo "  baresip.h: [OK] (clang -E passed)"
-  elif gcc  -E -x c "${INCLUDE_DIR}/baresip.h" -I "${INCLUDE_DIR}" > /dev/null 2>&1; then
-    echo "  baresip.h: [OK] (gcc -E passed)"
+  if cc -fsyntax-only -x c "${INCLUDE_DIR}/medut.h" > /dev/null 2>&1; then
+    echo "  medut.h: [OK]"
   else
-    echo "  baresip.h: [WARN] preprocessor failed — check include paths"
+    echo "  medut.h: [WARN] does not compile on its own"
   fi
 fi
 

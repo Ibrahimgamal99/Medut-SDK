@@ -1,18 +1,15 @@
 /**
- * @file audio_linux.c  Linux platform audio stub
+ * @file audio_linux.c  Linux platform audio session
  *
- * baresip's pulse/alsa module handles audio playback/capture directly. No
- * custom driver code is needed.
- *
- * Future enhancement: native PipeWire client here if baresip's pulse module
- * proves insufficient (e.g. for low-latency audio processing or AEC bypass).
+ * Linux has no audio session for the SDK to set up or activate: the "pulse"
+ * driver (pulse*.c, PulseAudio or PipeWire-pulse) opens the devices itself
+ * when a call's audio starts.
  */
 
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 int bsdk_platform_audio_init(bool activate)
 {
 	(void)activate;  /* no platform-managed session to activate */
-	/* baresip's pulse module (loaded by modules_init) handles Linux audio */
 	return 0;
 }

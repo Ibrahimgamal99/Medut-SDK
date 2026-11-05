@@ -19,14 +19,27 @@
  */
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <re.h>
-#include <baresip.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 /* ws_path.c reads g_bsdk.cfg for ws_origin / ws_extra_headers / keepalive;
  * core.c is not linked in, so own the definition here. */
 struct bsdk_ctx g_bsdk;
+
+/* The stack's logger (bsdk.h); core/stack.c is not linked. */
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
+{
+	va_list ap;
+	(void)level;
+	va_start(ap, fmt);
+	if (safe)
+		re_vfprintf_s(stdout, fmt, ap);
+	else
+		re_vfprintf(stdout, fmt, ap);
+	va_end(ap);
+}
 
 static int g_pass, g_fail;
 
@@ -231,7 +244,7 @@ static void test_no_servers_passthrough(void)
 /* ── In-dialog routing (RFC 7118 §B.2) ───────────────────────────────────────
  *
  * The regression this covers: an incoming call arrives with no Record-Route and
- * a Contact naming the PBX's internal address (`sip:asterisk@echo:5060`), so
+ * a Contact naming the PBX's internal address (`sip:asterisk@pbx:5060`), so
  * libre routes in-dialog requests to a host that resolves nowhere.  The BYE was
  * accepted by sipsess_bye() and then died in DNS, asynchronously and silently —
  * the caller stayed on a call the app had already reported as ended.
@@ -265,7 +278,7 @@ static void test_indialog_route_follows_flow(void)
 	bsdk_ws_set_server(MEDUT_TRANSPORT_WSS, "pbx.example.com", 443, "/ws");
 
 	/* The failing case: Asterisk's own Contact, unroutable from here. */
-	r = route_for("sip:asterisk@echo:5060;transport=ws");
+	r = route_for("sip:asterisk@pbx:5060;transport=ws");
 	CHECK(r != NULL, "route was dropped entirely");
 	CHECK(r && !pl_strcmp(&r->host, "pbx.example.com"),
 	      "in-dialog route was not moved to the flow");
@@ -296,9 +309,9 @@ static void test_indialog_route_follows_flow(void)
  * ambiguous. */
 static void test_indialog_route_unpinned_passthrough(void)
 {
-	const struct uri *r = route_for("sip:asterisk@echo:5060;transport=ws");
+	const struct uri *r = route_for("sip:asterisk@pbx:5060;transport=ws");
 
-	CHECK(r != NULL && !pl_strcmp(&r->host, "echo"),
+	CHECK(r != NULL && !pl_strcmp(&r->host, "pbx"),
 	      "route was rewritten with no server pinned");
 }
 

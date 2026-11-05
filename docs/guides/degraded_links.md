@@ -25,7 +25,7 @@ it visible, and in some cases survivable.
 
 Everything on this page is driven by the RTCP stats tick, so that has to be on.
 It is on by default — `stats_interval_ms = 2000` — but if you set it to 0 you
-also switch off RTCP accounting inside baresip, which silently disables quality
+also switch off RTCP accounting inside the stack, which silently disables quality
 alerts, media-stall detection and adaptive bitrate along with it.
 
 ```c
@@ -52,7 +52,7 @@ cfg.rtp_timeout_s  = 0;      /* end   — default off */
 with `recovering = true` when it resumes. The call is left alone. This is what
 turns "the user says they can't hear anything" into an event you can act on.
 
-`rtp_timeout_s` is baresip's `avt.rtp_timeout`: it **ends** the call. It is off
+`rtp_timeout_s` is the stream's RTP timeout: it **ends** the call. It is off
 by default because ending a call is destructive and some deployments run
 legitimate one-way media. 30–60 s is the usual choice when it is wanted.
 
@@ -291,9 +291,9 @@ burst, and concealment stops.
 ### A note on G.711
 
 Fixed-rate codecs have no bitrate to adapt and, in this build, no packet-loss
-concealment either — baresip's `plc` module is a wrapper around spandsp, which
-is not among the vendored dependencies. On a lossy link a lost G.711 frame is
-played as silence. Offering Opus is what makes such a link survivable.
+concealment either: the stack has no G.711 PLC (the usual one is spandsp's,
+which is not among the vendored dependencies). On a lossy link a lost G.711
+frame is played as silence. Offering Opus is what makes such a link survivable.
 
 ---
 
@@ -314,7 +314,7 @@ played as silence. Offering Opus is what makes such a link survivable.
   of usable throughput there is no Opus configuration that sounds acceptable.
   Adaptation buys headroom; it does not manufacture bandwidth.
 - **It does not adapt the jitter buffer bounds.** The buffer inside those bounds
-  is adaptive (baresip's `jbtype = ADAPTIVE`), but `jitter_buffer_min_ms` /
+  is adaptive (`MEDUT_JBUF_ADAPTIVE`, the default), but `jitter_buffer_min_ms` /
   `jitter_buffer_max_ms` are static per call. Widen them up front for mobile —
   see [Media](../api/media.md#jitter-buffer).
 - **It does not switch codecs mid-call.** That needs a re-INVITE and full

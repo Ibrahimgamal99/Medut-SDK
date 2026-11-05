@@ -83,9 +83,17 @@ medut_call_hangup(call);   // sends BYE; fires MEDUT_EV_CALL_STATE (ENDED)
 medut_call_hold(call);     // re-INVITE with sendonly
 medut_call_resume(call);   // re-INVITE with sendrecv
 
-// Query current state (reads local hold flag — no network round-trip)
+// Query current state (no network round-trip)
 bool held = medut_call_is_held(call);
 ```
+
+The call state follows the hold of either side: `HELD` once the peer has
+accepted our hold, or while the peer holds us; `ESTABLISHED` again when
+neither does. `medut_call_is_held()` is true from the request on; if the
+peer refuses the hold (e.g. 488), the hold is undone — media, `is_held()` —
+and the state never leaves `ESTABLISHED`. A hold or resume asked for while
+another re-INVITE is still under way goes out when that one ends.
+`medut_call_info_t.is_remote_hold` is the peer's hold alone.
 
 ## DTMF
 

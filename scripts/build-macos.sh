@@ -56,8 +56,10 @@ echo ""
 echo "=== Linking ${DYLIB} ==="
 # Statically embed OpenSSL so consumers need no brew package at runtime.
 # Apple system frameworks are always present; they stay as -framework.
+# Only the public API is exported (scripts/exports.ver says why).
 clang -dynamiclib \
   -Wl,-all_load "${DIST}/universal/medut.a" -Wl,-noall_load \
+  -Wl,-exported_symbol,'_medut_*' \
   "${OPENSSL_ROOT}/lib/libssl.a" \
   "${OPENSSL_ROOT}/lib/libcrypto.a" \
   -framework CoreFoundation \

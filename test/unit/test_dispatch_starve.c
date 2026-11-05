@@ -16,7 +16,7 @@
  * dispatch.  With the mqueue-based dispatch.c the work lands on re_main in
  * milliseconds; with the old one it lands when the first sleeper finishes.
  *
- * Links src/dispatch.c and src/re_loop.c against libre only.  Both read
+ * Links src/api/dispatch.c and src/api/re_loop.c against libre only.  Both read
  * g_bsdk (defined here, as test_ice_deadline.c does) and nothing else from
  * the SDK.
  */
@@ -27,19 +27,21 @@
 #include <string.h>
 #include <time.h>
 #include <re.h>
-#include <baresip.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 struct bsdk_ctx g_bsdk;
 
-/* dispatch.c's unknown-id branch calls baresip's warning(); core.c and the
- * log module are not linked, so provide the symbol. */
-void _warning(bool safe, const char *fmt, ...)
+/* dispatch.c's unknown-id branch logs through MDT_WARN(); core/stack.c
+ * is not linked, so provide the logger. */
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
 	va_list ap;
-	(void)safe;
+	(void)level;
 	va_start(ap, fmt);
-	vprintf(fmt, ap);
+	if (safe)
+		re_vfprintf_s(stdout, fmt, ap);
+	else
+		re_vfprintf(stdout, fmt, ap);
 	va_end(ap);
 }
 

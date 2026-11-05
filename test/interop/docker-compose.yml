@@ -1,0 +1,59 @@
+# Local PBXs for Medut interop and A/B testing (tools/ab/).
+#
+#   test/interop/gen-certs.sh && docker compose -f test/interop/docker-compose.yml up -d --build
+#
+# The PBXs sit on their own bridge with fixed addresses; the host reaches them
+# directly (no port mapping), so RTP and ICE see real addresses:
+#   Asterisk 22       172.31.250.10   5060 udp/tcp, 5061 tls, 8088 ws, 8089 wss
+#                                     accounts: asterisk/pjsip.conf; 600 echo
+#   FreeSWITCH 1.11   172.31.250.20   5060 udp/tcp, 5061 tls, 5066 ws, 7443 wss
+#                                     users 1000-1019 / medut; 9196 echo
+#
+# Each PBX has a netem sidecar in its network namespace; tools/ab/run-ab.sh
+# applies loss / jitter / delay there with `tc`.
+name: medut-interop
+
+networks:
+  interop:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
+
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    networks:
+      interop:
+        ipv4_address: 172.31.250.10
+    volumes:
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/http.conf:/etc/asterisk/http.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./asterisk/logger.conf:/etc/asterisk/logger.conf:ro
+      - ./certs:/etc/asterisk/keys:ro
+    restart: unless-stopped
+
+  asterisk-netem:
+    build: ./netem
+    network_mode: "service:asterisk"
+    cap_add: [NET_ADMIN]
+    depends_on: [asterisk]
+    restart: unless-stopped
+
+  freeswitch:
+    build: ./freeswitch
+    networks:
+      interop:
+        ipv4_address: 172.31.250.20
+    volumes:
+      - ./certs:/certs:ro
+    restart: unless-stopped
+
+  freeswitch-netem:
+    build: ./netem
+    network_mode: "service:freeswitch"
+    cap_add: [NET_ADMIN]
+    depends_on: [freeswitch]
+    restart: unless-stopped

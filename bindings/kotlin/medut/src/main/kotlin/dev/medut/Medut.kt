@@ -42,6 +42,8 @@ internal interface PlatformHooks {
     fun onCallEnded(call: Call, noCallsLeft: Boolean)
     /** The stack is shutting down. */
     fun onShutdown()
+    /** A monotonic clock, ns, that keeps counting while the device sleeps. */
+    fun elapsedNanos(): Long = System.nanoTime()
 }
 
 /**
@@ -80,6 +82,22 @@ object Medut {
 
     val isRunning: Boolean get() = gate.isRunning
 
+    /** When [start] brought the native stack up ([PlatformHooks.elapsedNanos]);
+     *  0 while stopped, or when [start] took over a stack that was already
+     *  running. */
+    @Volatile private var startedAtNanos = 0L
+
+    /** The stack came up less than [ms] ago, in this process: its transports
+     *  are bound to the network the device is on now. */
+    internal fun startedWithin(ms: Long): Boolean {
+        val t = startedAtNanos
+        return t != 0L && elapsedNanos() - t < ms * 1_000_000
+    }
+
+    // System.nanoTime() stops in deep sleep on Android: a stack started just
+    // before the device dozed would look fresh to a push hours later.
+    private fun elapsedNanos(): Long = platform?.elapsedNanos() ?: System.nanoTime()
+
     /**
      * Start the stack.  Throws [MedutError.Code.ALREADY] if it is running.
      *
@@ -107,6 +125,7 @@ object Medut {
                 reattach
             }
             reattached = wasReattached
+            startedAtNanos = if (wasReattached) 0L else elapsedNanos()
             if (wasReattached) adoptLiveState()
         }
     }
@@ -129,6 +148,7 @@ object Medut {
             if (!wasRunning) return
             registry.clear()
             reattached = false
+            startedAtNanos = 0L
             platform?.onShutdown()
         }
     }

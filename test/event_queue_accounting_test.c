@@ -28,10 +28,10 @@
  * events used as the "still alive" probe, and never completes.  The MESSAGE is
  * sent by this process to the SDK's own pinned UDP port.
  *
- * Note the MESSAGE cannot be sent to 127.0.0.1: baresip's interface filter
+ * Note the MESSAGE cannot be sent to 127.0.0.1: the stack's interface filter
  * drops loopback, so the stack never binds it.  The destination comes from
  * medut_network_local_addr() instead, which is the address it did bind.
- * Only the user part of the Request-URI is matched (uag_find_msg against the
+ * Only the user part of the Request-URI is matched (mdt_sip_find_msg against the
  * UA's contact user), so the URI host stays the unroutable AoR host.
  *
  * Build:
@@ -116,7 +116,7 @@ static int send_sip_message(const char *host)
 		return -1;
 
 	/* connect() so the kernel picks a source address that can reach the
-	 * SDK, then read it back for the Via — baresip replies to whatever the
+	 * SDK, then read it back for the Via — the stack replies to whatever the
 	 * Via names, and a wrong one would just be dropped. */
 	if (connect(fd, (struct sockaddr *)&dst, sizeof(dst)) < 0) {
 		close(fd);

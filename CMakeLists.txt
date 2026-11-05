@@ -1,37 +1,35 @@
 cmake_minimum_required(VERSION 3.19)
-project(medut VERSION 1.0.0 LANGUAGES C)
+project(medut VERSION 2.0.0 LANGUAGES C)
 
 include(ExternalProject)
 
 # ---------------------------------------------------------------------------
 # Source-only mode — used internally by medut_core_project ExternalProject.
-# When MEDUT_SRC_MODE=ON this file compiles only src/*.c + platform/*.c
-# into medut_core and returns; the outer build then merges it with re + baresip.
+# When MEDUT_SRC_MODE=ON this file compiles only src/<layer>/*.c + platform/<os>/*.c
+# into medut_core and returns; the outer build then merges it with re + opus.
 # ---------------------------------------------------------------------------
 option(MEDUT_SRC_MODE "Compile Medut sources only (internal use)" OFF)
 
 # ---------------------------------------------------------------------------
 # HAVE_UNIXSOCK is an ABI switch, not a feature flag — it MUST be identical in
-# re, baresip and medut_core. Set here, above the MEDUT_SRC_MODE branch,
-# because the core sources are configured by a *separate* CMake invocation
-# from the one that configures re and baresip: anything set inside a branch
-# reaches only one of them.
+# re and medut_core. Set here, above the MEDUT_SRC_MODE branch, because the
+# core sources are configured by a *separate* CMake invocation from the one
+# that configures re: anything set inside a branch reaches only one of them.
 #
 # re's `struct sa` embeds `struct sockaddr_un` in its union only when
 # HAVE_UNIXSOCK != 0, which changes sizeof(struct sa) from ~32 to ~112 bytes.
 # `struct sip_msg` opens with two `struct sa` (src, dst), so a disagreement
 # shifts every field after them by ~160 bytes. This does not fail to link and
 # does not crash — it builds, runs, and silently reads the other library's
-# structs at the wrong offsets. Android used to pass USE_UNIXSOCK=OFF to re
-# alone: re read scode=200 from a REGISTER response while baresip read 55857
-# from the very same message, so registration completed on the wire and no
-# event was ever emitted. The app sat in "registering" forever, Android only.
+# structs at the wrong offsets. Android once passed USE_UNIXSOCK=OFF to re
+# alone: re read scode=200 from a REGISTER response while the code above it
+# read 55857 from the very same message, so registration completed on the
+# wire and no event was ever emitted. The app sat in "registering" forever.
 #
-# The default is "on" in three separate places: re's own
-# option(USE_UNIXSOCK ... ON), baresip's inherited copy, and the header guard
-# `#if !defined(HAVE_UNIXSOCK) || HAVE_UNIXSOCK == 1` — so a target that never
-# hears about the flag at all still gets the *large* struct. Set it explicitly
-# on all three rather than trusting any of those defaults to agree.
+# The default is "on" in two places: re's own option(USE_UNIXSOCK ... ON) and
+# the header guard `#if !defined(HAVE_UNIXSOCK) || HAVE_UNIXSOCK == 1` — so a
+# target that never hears about the flag at all still gets the *large*
+# struct. Set it explicitly everywhere rather than trusting the defaults.
 set(MEDUT_USE_UNIXSOCK ON CACHE BOOL
     "Include AF_UNIX in re's struct sa (ABI-critical; must match everywhere)")
 if(MEDUT_USE_UNIXSOCK)
@@ -44,9 +42,9 @@ endif()
 
 if(MEDUT_SRC_MODE)
   cmake_minimum_required(VERSION 3.19)
-  project(medut_core VERSION 1.0.0 LANGUAGES C)
+  project(medut_core VERSION 2.0.0 LANGUAGES C)
 
-  set(MEDUT_SYSROOT "" CACHE PATH "Path to installed re+baresip headers")
+  set(MEDUT_SYSROOT "" CACHE PATH "Path to installed re + opus headers")
 
   # Platform-specific source files
   if(ANDROID_ABI)
@@ -74,19 +72,15 @@ if(MEDUT_SRC_MODE)
   # build.  Without it the glob is evaluated once at configure time and cached:
   # a new .c file links as if it were never written, which is a silent and very
   # confusing failure for anyone adding one.
-  file(GLOB CORE_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
-  # medut-ice: Medut's own ICE agent lives one directory down and the glob
-  # above is deliberately flat, so it needs naming.  It compiles into the
-  # core archive (it reads g_bsdk and calls netmon) and registers its
-  # media-NAT from bsdk_ice_module_init(), not through baresip's mod_table.
-  file(GLOB ICE_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/ice/*.c")
-  list(APPEND CORE_SRCS ${ICE_SRCS})
-  # glibc_symver.c pins glibc symbol versions for portable desktop-Linux
-  # binaries — it references strtoll@GLIBC_2.2.5 etc. and must not be
-  # compiled anywhere else (Android uses bionic, Windows/macOS no glibc).
-  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(FILTER CORE_SRCS EXCLUDE REGEX ".*glibc_symver\\.c$")
-  endif()
+  # One directory per layer (docs/architecture.md): the public API and the
+  # SDK's policy (api), the stack's core, SIP, media, codecs, media
+  # encryption, audio drivers and filters, and Medut's ICE agent.
+  set(CORE_SRCS)
+  foreach(_layer api core sip media codec menc audio ice)
+    file(GLOB _LAYER_SRCS CONFIGURE_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/${_layer}/*.c")
+    list(APPEND CORE_SRCS ${_LAYER_SRCS})
+  endforeach()
 
   add_library(medut_core STATIC ${CORE_SRCS} ${PLAT_SRCS})
 
@@ -103,13 +97,12 @@ if(MEDUT_SRC_MODE)
     target_compile_definitions(medut_core PRIVATE MEDUT_PROFILE_DESKTOP=1)
   endif()
 
-  # ABI-critical: must match re and baresip — see the HAVE_UNIXSOCK note above.
+  # ABI-critical: must match re — see the HAVE_UNIXSOCK note above.
   target_compile_definitions(medut_core PRIVATE ${_BSDK_UNIXSOCK_DEF})
 
   # WebRTC AEC opt-in: Medut's own filter over libwebrtc-audio-processing-1
-  # (src/webrtc_apm.cpp, driven from audio_processing.c), not baresip's
-  # webrtc_aec module — that one never enables the canceller.  The library
-  # is dlopen'ed through src/webrtc_shim.c, so it is a build-time dependency
+  # (src/audio/webrtc_apm.cpp, driven from src/audio/processing.c).  The
+  # library is dlopen'ed through src/audio/webrtc_shim.c, so it is a build-time dependency
   # only.  The wrapper is the only C++ in the SDK and is built so that it
   # needs no libstdc++; the PRE_LINK check below keeps it that way.
   if(MEDUT_WITH_WEBRTC_AEC)
@@ -132,7 +125,7 @@ if(MEDUT_SRC_MODE)
                    "(webrtc-audio-processing ${WEBRTC_AP_VERSION})")
 
     add_library(bsdk_webrtc_apm OBJECT
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/webrtc_apm.cpp")
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/audio/webrtc_apm.cpp")
     target_include_directories(bsdk_webrtc_apm SYSTEM PRIVATE
       ${WEBRTC_AP_INCLUDE_DIRS})
     target_compile_options(bsdk_webrtc_apm PRIVATE
@@ -156,9 +149,10 @@ if(MEDUT_SRC_MODE)
       MEDUT_WEBRTC_SONAME="${_BSDK_WEBRTC_SONAME}")
   endif()
 
-  # Platform audio define so modules_init.c picks the right audio module.
-  # Android uses OpenSLES: the aaudio module needs API >= 26 (libaaudio.so
-  # does not exist in the android-24 sysroot) while minSdk is 24.
+  # Platform audio define: src/audio/device.c registers this build's driver
+  # (platform/<os>/). Android uses OpenSL ES (sles_vc.c): AAudio needs
+  # API >= 26 (libaaudio.so does not exist in the android-24 sysroot) while
+  # minSdk is 24.
   if(ANDROID_ABI)
     target_compile_definitions(medut_core PRIVATE MEDUT_AUDIO_OPENSLES=1)
   elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -217,7 +211,7 @@ option(MEDUT_BUILD_OPENSSL
        "Cross-build OpenSSL from third_party/openssl instead of using a system one"
        ${_build_openssl_default})
 option(MEDUT_SHARED "Also produce a shared library (.so/.dylib/.dll) from the merged archive" OFF)
-# WebRTC AEC: desktop Linux only.  src/webrtc_shim.c resolves the library's
+# WebRTC AEC: desktop Linux only.  src/audio/webrtc_shim.c resolves the library's
 # symbols by their ELF names and loads it with dlopen by SONAME, neither of
 # which carries over to Mach-O or Windows.  Only the 1.x API is supported:
 # 2.x (pkg-config webrtc-audio-processing-2) returns scoped_refptr from
@@ -253,77 +247,16 @@ endif()
 
 set(MEDUT_RE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/re"
     CACHE PATH "Path to libre source tree")
-set(MEDUT_BARESIP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/baresip"
-    CACHE PATH "Path to baresip source tree")
-
-# ---------------------------------------------------------------------------
-# Guard: baresip internals used by src/netmon.c
-#
-# call_reset_transp() and call_laddr() are exported from libbaresip but live in
-# its private src/core.h, so Medut hand-declares them in medut_internal.h.
-# An upstream signature change would still link and then misbehave at runtime,
-# so compare the prototypes at configure time and fail loudly instead.
-#
-# Whitespace is collapsed before matching so reformatting upstream does not
-# trip a false alarm — only a real signature change does.
-# ---------------------------------------------------------------------------
-set(_BARESIP_CORE_H "${MEDUT_BARESIP_SOURCE_DIR}/src/core.h")
-if(EXISTS "${_BARESIP_CORE_H}")
-  file(READ "${_BARESIP_CORE_H}" _CORE_H_TEXT)
-  string(REGEX REPLACE "[ \t\r\n]+" " " _CORE_H_FLAT "${_CORE_H_TEXT}")
-  foreach(_proto
-      "int call_reset_transp(struct call *call, const struct sa *laddr);"
-      "const struct sa *call_laddr(const struct call *call);")
-    string(FIND "${_CORE_H_FLAT}" "${_proto}" _pos)
-    if(_pos EQUAL -1)
-      message(FATAL_ERROR
-        "baresip's src/core.h no longer declares:\n"
-        "    ${_proto}\n"
-        "src/netmon.c hand-declares this in src/medut_internal.h for network "
-        "handover. Update that declaration to match before building, or the "
-        "mismatch will link silently and fail at runtime.")
-    endif()
-  endforeach()
-endif()
-
 set(MEDUT_MBEDTLS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls"
     CACHE PATH "Path to mbedTLS source tree (required when MEDUT_TLS=mbedtls)")
 set(MEDUT_OPENSSL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openssl"
     CACHE PATH "Path to OpenSSL source tree (required when MEDUT_BUILD_OPENSSL=ON)")
 set(MEDUT_OPUS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opus"
-    CACHE PATH "Path to libopus source tree (required when opus module is enabled)")
+    CACHE PATH "Path to libopus source tree")
 set(MEDUT_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist"
     CACHE PATH "Top-level output directory for built archives")
 
 set(SYSROOT "${CMAKE_BINARY_DIR}/sysroot")
-
-# ---------------------------------------------------------------------------
-# Module list
-# ---------------------------------------------------------------------------
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules-mobile.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules-desktop.cmake")
-
-if(MEDUT_MODULES_PROFILE STREQUAL "mobile")
-  set(MEDUT_MODULES "${MEDUT_MOBILE_MODULES_BASE}")
-  # Append platform audio
-  if(ANDROID_ABI)
-    set(MEDUT_MODULES "${MEDUT_MODULES};opensles")
-  elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    # audiounit only: it provides both capture and playback on iOS via
-    # kAudioUnitSubType_VoiceProcessingIO (hardware AEC).  avcapture is
-    # VIDEO capture — linking it pulls AVCaptureDevice and makes App Store
-    # review demand a camera-usage string for an audio-only SDK.
-    set(MEDUT_MODULES "${MEDUT_MODULES};audiounit")
-  elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(MEDUT_MODULES "${MEDUT_MODULES};audiounit;coreaudio")
-  endif()
-else()
-  set(MEDUT_MODULES "${MEDUT_DESKTOP_MODULES}")
-  if(WIN32)
-    list(REMOVE_ITEM MEDUT_MODULES "pulse")
-    list(APPEND MEDUT_MODULES "wasapi")
-  endif()
-endif()
 
 # ---------------------------------------------------------------------------
 # Platform ID for dist/ subdirectory naming
@@ -374,7 +307,6 @@ if(MSVC)
   set(_LPFX "")
   set(_EXT  ".lib")
   set(_RE_LIB   "re-static.lib")
-  set(_BARE_LIB "libbaresip.lib")
   set(_CORE_LIB "medut_core.lib")
   # Embed TrackFileAccess=false in every generated .vcxproj for sub-projects.
   # This prevents CL.exe's PostExecuteTool from writing .tlog files, which
@@ -384,13 +316,11 @@ else()
   set(_LPFX "lib")
   set(_EXT  ".a")
   set(_RE_LIB   "libre.a")
-  set(_BARE_LIB "libbaresip.a")
   set(_CORE_LIB "medut_core.a")
   set(_NOTRACK_ARG "")
 endif()
 
 set(_RE_A   "${SYSROOT}/lib/${_RE_LIB}")
-set(_BARE_A "${SYSROOT}/lib/${_BARE_LIB}")
 if(MSVC)
   set(_CORE_A "${CMAKE_BINARY_DIR}/medut-core-build/$<CONFIG>/${_CORE_LIB}")
 else()
@@ -404,9 +334,8 @@ endif()
 # and nothing else; USE_MBEDTLS there only swaps the hmac/md5/sha primitives.
 # Without OpenSSL, re compiles src/tls/stub.c and src/aes/stub.c, so tls_alloc,
 # dtls_listen and aes_alloc are all no-ops. That silently costs the whole
-# secure stack: baresip's SIP/TLS and SIP/WSS transports are behind
-# #ifdef USE_TLS (which re-config.cmake defines only for OpenSSL), and its
-# dtls_srtp module returns early on `NOT USE_OPENSSL`. Neither Android nor iOS
+# secure stack: SIP/TLS, SIP/WSS and DTLS-SRTP are all behind #ifdef USE_TLS
+# (which re-config.cmake defines only for OpenSSL). Neither Android nor iOS
 # has a system OpenSSL, so build one here.
 # ---------------------------------------------------------------------------
 set(OPENSSL_ARGS "")
@@ -541,7 +470,7 @@ if(MEDUT_BUILD_OPENSSL)
     BUILD_BYPRODUCTS "${_SSL_A}" "${_CRYPTO_A}"
   )
 
-  # Pre-seed FindOpenSSL's cache variables so re/baresip resolve the archives
+  # Pre-seed FindOpenSSL's cache variables so re resolves the archives
   # we just built. The NDK toolchain restricts find_library() to the NDK
   # sysroot, so an unaided find_package(OpenSSL) would come up empty.
   set(OPENSSL_ARGS
@@ -553,8 +482,6 @@ if(MEDUT_BUILD_OPENSSL)
   )
   set(OPENSSL_EXTRA_LIBS "${_SSL_A}" "${_CRYPTO_A}")
   set(OPENSSL_DEPENDS openssl_project)
-  # Same rationale as MEDUT_MBEDTLS_LINK: hand baresip the archives directly
-  # instead of relying on FindOpenSSL re-running in its cmake context.
   set(MEDUT_OPENSSL_LINK "|${_SSL_A}|${_CRYPTO_A}")
 endif()
 
@@ -603,9 +530,7 @@ if(MEDUT_TLS STREQUAL "mbedtls")
   )
   set(MBEDTLS_EXTRA_LIBS "${_MBEDTLS_A}" "${_MBEDX509_A}" "${_MBEDCRYPTO_A}")
   set(MBEDTLS_DEPENDS mbedtls_project)
-  # Suffix appended to RE_LIBRARIES so baresip consumers (webrtc, selftest)
-  # get all three mbedTLS archives without relying on FindMBEDTLS running in
-  # baresip's transitive cmake context (where its module path is different).
+  # All three mbedTLS archives, for whatever links libre.
   set(MEDUT_MBEDTLS_LINK "|${_MBEDCRYPTO_A}|${_MBEDX509_A}|${_MBEDTLS_A}")
 else()
   set(MBEDTLS_DEPENDS "")
@@ -623,7 +548,8 @@ set(OPUS_ARGS "")
 set(OPUS_EXTRA_LIBS "")
 set(OPUS_DEPENDS "")
 
-if("opus" IN_LIST MEDUT_MODULES)
+# libopus: the SDK's Opus codec (src/codec/) links it directly.
+if(TRUE)
   if(NOT EXISTS "${MEDUT_OPUS_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
       "opus module enabled but sources not found at ${MEDUT_OPUS_SOURCE_DIR}. "
@@ -692,7 +618,7 @@ if(MEDUT_TLS STREQUAL "mbedtls" AND NOT MSVC)
 endif()
 # The SDK owns websock_connect() and sip_dialog_route() on every platform:
 # cmake/patch-re-sources.cmake renames libre's definitions to __real_* behind
-# these compile-time switches, and src/ws_path.c provides the public names, so
+# these compile-time switches, and src/api/ws_path.c provides the public names, so
 # every call site resolves to the SDK at link time.  This replaced the GNU-ld
 # --wrap flags the shared-library links used to pass — Apple's linker has no
 # --wrap, so the WS routing and BYE fixes never reached iOS (which could not
@@ -765,86 +691,12 @@ if(WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
-# Phase 3: build libbaresip (STATIC=ON links all modules in)
+# Phase 3: the Medut sources — what they build against
 # ---------------------------------------------------------------------------
-string(REPLACE ";" "|" MEDUT_MODULES_SEP "${MEDUT_MODULES}")
+set(_CORE_DEPENDS re_project ${OPUS_DEPENDS} ${OPENSSL_DEPENDS})
 
-ExternalProject_Add(baresip_project
-  DEPENDS re_project ${OPUS_DEPENDS} ${OPENSSL_DEPENDS}
-  SOURCE_DIR "${MEDUT_BARESIP_SOURCE_DIR}"
-  BINARY_DIR "${CMAKE_BINARY_DIR}/baresip-build"
-  LIST_SEPARATOR "|"
-  CMAKE_ARGS
-    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-    -DCMAKE_INSTALL_PREFIX=${SYSROOT}
-    -DCMAKE_PREFIX_PATH=${SYSROOT}
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    -DRE_INCLUDE_DIR=${SYSROOT}/include/re
-    -DRE_INCLUDE_DIRS=${SYSROOT}/include/re
-    "-DRE_LIBRARY=${_RE_A}${MEDUT_MBEDTLS_LINK}${MEDUT_OPENSSL_LINK}"
-    "-DRE_LIBRARIES=${_RE_A}${MEDUT_MBEDTLS_LINK}${MEDUT_OPENSSL_LINK}"
-    -Dre_DIR=${SYSROOT}/lib/cmake/re
-    -DSTATIC=ON
-    "-DMODULES=${MEDUT_MODULES_SEP}"
-    -DBUILD_TESTING=OFF
-    # Must match re and medut_core — see the HAVE_UNIXSOCK note above.
-    -DUSE_UNIXSOCK=${_BSDK_UNIXSOCK_CM}
-    "-DCMAKE_C_FLAGS=-DJBUF_STAT=1 -D${_BSDK_UNIXSOCK_DEF}"
-    -DHAVE_THREADS=OFF
-    ${MBEDTLS_ARGS}
-    ${OPENSSL_ARGS}
-    ${OPUS_ARGS}
-    ${_NOTRACK_ARG}
-    ${CROSS_ARGS}
-  BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target baresip
-  # baresip adds test/ and webrtc/ to ALL unconditionally (BUILD_TESTING is not
-  # honoured), so the default install step ("--target install" => builds ALL)
-  # drags in selftest and baresip-webrtc. Neither ships in the SDK, and
-  # test/sip/user.c does not even compile on Android (its "struct user" clashes
-  # with the NDK's <sys/user.h>). Install the Development component directly:
-  # that is the static archive, the public headers and libbaresip.pc, all of
-  # which the BUILD_COMMAND above has already produced.
-  INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --component Development
-  BUILD_BYPRODUCTS "${_BARE_A}"
-)
-
-# baresip's executables (baresip_exe, test/, webrtc/) link libre without
-# ws_path.c, which owns the public websock_connect/sip_dialog_route names on
-# every platform now — disable them everywhere (the SDK only consumes the
-# static library).
-# The dtls_srtp hunks the script splices live in cmake/patches/.
-file(GLOB _BARESIP_HUNKS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/*")
-bsdk_patch_depends(_BARESIP_PATCH_DEPS patch-baresip-sources.cmake
-                   "${MEDUT_BARESIP_SOURCE_DIR}" ${_BARESIP_HUNKS})
-ExternalProject_Add_Step(baresip_project disable_executables
-  COMMAND ${CMAKE_COMMAND}
-    -DSOURCE_DIR=${MEDUT_BARESIP_SOURCE_DIR}
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-baresip-sources.cmake
-  DEPENDS ${_BARESIP_PATCH_DEPS}
-  DEPENDEES update
-  DEPENDERS configure
-  COMMENT "Patching baresip sources (executables disabled)"
-)
-
-if(WIN32)
-  bsdk_patch_depends(_BARESIP_MSVC_DEPS fix-msvc-baresip.cmake
-                     "${MEDUT_BARESIP_SOURCE_DIR}")
-  ExternalProject_Add_Step(baresip_project patch_sources
-    COMMAND ${CMAKE_COMMAND}
-      -DSOURCE_DIR=${MEDUT_BARESIP_SOURCE_DIR}
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fix-msvc-baresip.cmake
-    DEPENDS ${_BARESIP_MSVC_DEPS}
-    DEPENDEES update
-    DEPENDERS configure
-    COMMENT "Patching baresip sources for MSVC compatibility"
-  )
-endif()
-
-# ---------------------------------------------------------------------------
-# Phase 3.5: compile Medut source layer against installed headers
-# ---------------------------------------------------------------------------
 ExternalProject_Add(medut_core_project
-  DEPENDS baresip_project
+  DEPENDS ${_CORE_DEPENDS}
   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
   BINARY_DIR "${CMAKE_BINARY_DIR}/medut-core-build"
   CMAKE_ARGS
@@ -878,11 +730,25 @@ else()
   set(_OUT "${CMAKE_BINARY_DIR}/medut.a")
 endif()
 
+# Merge again whenever an input library was reinstalled.  Their archives are
+# declared BUILD_BYPRODUCTS, but each project's *install* step writes the copy
+# merged here, after ninja has already judged the merge up to date: a change
+# to libre alone (a patch in cmake/patch-re-sources.cmake) left the shipped
+# archive without it until some SDK source changed too.  The install stamps
+# are outputs ninja knows about.
+set(_MERGE_STAMPS "")
+foreach(_ep re_project opus_project openssl_project mbedtls_project)
+  if(TARGET ${_ep})
+    ExternalProject_Get_Property(${_ep} STAMP_DIR)
+    list(APPEND _MERGE_STAMPS "${STAMP_DIR}/${_ep}-install")
+  endif()
+endforeach()
+
 medut_merge(
   OUTPUT   "${_OUT}"
-  INPUTS   "${_CORE_A}" "${_RE_A}" "${_BARE_A}" ${MBEDTLS_EXTRA_LIBS}
+  INPUTS   "${_CORE_A}" "${_RE_A}" ${MBEDTLS_EXTRA_LIBS}
            ${OPENSSL_EXTRA_LIBS} ${OPUS_EXTRA_LIBS}
-  DEPENDS  medut_core_project
+  DEPENDS  medut_core_project ${_MERGE_STAMPS}
 )
 
 # ---------------------------------------------------------------------------
@@ -900,6 +766,7 @@ if(MEDUT_SHARED)
       OUTPUT  "${_SHARED_OUT}"
       COMMAND "${CMAKE_C_COMPILER}" -dynamiclib
               -Wl,-all_load "${_OUT}" -Wl,-noall_load
+              "-Wl,-exported_symbol,_medut_*"
               -lz
               -framework CoreFoundation -framework Security
               -o "${_SHARED_OUT}"
@@ -955,15 +822,14 @@ if(MEDUT_SHARED)
       set(_SHARED_OUT "${CMAKE_BINARY_DIR}/medut.so")
       set(_SHARED_PLATFORM_LIBS -lpthread -lssl -lcrypto -lz -lm -ldl -lresolv -lpulse)
     endif()
-    # --whole-archive exists for the baresip modules: each registers itself
-    # from a constructor, so nothing references it and on-demand extraction
-    # would drop them all. OpenSSL has no such objects — it is only ever
+    # --whole-archive: a -shared link of archives nothing references yet
+    # would otherwise produce an empty library. OpenSSL is only ever
     # called directly — so keep it outside the group and let the linker take
     # what it needs. Inside, --whole-archive would add ~6 MB of unreferenced
     # libcrypto to every ABI. The merged medut.a still bundles OpenSSL, so
     # static consumers keep getting one self-contained archive.
     if(OPENSSL_EXTRA_LIBS)
-      set(_WHOLE_LIBS "${_CORE_A}" "${_RE_A}" "${_BARE_A}"
+      set(_WHOLE_LIBS "${_CORE_A}" "${_RE_A}"
                       ${MBEDTLS_EXTRA_LIBS} ${OPUS_EXTRA_LIBS})
       set(_ONDEMAND_LIBS ${OPENSSL_EXTRA_LIBS})
     else()
@@ -979,6 +845,9 @@ if(MEDUT_SHARED)
       OUTPUT  "${_SHARED_OUT}"
       COMMAND "${CMAKE_C_COMPILER}" -shared
               ${_SHARED_LINK_EXTRA}
+              # Only the public API (and Android's JNI entry points) is
+              # exported: scripts/exports.ver.
+              "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/scripts/exports.ver"
               -Wl,--whole-archive ${_WHOLE_LIBS} -Wl,--no-whole-archive
               ${_ONDEMAND_LIBS}
               ${_SHARED_PLATFORM_LIBS}
@@ -1005,4 +874,4 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/medut.h"
               "${CMAKE_CURRENT_SOURCE_DIR}/bindings/cpp/medut.hpp"
               DESTINATION "${_DIST}/include")
 install(DIRECTORY "${SYSROOT}/include/re/"  DESTINATION "${_DIST}/include/re")
-install(FILES     "${SYSROOT}/include/baresip.h" DESTINATION "${_DIST}/include")
+

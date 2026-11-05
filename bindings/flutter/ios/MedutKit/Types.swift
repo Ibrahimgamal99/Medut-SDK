@@ -123,5 +123,7 @@ public enum NetworkStage: Int, Sendable, CaseIterable {
 }
 
 public enum LogLevel: Int, Sendable, CaseIterable {
+    /// No log events at all.
+    case off = -1
     case error = 0, warning, info, debug
 }

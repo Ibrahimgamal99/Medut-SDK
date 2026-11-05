@@ -9,15 +9,15 @@
  *
  * Layering rule: every engine file (ice_cand.c ice_sdp.c ice_pair.c
  * ice_check.c ice_stund.c ice_select.c ice_route.c ice_gather.c ice_port.c)
- * includes only libre headers and this file — no baresip.h, no g_bsdk, no
+ * includes only libre headers and this file — no stack headers, no g_bsdk, no
  * bsdk_*.  Tunables arrive through struct icea_conf.  Only ice_mod.c speaks
- * to baresip and the rest of the SDK.
+ * to the stack and the rest of the SDK.
  *
  * Names are prefixed icea_ because <re.h> pulls re_trice.h, whose
  * struct ice_cand / ice_candpair / ice_lcand would otherwise collide.
  *
  * Threads: all agent state lives on re_main.  The one exception is the wire
- * send helper (ice_route.c), which baresip runs on the audio encoder thread
+ * send helper (ice_route.c), which the stack runs on the audio encoder thread
  * for RTP; it reads only the mutex-guarded icea_txsel snapshot.
  */
 
@@ -39,7 +39,7 @@ extern "C" {
  * harness can compress time.
  */
 
-/* udp_helper layers on the RTP/RTCP sockets.  baresip's dtls_srtp sits at
+/* udp_helper layers on the RTP/RTCP sockets.  The stack's dtls_srtp sits at
  * 20 (LAYER_DTLS / LAYER_SRTP), bundle at 40; receive runs low → high, send
  * runs high → low, so 0 puts us first after the wire and last before it. */
 #define ICEA_LAYER_ICE      0
@@ -70,7 +70,7 @@ extern "C" {
 #define ICEA_PING_TABLE_EXPIRY_MS    30000     /* forget a tid after this       */
 
 /* Gather bound for a restart when cfg.ice_gathering_timeout_ms is 0.  The
- * initial INVITE may wait for ever (baresip's own behaviour, no call yet);
+ * initial INVITE may wait for ever (the stack's own behaviour, no call yet);
  * a restart runs under a live, already-silent call and must not. */
 #ifndef BSDK_ICE_RESTART_DEADLINE_MS
 #define BSDK_ICE_RESTART_DEADLINE_MS  3000
@@ -101,6 +101,7 @@ extern "C" {
 #define ICEA_UFRAG_LEN   8
 #define ICEA_PWD_LEN    32
 #define ICEA_MAX_COMP    2
+#define ICEA_EARLY_DTLS_MAX 4   /* DTLS records kept before media starts */
 
 /* ── Enums ───────────────────────────────────────────────────────────────── */
 

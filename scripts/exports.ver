@@ -1,0 +1,15 @@
+/* What libmedut exports (Linux, Android): the public API of
+ * include/medut.h and, on Android, the JNI entry points in
+ * platform/android/.  Everything else — the Medut stack, libre, libopus,
+ * the glibc compatibility shims of platform/linux/glibc_symver.c — binds
+ * inside the library and stays out of the dynamic symbol table, so it can
+ * neither clash with an application's own copies of those libraries nor be
+ * called as if it were API.  macOS / iOS do the same with
+ * -exported_symbol, Windows with its .def file. */
+{
+    global:
+        medut_*;
+        Java_*;
+    local:
+        *;
+};

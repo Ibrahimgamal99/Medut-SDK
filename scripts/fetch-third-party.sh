@@ -8,20 +8,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The marker is the file whose presence means "already cloned and usable".
 # It is CMakeLists.txt for the CMake projects; OpenSSL has no CMake build, so
 # its marker is the Configure script the ExternalProject actually invokes.
+#
+# Every dependency comes from Medut's own forks (github.com/Ibrahimgamal99),
+# pinned at the same upstream commits — a fork serves its parent's history,
+# so the pins are unchanged.
+GH="https://github.com/Ibrahimgamal99"
 DEPS=(
-  "re|https://github.com/baresip/re.git|fd6c71be2a981f2e961c59c7f1b39b5cbd30494e|CMakeLists.txt"
-  "baresip|https://github.com/baresip/baresip.git|d5ed26ccff4c884f27061cdf022f18332cda4c9c|CMakeLists.txt"
-  "opus|https://github.com/xiph/opus.git|503d81b138d76621aae4b12786e90de48aa8db3a|CMakeLists.txt"
+  "re|${GH}/re.git|fd6c71be2a981f2e961c59c7f1b39b5cbd30494e|CMakeLists.txt"
+  "opus|${GH}/opus.git|503d81b138d76621aae4b12786e90de48aa8db3a|CMakeLists.txt"
 )
 if [[ "${MEDUT_TLS:-openssl}" == "mbedtls" ]]; then
-  DEPS+=("mbedtls|https://github.com/Mbed-TLS/mbedtls.git|2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9|CMakeLists.txt")
+  DEPS+=("mbedtls|${GH}/mbedtls.git|2f2b202f8e72ef01aa0b743ef9df2abb0a3527d9|CMakeLists.txt")
 fi
 # OpenSSL sources are only needed where there is no system OpenSSL to link
 # against — i.e. cross-compiled targets like Android. Desktop builds keep
 # using the platform's own libssl/libcrypto, so they skip this clone.
 # (openssl-3.5.7, an LTS release.)
 if [[ "${MEDUT_OPENSSL_SRC:-0}" == "1" ]]; then
-  DEPS+=("openssl|https://github.com/openssl/openssl.git|8cf17aaeb4599f8af87fefd810b5b5fee90fe69e|Configure")
+  DEPS+=("openssl|${GH}/openssl.git|8cf17aaeb4599f8af87fefd810b5b5fee90fe69e|Configure")
 fi
 
 for dep in "${DEPS[@]}"; do
@@ -33,6 +37,8 @@ for dep in "${DEPS[@]}"; do
   # sources nobody had reviewed.  Moving it uses checkout -f, which drops the
   # Medut patches the build applied (it re-applies them: the patch steps
   # depend on .git/HEAD) — and also any hand edits under third_party/.
+  # The remote is re-pointed first, so a tree cloned from elsewhere (an
+  # upstream repository) follows the URL pinned here.
   if [[ -f "${dir}/${marker}" ]]; then
     have=$(git -C "${dir}" rev-parse HEAD 2>/dev/null || true)
     if [[ "${have}" == "${rev}" ]]; then
@@ -40,6 +46,8 @@ for dep in "${DEPS[@]}"; do
       continue
     fi
     echo "==> ${name}: ${have:0:12} -> ${rev:0:12}"
+    git -C "${dir}" remote set-url origin "${url}" 2>/dev/null ||
+      git -C "${dir}" remote add origin "${url}"
     git -C "${dir}" fetch -q --depth 1 origin "${rev}"
     git -C "${dir}" checkout -q -f FETCH_HEAD
     continue

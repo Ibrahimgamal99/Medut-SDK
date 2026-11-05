@@ -660,7 +660,8 @@ class MedutBindings {
         int Function(medut_call_handle_t, int, ffi.Pointer<ffi.Char>)
       >();
 
-  /// Put call on hold (re-INVITE with sendonly).
+  /// Put call on hold (re-INVITE with sendonly).  MEDUT_EV_CALL_STATE
+  /// reports HELD once the peer accepts it; a refused hold is undone.
   int medut_call_hold(medut_call_handle_t call) {
     return _medut_call_hold(call);
   }
@@ -672,7 +673,8 @@ class MedutBindings {
   late final _medut_call_hold = _medut_call_holdPtr
       .asFunction<int Function(medut_call_handle_t)>();
 
-  /// Resume a held call (re-INVITE with sendrecv).
+  /// Resume a held call (re-INVITE with sendrecv).  The state returns to
+  /// ESTABLISHED once the peer accepts it, unless the peer holds us too.
   int medut_call_resume(medut_call_handle_t call) {
     return _medut_call_resume(call);
   }
@@ -684,7 +686,9 @@ class MedutBindings {
   late final _medut_call_resume = _medut_call_resumePtr
       .asFunction<int Function(medut_call_handle_t)>();
 
-  /// Return true if the call is currently on local hold.
+  /// True while the call is on hold: our own hold (from the request on,
+  /// false again if the peer refuses it) or the peer's
+  /// (medut_call_info_t.is_remote_hold tells which).
   bool medut_call_is_held(medut_call_handle_t call) {
     return _medut_call_is_held(call);
   }
@@ -995,7 +999,7 @@ class MedutBindings {
   /// platform, so an app that shuts the stack down and brings it back up has to
   /// ask for the app-owned device again.
   ///
-  /// One microphone, one speaker: baresip opens a device per call, but the app
+  /// One microphone, one speaker: the stack opens a device per call, but the app
   /// has only one of each.  The most recently opened call owns them; a second
   /// concurrent call gets silence rather than a share.
   ///
@@ -2678,10 +2682,10 @@ final class medut_ev_transfer_req_t extends ffi.Struct {
 
 /// An outgoing REFER was refused (blind or attended).
 ///
-/// The call is still up.  baresip does not close a call whose transfer failed,
-/// and neither does Medut: the caller is still on the line, usually on hold,
-/// and the app's remedy is to resume them and report the failure — not to hang
-/// up.  `reason` is the status line or cause text when the stack supplied one.
+/// The call is still up.  Medut does not close a call whose transfer failed:
+/// the caller is still on the line, usually on hold, and the app's remedy is to
+/// resume them and report the failure — not to hang up.  `reason` is the status
+/// line or cause text when the stack supplied one.
 final class medut_ev_transfer_failed_t extends ffi.Struct {
   external medut_account_handle_t account;
 
@@ -3084,7 +3088,7 @@ final class medut_config_t extends ffi.Struct {
   /// MEDUT_EV_MEDIA_STATS poll interval in ms.  Default 2000; 0 disables.
   ///
   /// This is also the master switch for RTCP accounting
-  /// (baresip `avt.rtp_stats`), so with 0 the loss/jitter/RTT/MOS fields
+  /// (in the stack's RTP streams), so with 0 the loss/jitter/RTT/MOS fields
   /// read back as zero from medut_call_get_stats() too, and every
   /// feature derived from them — quality alerts, media-stall detection and
   /// adaptive bitrate — is inert.
@@ -3217,7 +3221,7 @@ final class medut_config_t extends ffi.Struct {
   /// Terminate a call after this many seconds without inbound RTP.
   /// 0 (default) = never.
   ///
-  /// Maps to baresip's `avt.rtp_timeout`.  This is the hard, fatal bound:
+  /// The stream's RTP timeout.  This is the hard, fatal bound:
   /// the stream is closed with ETIMEDOUT and the call ends with
   /// MEDUT_ERR_TIMEOUT.  Only sendrecv streams are checked, so a held
   /// call is never torn down by it.
@@ -3236,7 +3240,7 @@ final class medut_config_t extends ffi.Struct {
   /// again with `recovering` = true when it resumes.  This is what turns
   /// "the user says they can't hear anything" into an event — a stall that
   /// is not accompanied by an address change is invisible to handover and,
-  /// with rtp_timeout_s at 0, invisible to baresip.
+  /// with rtp_timeout_s at 0, invisible to the stream.
   ///
   /// Requires stats_interval_ms > 0.  Values below one stats interval
   /// cannot be detected any sooner than that interval.
@@ -3692,7 +3696,7 @@ final class medut_call_info_t extends ffi.Struct {
   external int state;
 }
 
-const int MEDUT_VERSION_MAJOR = 1;
+const int MEDUT_VERSION_MAJOR = 2;
 
 const int MEDUT_VERSION_MINOR = 0;
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build Medut for Linux x86_64.
 # Output: dist/linux/x86_64/medut.a  +  dist/linux/x86_64/include/
+
 #
 # Prerequisites: cmake ninja gcc openssl-devel (or libssl-dev)
 #                webrtc-audio-processing-devel (build-time only; optional at runtime)
@@ -29,11 +30,13 @@ fi
 
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 BUILD_DIR="${ROOT}/build/linux-x86_64"
+DIST_ROOT="${ROOT}/dist"
 
 bash "${SCRIPT_DIR}/fetch-third-party.sh"
 
 cmake -S "${ROOT}" -B "${BUILD_DIR}" -GNinja \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  -DMEDUT_DIST_DIR="${DIST_ROOT}" \
   -DMEDUT_TLS=openssl \
   -DMEDUT_MODULES_PROFILE=desktop \
   -DMEDUT_WITH_WEBRTC_AEC="${MEDUT_WITH_WEBRTC_AEC:-ON}" \
@@ -46,7 +49,7 @@ cmake --build "${BUILD_DIR}" --target medut gen_hpp -j"$(nproc)"
 cmake --install "${BUILD_DIR}"
 
 # ── Link shared library ───────────────────────────────────────────────────────
-DIST_DIR="${ROOT}/dist/linux/x86_64"
+DIST_DIR="${DIST_ROOT}/linux/x86_64"
 SO="${DIST_DIR}/medut.so"
 echo ""
 echo "=== Linking ${SO} ==="
@@ -58,7 +61,7 @@ gcc -shared \
   -lssl -lcrypto -lz -lpthread -lm -lresolv -ldl \
   "${PULSE_LDLIB}" \
   -Wl,--default-symver \
-  -Wl,--version-script="${SCRIPT_DIR}/glibc-compat.ver" \
+  -Wl,--version-script="${SCRIPT_DIR}/exports.ver" \
   -Wl,-z,defs \
   -o "${SO}"
 

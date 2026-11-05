@@ -11,7 +11,7 @@
  *      (the old callback goes quiet), and account/call enumeration hands the
  *      new consumer back the handles the dead one held.
  *   2. cfg.audio_codec_names[] — the global string codec list — actually
- *      reaches baresip, ordered, instead of being silently dropped.
+ *      reaches the stack, ordered, instead of being silently dropped.
  *
  * No SIP server needed: registration against a black-hole address produces
  * REG_STATE events, which is all the event traffic the test needs.
@@ -33,11 +33,11 @@
 #include <unistd.h>
 #include "../include/medut.h"
 
-/* baresip/re headers — used to read back what the SDK told baresip about
- * codecs. White-box on purpose: the alternative is a live peer to negotiate
- * SDP with. */
+/* The stack's own headers — used to read back the codec list the account
+ * resolved to. White-box on purpose: the alternative is a live peer to
+ * negotiate SDP with. */
 #include <re.h>
-#include <baresip.h>
+#include "../src/sip/mdt_sip.h"
 
 #define AOR "sip:alice@192.0.2.1"
 
@@ -126,22 +126,26 @@ static void poke_events(medut_account_handle_t acct)
 
 /* ── Codec read-back ─────────────────────────────────────────────────────── */
 
-/* Join the aucodec names baresip resolved for AOR into buf, e.g.
+/* Join the codec names the stack resolved for AOR into buf, e.g.
  * "PCMU,opus". Empty when the account or its codec list is missing. */
 static void configured_codecs(char *buf, size_t sz)
 {
 	buf[0] = '\0';
 
-	struct ua *ua = uag_find_aor(AOR);
+	const struct mdt_ua *ua = NULL;
+	struct le *le;
+
+	LIST_FOREACH(&g_sip.ual, le) {
+		const struct mdt_ua *u = le->data;
+		if (!str_cmp(u->aor, AOR))
+			ua = u;
+	}
 	if (!ua) return;
-	struct account *acc = ua_account(ua);
-	if (!acc) return;
-	struct list *l = account_aucodecl(acc);
+	struct list *l = mdt_ua_aucodecl(ua);
 	if (!l) return;
 
-	struct le *le;
 	for (le = list_head(l); le; le = le->next) {
-		const struct aucodec *ac = le->data;
+		const struct mdt_aucodec *ac = le->data;
 		if (!ac || !ac->name) continue;
 		if (buf[0]) strncat(buf, ",", sz - strlen(buf) - 1);
 		strncat(buf, ac->name, sz - strlen(buf) - 1);
@@ -205,7 +209,7 @@ int main(void)
 	}
 	medut_account_register(acct);
 
-	/* ── 2. Global codec names reached baresip, in order ─────────────── */
+	/* ── 2. Global codec names reached the stack, in order ─────────────── */
 	char codecs[256];
 	configured_codecs(codecs, sizeof(codecs));
 	CHECK(strncmp(codecs, "PCMU,opus", 9) == 0,

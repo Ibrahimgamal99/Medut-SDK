@@ -25,7 +25,7 @@
 #include <windows.h>
 #include <wincrypt.h>
 #include <re.h>
-#include "../../src/medut_internal.h"
+#include "../../src/core/medut_internal.h"
 
 const char *bsdk_platform_ca_bundle(const char *dir)
 {
@@ -40,7 +40,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	store = CertOpenSystemStoreA(0, "ROOT");
 	if (!store) {
-		warning("Medut: cannot open the Windows ROOT certificate "
+		MDT_WARN("Medut: cannot open the Windows ROOT certificate "
 		        "store; TLS server verification will fail unless "
 		        "ca_cert_path is set\n");
 		return NULL;
@@ -89,7 +89,7 @@ const char *bsdk_platform_ca_bundle(const char *dir)
 
 	if (!written) {
 		(void)remove(path);
-		warning("Medut: the Windows ROOT store held no usable "
+		MDT_WARN("Medut: the Windows ROOT store held no usable "
 		        "certificates; TLS server verification will fail "
 		        "unless ca_cert_path is set\n");
 		return NULL;

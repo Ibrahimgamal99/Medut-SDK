@@ -14,7 +14,7 @@ plugins {
 }
 
 group = 'dev.medut.flutter'
-version = '1.0.0'
+version = '2.0.0'
 
 // The Kotlin SDK (bindings/kotlin) is compiled into this module from source:
 // its Kotlin, its JNI layer, and the prebuilt libmedut.so it packages. A

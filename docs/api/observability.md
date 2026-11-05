@@ -16,7 +16,7 @@ You will receive `MEDUT_EV_MEDIA_STATS` events at that interval during every act
 
 !!! warning "0 disables more than the events"
     `stats_interval_ms` is also the master switch for RTCP accounting inside
-    baresip (`avt.rtp_stats`). With it at 0 the loss, jitter, RTT and MOS fields
+    the stack's RTP streams. With it at 0 the loss, jitter, RTT and MOS fields
     read back as zero from `medut_call_get_stats()` too, and every feature
     derived from them — quality alerts, media-stall detection and adaptive
     bitrate — is inert.

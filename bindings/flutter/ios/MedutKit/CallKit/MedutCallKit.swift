@@ -109,6 +109,10 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     private var pendingAnswers: [UUID] = []
     private var pendingRejects: [UUID: UInt16] = [:]
     private var endedByAction: Set<UUID> = []
+    /// Ends this bridge asked CallKit for (requestEnd).  An end action that is
+    /// not one of these came from the system: the lock-screen or Dynamic
+    /// Island button, a headset, Siri, or a cellular call taking over.
+    private var appRequestedEnds: Set<UUID> = []
     private var placeholders: [Placeholder] = []
     private var filtered: Set<UUID> = []
     private var sessionActive = false
@@ -201,6 +205,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
                 pendingAnswers.removeAll()
                 pendingRejects.removeAll()
                 endedByAction.removeAll()
+                appRequestedEnds.removeAll()
                 placeholders.removeAll()
                 filtered.removeAll()
                 sessionActive = false
@@ -529,9 +534,15 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     }
 
     func requestEnd(_ call: Call, rejectCode: UInt16?) {
-        lock.locked { pendingRejects[call.id] = rejectCode }
+        lock.locked {
+            pendingRejects[call.id] = rejectCode
+            _ = appRequestedEnds.insert(call.id)
+        }
         request(CXEndCallAction(call: call.id)) {
-            self.lock.locked { _ = self.pendingRejects.removeValue(forKey: call.id) }
+            self.lock.locked {
+                _ = self.pendingRejects.removeValue(forKey: call.id)
+                _ = self.appRequestedEnds.remove(call.id)
+            }
             try self.end(call, rejectCode: rejectCode)
         }
     }
@@ -610,6 +621,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
                 pendingAnswers.removeAll()
                 pendingRejects.removeAll()
                 endedByAction.removeAll()
+                appRequestedEnds.removeAll()
                 placeholders.forEach { $0.expiry?.cancel() }
                 placeholders.removeAll()
                 filtered.removeAll()
@@ -647,6 +659,13 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
     }
 
     public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        // A local hangup the app never asked for: the stack's own log cannot
+        // tell it from one the app made, so say so here.
+        let byApp = lock.locked { appRequestedEnds.remove(action.callUUID) != nil }
+        if !byApp {
+            NSLog("Medut: CallKit ended call %@ from the system (lock screen, headset, Siri or another call)",
+                  action.callUUID.uuidString)
+        }
         if let call = lock.locked({ calls[action.callUUID] }) {
             let code = lock.locked { pendingRejects.removeValue(forKey: action.callUUID) }
             try? end(call, rejectCode: code)
@@ -771,7 +790,7 @@ public final class MedutCallKit: NSObject, @unchecked Sendable, CXProviderDelega
         return CXHandle(type: .generic, value: bare.isEmpty ? "unknown" : bare)
     }
 
-    /// "sip:1003@echo.example.com;transport=wss" -> "1003".
+    /// "sip:1003@pbx.example.com;transport=wss" -> "1003".
     static func userPart(_ uri: String) -> String {
         var s = uri
         for prefix in ["sips:", "sip:"] where s.hasPrefix(prefix) {

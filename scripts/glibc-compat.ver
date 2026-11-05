@@ -1,7 +1,0 @@
-{
-    global:
-        *;
-    local:
-        __isoc23_*;
-        __old_*;
-};

@@ -2,21 +2,20 @@
  * @file reinit_test.c  Gate test: medut_shutdown() → medut_init() in one
  *                      process must come back with a working stack
  *
- * What went wrong: libre_close() never unloads the module registry (re's
- * mod.c `modl` survives it) while baresip_close() frees the codec /
- * media-encryption / media-NAT lists those modules registered into.  On the
- * next medut_init(), module_load() found every module via mod_find(),
- * answered EALREADY, and never re-ran their init() — so the second stack had
- * zero codecs, no dtls_srtp and no ice, and medut_account_create() still
- * returned 0.  Hit in practice by two Flutter engines each treating the SDK
- * as their own: one engine's shutdown crippled the other's next init.
+ * What went wrong once: a shutdown that freed the codec / media-encryption /
+ * media-NAT registries without the next init re-filling them left the second
+ * stack with zero codecs, no dtls_srtp and no ice, while
+ * medut_account_create() still returned 0.  Hit in practice by two Flutter
+ * engines each treating the SDK as their own: one engine's shutdown crippled
+ * the other's next init.
  *
- * medut_shutdown() now calls mod_close() (core.c), and
+ * medut_shutdown() unregisters every codec / media encryption / media-NAT
+ * and medut_init() registers them again (core/stack.c), and
  * medut_account_create() refuses an account whose media encryption / ICE /
- * codecs are not registered (account.c) instead of handing back one that
+ * codecs are not registered (sip/ua.c) instead of handing back one that
  * would offer plain RTP.
  *
- * White-box: reads baresip's registries directly, the way reattach_test.c
+ * White-box: reads the stack's registries directly, the way reattach_test.c
  * reads the account codec list — the alternative is a live peer.
  *
  * Build (from repo root, after scripts/build-linux.sh):
@@ -31,7 +30,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <re.h>
-#include <baresip.h>
+#include "../src/sip/mdt_sip.h"
 #include "medut.h"
 
 static int g_pass = 0;
@@ -65,12 +64,19 @@ static int stack_up(void)
 /* Whether the account for AOR resolved Opus from its codec list. */
 static bool account_has_opus(const char *aor)
 {
-	struct ua *ua = uag_find_aor(aor);
-	struct account *acc = ua ? ua_account(ua) : NULL;
-	struct list *l = acc ? account_aucodecl(acc) : NULL;
+	const struct mdt_ua *ua = NULL;
+	struct list *l;
+	struct le *le;
 
-	for (struct le *le = list_head(l); le; le = le->next) {
-		const struct aucodec *ac = le->data;
+	LIST_FOREACH(&g_sip.ual, le) {
+		const struct mdt_ua *u = le->data;
+		if (!str_cmp(u->aor, aor))
+			ua = u;
+	}
+	l = ua ? mdt_ua_aucodecl(ua) : NULL;
+
+	for (le = list_head(l); le; le = le->next) {
+		const struct mdt_aucodec *ac = le->data;
 		if (ac && ac->name && !str_casecmp(ac->name, "opus"))
 			return true;
 	}
@@ -90,15 +96,15 @@ static void cycle(int n)
 		return;
 
 	/* The registries the modules fill at init(). */
-	CHECK(list_count(baresip_aucodecl()) >= 2,
+	CHECK(list_count(mdt_aucodecl()) >= 2,
 	      "cycle %d: only %u audio codecs registered\n",
-	      n, list_count(baresip_aucodecl()));
+	      n, list_count(mdt_aucodecl()));
 	/* Any channel count: mono unless cfg.opus.stereo. */
-	CHECK(aucodec_find(baresip_aucodecl(), "opus", 48000, 0) != NULL,
+	CHECK(mdt_aucodec_find(mdt_aucodecl(), "opus", 48000, 0) != NULL,
 	      "cycle %d: opus missing\n", n);
-	CHECK(menc_find(baresip_mencl(), "dtls_srtp") != NULL,
+	CHECK(mdt_menc_find(mdt_mencl(), "dtls_srtp") != NULL,
 	      "cycle %d: dtls_srtp missing\n", n);
-	CHECK(mnat_find(baresip_mnatl(), "ice") != NULL,
+	CHECK(mdt_mnat_find(mdt_mnatl(), "ice") != NULL,
 	      "cycle %d: ice missing\n", n);
 
 	/* An account that needs all three must be creatable. */
@@ -123,12 +129,10 @@ static void cycle(int n)
 	medut_shutdown();
 }
 
-/* The opus module reads its settings into globals once per init, and used to
- * write only the ones a key was present for: a later init that left a key
- * out kept the earlier value, and one mono init made every later one mono.
- * (cmake/patch-baresip-sources.cmake, job 7.) */
-extern uint32_t opus_complexity;     /* modules/opus/opus.c */
-extern int32_t  opus_packet_loss;
+/* The Opus codec keeps its settings in globals set at each init; one that
+ * kept an earlier init's value made, e.g., every later init mono after one
+ * mono init. */
+extern uint32_t mdt_opus_complexity;     /* src/codec/opus.c */
 
 static void test_opus_settings_per_init(void)
 {
@@ -147,7 +151,7 @@ static void test_opus_settings_per_init(void)
 
 	for (size_t i = 0; i < sizeof(inits) / sizeof(inits[0]); i++) {
 		medut_config_t cfg;
-		const struct aucodec *opus;
+		const struct mdt_aucodec *opus;
 
 		medut_config_init(&cfg);
 		cfg.opus.stereo             = inits[i].stereo;
@@ -157,16 +161,16 @@ static void test_opus_settings_per_init(void)
 			CHECK(false, "opus init %zu: medut_init failed\n", i);
 			continue;
 		}
-		opus = aucodec_find(baresip_aucodecl(), "opus", 48000, 0);
+		opus = mdt_aucodec_find(mdt_aucodecl(), "opus", 48000, 0);
 		CHECK(opus && opus->ch == inits[i].want_ch,
 		      "opus init %zu: %u channels, want %u\n", i,
 		      opus ? opus->ch : 0, inits[i].want_ch);
-		CHECK(opus_complexity == inits[i].want_complexity,
+		CHECK(mdt_opus_complexity == inits[i].want_complexity,
 		      "opus init %zu: complexity %u, want %u\n", i,
-		      opus_complexity, inits[i].want_complexity);
-		CHECK(opus_packet_loss == inits[i].want_loss,
+		      mdt_opus_complexity, inits[i].want_complexity);
+		CHECK(g_mdt_opus_loss == inits[i].want_loss,
 		      "opus init %zu: expected loss %d, want %d\n", i,
-		      opus_packet_loss, inits[i].want_loss);
+		      g_mdt_opus_loss, inits[i].want_loss);
 		medut_shutdown();
 	}
 }
@@ -177,7 +181,7 @@ static void test_create_refuses_on_empty_registry(void)
 {
 	medut_account_config_t ac;
 	medut_account_handle_t h = NULL;
-	struct menc *dtls;
+	struct mdt_menc *dtls;
 	int err;
 
 	if (stack_up())
@@ -185,7 +189,7 @@ static void test_create_refuses_on_empty_registry(void)
 
 	/* Take dtls_srtp out of the registry (what an un-reinitialised
 	 * module set looked like), then ask for it. */
-	dtls = (struct menc *)menc_find(baresip_mencl(), "dtls_srtp");
+	dtls = (struct mdt_menc *)mdt_menc_find(mdt_mencl(), "dtls_srtp");
 	CHECK(dtls != NULL, "dtls_srtp not registered before the test\n");
 	if (dtls)
 		list_unlink(&dtls->le);
@@ -204,7 +208,7 @@ static void test_create_refuses_on_empty_registry(void)
 
 	/* Put it back so shutdown's module close finds what it expects. */
 	if (dtls)
-		list_append(baresip_mencl(), &dtls->le, dtls);
+		list_append(mdt_mencl(), &dtls->le, dtls);
 
 	medut_shutdown();
 }

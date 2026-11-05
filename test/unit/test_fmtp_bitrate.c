@@ -2,7 +2,7 @@
  * @file test_fmtp_bitrate.c  Unit tests for the adaptive-bitrate fmtp rewriter
  *
  * bsdk_adapt_fmtp_set_bitrate() is what makes adaptive bitrate safe.  The
- * obvious alternative — baresip's audio_set_bitrate() — re-runs the encoder
+ * obvious alternative — the stack's audio_set_bitrate() — re-runs the encoder
  * update with a NULL fmtp, so Opus re-derives useinbandfec, usedtx, cbr and
  * stereo from defaults and quietly drops whatever was negotiated.  Dropping
  * FEC at the moment the link needs it is the exact opposite of the intent, so
@@ -13,15 +13,14 @@
  * its own previous output.  A parameter dropped, duplicated or corrupted here
  * silently changes how audio is encoded, which is why it gets its own test.
  *
- * Links src/adapt.c against libre only.  The baresip and Medut symbols the
- * rest of that file references are stubbed below: pulling in libbaresip would
- * drag every audio backend the sysroot happens to have been built with.
+ * Links src/api/adapt.c against libre only.  The stack (src/core/mdt.h)
+ * and Medut symbols the rest of that file references are stubbed below.
  */
 
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "../../src/medut_internal.h"
+#include "../../src/api/bsdk.h"
 
 static int g_pass, g_fail;
 
@@ -36,7 +35,6 @@ static int g_pass, g_fail;
  * rewriter under test. */
 
 struct bsdk_ctx g_bsdk;
-int32_t opus_packet_loss;   /* modules/opus/opus.c */
 
 void bsdk_post_quality_alert(struct medut_call *lc,
                              medut_quality_issue_t issue,
@@ -51,44 +49,34 @@ int bsdk_dispatch_sync(void (*fn)(void *), void *arg)
 	return 0;
 }
 
-struct audio *call_audio(const struct call *call) { (void)call; return NULL; }
-struct stream *audio_strm(const struct audio *au) { (void)au; return NULL; }
-bool call_is_onhold(const struct call *call) { (void)call; return false; }
-void call_enable_rtp_timeout(struct call *call, uint32_t ms)
+/* The engine seam (src/core/mdt.h): no call has media here. */
+int mdt_call_rfmt(const struct mdt_call *ec, struct mdt_rfmt *rf)
 {
-	(void)call; (void)ms;
+	(void)ec; memset(rf, 0, sizeof(*rf)); return ENOENT;
 }
-void stream_enable_rtp_timeout(struct stream *strm, uint32_t ms)
+int mdt_call_encoder_set(struct mdt_call *ec, const char *params,
+                         int32_t loss_pct)
 {
-	(void)strm; (void)ms;
-}
-struct sdp_media *stream_sdpmedia(const struct stream *strm)
-{
-	(void)strm; return NULL;
-}
-int audio_encoder_set(struct audio *a, const struct aucodec *ac, int pt,
-                      const char *params)
-{
-	(void)a; (void)ac; (void)pt; (void)params;
+	(void)ec; (void)params; (void)loss_pct;
 	return 0;
 }
-
-/* The stall check reads whether media setup is still under way: no streams,
- * nothing encrypting, no ICE, and the netmon seam it would call. */
-static struct list g_streaml = LIST_INIT;
-struct list *call_streaml(const struct call *call)
+void mdt_media_expected_loss(int32_t loss_pct) { (void)loss_pct; }
+bool mdt_call_is_onhold(const struct mdt_call *ec) { (void)ec; return false; }
+int mdt_call_set_rtp_timeout(struct mdt_call *ec, uint32_t ms)
 {
-	(void)call; return &g_streaml;
+	(void)ec; (void)ms; return 0;
 }
-bool stream_is_secure(const struct stream *strm) { (void)strm; return true; }
+
+/* The stall check reads whether media setup is still under way: nothing
+ * encrypting, no ICE, and the netmon seam it would call. */
+bool mdt_call_menc_pending(const struct mdt_call *ec) { (void)ec; return false; }
 bool bsdk_ice_setup_pending(void *call) { (void)call; return false; }
 void bsdk_netmon_call_stalled(struct medut_call *lc) { (void)lc; }
 
-/* baresip's info() macro expands to this; its implementation lives in
- * libbaresip's log.c, which the test deliberately does not link. */
-void _info(bool safe, const char *fmt, ...)
+/* The stack's logger (bsdk.h); core/stack.c is not linked. */
+void mdt_logf(bool safe, enum mdt_log_level level, const char *fmt, ...)
 {
-	(void)safe; (void)fmt;
+	(void)safe; (void)level; (void)fmt;
 }
 
 /* ── Helper ──────────────────────────────────────────────────────────────── */

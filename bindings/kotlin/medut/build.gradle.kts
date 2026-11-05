@@ -13,7 +13,7 @@ val jniLibsDir: String = (findProperty("medut.jniLibsDir") as String?)
 val medutInclude: String = rootDir.resolve("../../include").canonicalPath
 
 group = "dev.medut"
-version = "1.0.0"
+version = "2.0.0"
 
 android {
     namespace = "dev.medut"

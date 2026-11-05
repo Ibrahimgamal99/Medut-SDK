@@ -1,7 +1,7 @@
 # Medut
 
-A general-purpose SIP client SDK built on [baresip](https://github.com/baresip/baresip)
-and [libre](https://github.com/baresip/re). It registers against any
+A general-purpose SIP client SDK with its own SIP and media stack, built on
+[libre](https://github.com/baresip/re). It registers against any
 standards-compliant SIP server, ships no UI, and imposes no call flow —
 everything app-specific is configuration you pass in.
 
@@ -14,7 +14,7 @@ everything app-specific is configuration you pass in.
 | **SIP** | INVITE, BYE, REGISTER, MESSAGE, SUBSCRIBE/NOTIFY, REFER (blind + attended, plus accept/reject of an incoming REFER), PRACK/100rel |
 | **WebRTC media** | DTLS-SRTP, SDES, ICE, STUN, TURN, RTCP-mux |
 | **Transports** | UDP, TCP, TLS, WebSocket, WSS |
-| **Audio** | Opus, G.711 (PCMU/PCMA), G.722, G.726; AEC, NS, AGC; PCM tap, WAV recording, device hot-switch, app-owned audio device |
+| **Audio** | Opus, G.711 (PCMU/PCMA); AEC, NS, AGC; PCM tap, WAV recording, device hot-switch, app-owned audio device |
 | **Mobility** | Wi-Fi ↔ 4G/5G handover with media verification, `RECONNECTING` registration state, RFC 8599 push |
 | **Degraded links** | Media-stall alerts, RTP timeout, OPTIONS keepalive, SRV failover, adaptive Opus bitrate |
 | **Observability** | RTCP stats, MOS (E-model + simplified, per direction), quality alerts, SIP trace, pcap, SDP diff |
@@ -30,7 +30,7 @@ everything app-specific is configuration you pass in.
 | Linux | x86_64 | OpenSSL (embedded) | `dist/linux/x86_64/medut.so` |
 | macOS | x86_64 + arm64 (universal) | OpenSSL (embedded) | `dist/macos/universal/medut.dylib` |
 | Windows | x64 | OpenSSL (embedded via vcpkg) | `dist\windows\x64\medut.dll` |
-| Android | arm64-v8a, armeabi-v7a, x86_64 | OpenSSL (embedded, built from source) | `dist/android/<ABI>/medut.so` |
+| Android | arm64-v8a, armeabi-v7a, x86_64 | OpenSSL (embedded, built from source) | `dist/android/<ABI>/libmedut.so` |
 | iOS | device + simulator | OpenSSL (embedded, built from source) | `dist/ios/Medut.xcframework` |
 
 Each platform build script produces both the static archive (`medut.a` / `bare.lib`) and the shared library in one step. Shared libraries are **fully self-contained** — consumers need no extra packages at runtime.
@@ -45,7 +45,7 @@ Each platform build script produces both the static archive (`medut.a` / `bare.l
 | Python | cffi | `bindings/python/` |
 | Kotlin (Android) | JNI, plus Telecom, push wake-up and an account store | `bindings/kotlin/` |
 | Swift (iOS) | Swift package over the C module, plus CallKit, PushKit wake-up and an account store | `bindings/swift/` |
-| Flutter | Pigeon over the Kotlin and Swift SDKs on mobile; `dart:ffi` on desktop | `bindings/flutter/` |
+| Flutter | Pigeon over the Kotlin and Swift SDKs on Android and iOS; dart:ffi on Linux, macOS and Windows | `bindings/flutter/` |
 
 On mobile the native SDK owns the stack for the life of the process: it can
 start at launch or from a push and ring a call with no UI up. The Flutter
@@ -85,6 +85,13 @@ all three languages side by side.
 
 ---
 
+## Inside the SDK
+
+- [How Medut is built](architecture.md) — the layers under `src/`, threads,
+  the path of a registration and a call, what is not ported yet
+
+---
+
 ## Dial refusals
 
 A PBX dialplan typically refuses a call the caller is not allowed to place with
@@ -102,19 +109,19 @@ outside the SDK. An app on the SDK therefore has the refusal but not yet its rea
 and should show the generic text until the websocket event arrives.
 
 **Planned:** the dialplan also sends a SIP MESSAGE from
-`sip:echo-dial-blocked@<pbx>`, addressed to the device that dialled so that a
+`sip:dial-blocked@<pbx>`, addressed to the device that dialled so that a
 web and a mobile client on one extension do not receive each other's messages.
 That needs nothing new from the SDK when it lands — it arrives as
 `MEDUT_EV_MESSAGE`, with `from_uri` naming the sender and `body` holding the
 text — so an app can be written against it now:
 
 - On `FAILED` with `MEDUT_ERR_FORBIDDEN`, show the generic refusal.
-- On a message from `echo-dial-blocked@…`, show its body as the reason,
+- On a message from `dial-blocked@…`, show its body as the reason,
   replacing the generic text if the failure has already been shown, or keeping
   it ready for the failure that is about to arrive. The two are independent and
   either can arrive first, so neither may wait on the other.
 
-Matching only on the user part (`echo-dial-blocked`) keeps the check working
+Matching only on the user part (`dial-blocked`) keeps the check working
 across the PBX hostnames a deployment uses.
 
 ---
