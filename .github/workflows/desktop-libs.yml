@@ -165,6 +165,22 @@ jobs:
       # stack, registers against a black-hole registrar, detaches and
       # reattaches, shuts down. x64 only: the Flutter SDK has no Windows
       # arm64 host build to run it on.
+      # Windows Error Reporting writes a minidump if the smoke test's
+      # process crashes, so the failure step below can print where.  Set
+      # before the run that fails, which is the one without the step trace
+      # (the trace's output slows shutdown and has hidden the crash).
+      - name: Collect crash dumps of the smoke test
+        if: matrix.arch == 'x64'
+        run: |
+          $dumps = "$env:RUNNER_TEMP\crashdumps"
+          New-Item -ItemType Directory -Force $dumps | Out-Null
+          foreach ($exe in "flutter_tester.exe", "dart.exe") {
+            $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\$exe"
+            New-Item -Force $key | Out-Null
+            New-ItemProperty -Force $key -Name DumpFolder -PropertyType ExpandString -Value $dumps | Out-Null
+            New-ItemProperty -Force $key -Name DumpType -PropertyType DWord -Value 1 | Out-Null
+          }
+
       - name: FFI smoke test
         id: smoke
         if: matrix.arch == 'x64'
@@ -185,30 +201,26 @@ jobs:
       - name: FFI smoke test, again with the core's step trace (on failure)
         if: failure() && steps.smoke.outcome == 'failure'
         working-directory: bindings/flutter
-        env:
-          MEDUT_DEBUG_INIT: "1"
         run: |
-          # Windows Error Reporting writes a minidump when the test process
-          # crashes, so the stack of the crash can be printed below.
+          # 1. Where the failing run crashed: the exception and the crashing
+          #    thread's stack from its minidump, with medut.pdb for names.
           $dumps = "$env:RUNNER_TEMP\crashdumps"
-          New-Item -ItemType Directory -Force $dumps | Out-Null
-          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\flutter_tester.exe"
-          New-Item -Force $key | Out-Null
-          New-ItemProperty -Force $key -Name DumpFolder -PropertyType ExpandString -Value $dumps | Out-Null
-          New-ItemProperty -Force $key -Name DumpType -PropertyType DWord -Value 1 | Out-Null
-          flutter test --reporter expanded test/medut_smoke_test.dart
-          # The exception and the crashing thread's stack, from the first
-          # dump: which module (medut.dll, the CRT, ntdll's heap) and which
-          # exported function the crash is nearest to.
-          $dump = Get-ChildItem $dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
           $cdb = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($dump -and $cdb) {
-            & $cdb.FullName -z $dump.FullName -c ".exr -1; .ecxr; kb 40; lm m medut*; q"
-          } elseif ($dump) {
-            Write-Host "dump at $($dump.FullName), but no cdb.exe to read it"
-          } else {
-            Write-Host "no crash dump was written"
+          $syms = (Resolve-Path "..\..\dist\windows\${{ matrix.arch }}").Path
+          $found = Get-ChildItem $dumps -Filter *.dmp -ErrorAction SilentlyContinue
+          if (-not $found) { Write-Host "no crash dump from the failing run" }
+          foreach ($dump in $found) {
+            Write-Host "=== $($dump.Name)"
+            if ($cdb) {
+              & $cdb.FullName -z $dump.FullName -y "$syms;srv*" -c ".exr -1; .ecxr; kb 40; ~*k 12; lm m medut*; q"
+            } else {
+              Write-Host "no cdb.exe on this runner to read it"
+            }
           }
+          # 2. The same test again with the core's own step trace on
+          #    (MEDUT_DEBUG_INIT prints each init and shutdown step).
+          $env:MEDUT_DEBUG_INIT = "1"
+          flutter test --reporter expanded test/medut_smoke_test.dart
           exit 1
 
       - name: Upload plugin library

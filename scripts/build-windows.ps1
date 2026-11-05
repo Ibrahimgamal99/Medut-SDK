@@ -163,7 +163,12 @@ if (-not $LinkExe -or -not (Test-Path $LinkExe)) {
 }
 
 # Run link.exe through cmd with vcvarsall environment
-$LinkArgs = "/DLL /NOLOGO /DEF:`"$DefPath`" /OUT:`"$DllPath`" /WHOLEARCHIVE:`"$StaticLib`" `"$SslLib`" `"$CryptoLib`" `"$ZlibLib`" ws2_32.lib iphlpapi.lib crypt32.lib secur32.lib bcrypt.lib ole32.lib oleaut32.lib avrt.lib advapi32.lib user32.lib shell32.lib qwave.lib"
+# /DEBUG writes medut.pdb next to the DLL, so a crash in it can be read with
+# function names (CI prints such a stack when the smoke test crashes).
+# /OPT:REF /OPT:ICF keep the DLL optimised as it is without /DEBUG, and
+# /PDBALTPATH records only the file name, not this machine's path.
+$PdbPath = Join-Path $DistDir "medut.pdb"
+$LinkArgs = "/DLL /NOLOGO /DEBUG /OPT:REF /OPT:ICF /PDB:`"$PdbPath`" /PDBALTPATH:medut.pdb /DEF:`"$DefPath`" /OUT:`"$DllPath`" /WHOLEARCHIVE:`"$StaticLib`" `"$SslLib`" `"$CryptoLib`" `"$ZlibLib`" ws2_32.lib iphlpapi.lib crypt32.lib secur32.lib bcrypt.lib ole32.lib oleaut32.lib avrt.lib advapi32.lib user32.lib shell32.lib qwave.lib"
 
 if (Test-Path $VcvarsAll) {
     # Use call operator with properly escaped arguments
