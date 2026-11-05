@@ -241,7 +241,7 @@ for SLICE in device simulator; do
   # call whose WebSocket died can never be re-INVITEd onto a new one
   # (src/api/netmon.c).
   if ! grep -q '_sipsess_reinvite_abandon' <<<"${DEFINED}" ||
-     ! grep -q '_echo_call_reinvite_abandon' <<<"${DEFINED}"; then
+     ! grep -q '_mdt_call_reinvite_abandon' <<<"${DEFINED}"; then
     echo "ERROR: ${SLICE}: re-INVITE abandon missing (libre hunk U / src/core not built?)" >&2
     exit 1
   fi
