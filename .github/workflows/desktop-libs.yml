@@ -158,6 +158,7 @@ jobs:
       # reattaches, shuts down. x64 only: the Flutter SDK has no Windows
       # arm64 host build to run it on.
       - name: FFI smoke test
+        id: smoke
         if: matrix.arch == 'x64'
         working-directory: bindings/flutter
         run: |
@@ -166,6 +167,21 @@ jobs:
           # The default GitHub reporter folds them, and a test that died with
           # the process left only "N tests passed" and an exit code.
           flutter test --reporter expanded test/medut_smoke_test.dart
+
+      # Only when the smoke test failed: run it again with the core's own
+      # step trace on (MEDUT_DEBUG_INIT prints every init and shutdown step,
+      # "[bsdk] ...", to the test process's stdout, which flutter test
+      # forwards).  When the process dies rather than failing an expectation,
+      # the last of those lines names the step it died in.  The job stays
+      # failed either way.
+      - name: FFI smoke test, again with the core's step trace (on failure)
+        if: failure() && steps.smoke.outcome == 'failure'
+        working-directory: bindings/flutter
+        env:
+          MEDUT_DEBUG_INIT: "1"
+        run: |
+          flutter test --reporter expanded test/medut_smoke_test.dart
+          exit 1
 
       - name: Upload plugin library
         uses: actions/upload-artifact@v4
