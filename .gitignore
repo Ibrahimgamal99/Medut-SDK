@@ -101,6 +101,8 @@ desktop.ini
 /test/unit/test_aurecv_plc
 /test/unit/test_jbuf_adapt
 /test/unit/test_stats_loss
+/test/unit/test_dns_parallel
+/test/unit/test_sipreg_takeover
 
 # Swift package: SwiftPM state.  Frameworks/Medut.xcframework is committed
 # (scripts/build-ios.sh or scripts/fetch-prebuilt.sh refresh it).
