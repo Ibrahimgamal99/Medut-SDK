@@ -73,6 +73,7 @@ run thread_safety_test          "-fsanitize=thread"   a
 run event_queue_accounting_test ""                    so
 run push_contact_test           ""                    so
 run reconnect_state_test        ""                    so
+run reattach_shutdown_test      ""                    so
 
 echo "== ${pass} passed, ${fail} failed${failed:+: ${failed[*]}}"
 [[ ${fail} -eq 0 ]]
