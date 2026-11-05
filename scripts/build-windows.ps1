@@ -1,17 +1,21 @@
-# Build Medut for Windows x64.
-# Output: dist\windows\x64\medut.dll + medut.lib (import lib) + bare.lib + dist\windows\x64\include\
+# Build Medut for Windows x64 or arm64 (-Arch; defaults to the host's).
+# Output: dist\windows\<arch>\medut.dll + medut.lib (import lib) + bare.lib + include\,
+#         and a copy of medut.dll in bindings\flutter\windows\<arch>\ for the Flutter plugin.
 #
 # Prerequisites:
 #   - Visual Studio 2022 (or 2019)
-#   - vcpkg with x64-windows-static-md triplet:
-#       vcpkg install openssl zlib abseil:x64-windows-static-md
+#   - vcpkg with the <arch>-windows-static-md triplet:
+#       vcpkg install openssl:x64-windows-static-md zlib:x64-windows-static-md
+#     (arm64-windows-static-md for -Arch arm64)
 #   - cmake (in PATH)
 # Audio: WASAPI (built into Windows — no extra install needed)
 # Runtime: MSVC CRT (dynamic, always present on Windows desktop)
 
 param(
     [string]$BuildType = "Release",
-    [string]$VcpkgRoot = $env:VCPKG_ROOT
+    [string]$VcpkgRoot = $env:VCPKG_ROOT,
+    [ValidateSet("", "x64", "arm64")]
+    [string]$Arch = ""
 )
 
 Set-StrictMode -Version Latest
@@ -27,7 +31,15 @@ if ($PSVersionTable.PSVersion.Major -ge 5) {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $ScriptDir
-$BuildDir = Join-Path $Root "build\windows-x64"
+
+# The machine this runs on, and the one the DLL is for (the host's unless
+# -Arch says otherwise). MSVC names its tool directories after both.
+$HostArch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+if (-not $Arch) { $Arch = $HostArch }
+$VsPlatform = if ($Arch -eq "arm64") { "ARM64" } else { "x64" }
+$Triplet = "$Arch-windows-static-md"
+$DistDir = Join-Path $Root "dist\windows\$Arch"
+$BuildDir = Join-Path $Root "build\windows-$Arch"
 
 if (-not $VcpkgRoot) {
     $VcpkgRoot = @("C:\vcpkg","D:\vcpkg","$env:USERPROFILE\vcpkg") |
@@ -49,11 +61,21 @@ Write-Host "=== Fetching third_party ==="
 & (Join-Path $ScriptDir "fetch-third-party.ps1")
 if ($LASTEXITCODE -ne 0) { Write-Error "third_party fetch failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 
-Write-Host "=== Configuring Windows x64 ==="
+# The Visual Studio generator is named after the installed version (17 is
+# 2022, 18 is 2026); runner images do not all carry the same one.
+$VsWhereExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VsMajor = (& $VsWhereExe -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationVersion) -replace '\..*$', ''
+$VsGenerator = switch ($VsMajor) {
+    "17" { "Visual Studio 17 2022" }
+    "18" { "Visual Studio 18 2026" }
+    default { Write-Error "No supported Visual Studio with C++ tools found (vswhere: '$VsMajor')"; exit 1 }
+}
+
+Write-Host "=== Configuring Windows $Arch (on $HostArch, $VsGenerator) ==="
 cmake -S $Root -B $BuildDir `
-    -G "Visual Studio 17 2022" -A x64 `
+    -G $VsGenerator -A $VsPlatform `
     "-DCMAKE_TOOLCHAIN_FILE=$Toolchain" `
-    -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
+    "-DVCPKG_TARGET_TRIPLET=$Triplet" `
     -DMEDUT_TLS=openssl `
     -DMEDUT_MODULES_PROFILE=desktop `
     -DMEDUT_WITH_WEBRTC_AEC=OFF
@@ -66,7 +88,7 @@ Write-Host "=== Installing ==="
 cmake --install $BuildDir --config $BuildType
 if ($LASTEXITCODE -ne 0) { Write-Error "cmake --install failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 
-$StaticLib = Join-Path $Root "dist\windows\x64\bare.lib"
+$StaticLib = Join-Path $DistDir "bare.lib"
 if (Test-Path $StaticLib) {
     $size = (Get-Item $StaticLib).Length / 1MB
     Write-Host ""
@@ -77,10 +99,10 @@ if (Test-Path $StaticLib) {
 }
 
 # ── Link shared library (DLL, no extra runtime deps beyond MSVC CRT) ─────────
-# vcpkg x64-windows-static-md: OpenSSL + zlib statically embedded.
+# vcpkg <arch>-windows-static-md: OpenSSL + zlib statically embedded.
 # opus is already in bare.lib (built from third_party/opus by CMake).
 # Windows system libs (ws2_32/crypt32/ole32/avrt etc.) are always present.
-$VcpkgLibs  = Join-Path $VcpkgRoot "installed\x64-windows-static-md\lib"
+$VcpkgLibs  = Join-Path $VcpkgRoot "installed\$Triplet\lib"
 $SslLib     = Join-Path $VcpkgLibs "libssl.lib"
 $CryptoLib  = Join-Path $VcpkgLibs "libcrypto.lib"
 
@@ -93,20 +115,20 @@ if (-not (Test-Path $ZlibLib)) {
 
 # Check if vcpkg libraries exist
 if (-not (Test-Path $SslLib)) {
-    Write-Error "OpenSSL library not found at $SslLib. Please install: vcpkg install openssl:x64-windows-static-md"
+    Write-Error "OpenSSL library not found at $SslLib. Please install: vcpkg install openssl:$Triplet"
     exit 1
 }
 if (-not (Test-Path $CryptoLib)) {
-    Write-Error "Crypto library not found at $CryptoLib. Please install: vcpkg install openssl:x64-windows-static-md"
+    Write-Error "Crypto library not found at $CryptoLib. Please install: vcpkg install openssl:$Triplet"
     exit 1
 }
 if (-not (Test-Path $ZlibLib)) {
-    Write-Error "Zlib library not found at $ZlibLib. Please install: vcpkg install zlib:x64-windows-static-md"
+    Write-Error "Zlib library not found at $ZlibLib. Please install: vcpkg install zlib:$Triplet"
     exit 1
 }
 
-$DllPath = Join-Path $Root "dist\windows\x64\medut.dll"
-$DefPath = Join-Path $Root "dist\windows\x64\medut.def"
+$DllPath = Join-Path $DistDir "medut.dll"
+$DefPath = Join-Path $DistDir "medut.def"
 $HeaderPath = Join-Path $Root "include\medut.h"
 
 Write-Host ""
@@ -125,10 +147,10 @@ Write-Host ""
 Write-Host "=== Linking $DllPath ==="
 
 # Find link.exe and set up VS environment
-$VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VsWhere = $VsWhereExe
 if (Test-Path $VsWhere) {
-    $VsPath = & $VsWhere -latest -property installationPath
-    $LinkExe = Join-Path $VsPath "VC\Tools\MSVC\*\bin\Hostx64\x64\link.exe"
+    $VsPath = & $VsWhere -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+    $LinkExe = Join-Path $VsPath "VC\Tools\MSVC\*\bin\Host$HostArch\$Arch\link.exe"
     $LinkExe = (Get-Item $LinkExe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
     
     # Find vcvarsall.bat to set up environment
@@ -145,15 +167,30 @@ $LinkArgs = "/DLL /NOLOGO /DEF:`"$DefPath`" /OUT:`"$DllPath`" /WHOLEARCHIVE:`"$S
 
 if (Test-Path $VcvarsAll) {
     # Use call operator with properly escaped arguments
-    $BatContent = "@echo off`ncall `"$VcvarsAll`" x64 >nul 2>&1`n`"$LinkExe`" $LinkArgs`n"
+    # vcvarsall names a native toolset by its arch, a cross one host_target.
+    $VcvarsArch = if ($HostArch -eq $Arch) { $Arch } else { "$($HostArch)_$Arch" }
+    $BatContent = "@echo off`ncall `"$VcvarsAll`" $VcvarsArch >nul 2>&1`n`"$LinkExe`" $LinkArgs`n"
     $TempBat = Join-Path $env:TEMP "link_medut.bat"
     $BatContent | Out-File -FilePath $TempBat -Encoding ASCII
     & cmd /c $TempBat
+    $LinkExit = $LASTEXITCODE
     Remove-Item $TempBat -ErrorAction SilentlyContinue
 } else {
     # Fallback: try running link.exe directly (may fail if SDK paths not set)
     & $LinkExe /DLL /NOLOGO "/DEF:$DefPath" "/OUT:$DllPath" "/WHOLEARCHIVE:$StaticLib" $SslLib $CryptoLib $ZlibLib ws2_32.lib iphlpapi.lib crypt32.lib secur32.lib bcrypt.lib ole32.lib oleaut32.lib avrt.lib advapi32.lib user32.lib shell32.lib qwave.lib
+    $LinkExit = $LASTEXITCODE
 }
+if ($LinkExit -ne 0 -or -not (Test-Path $DllPath)) {
+    Write-Error "link.exe failed (exit $LinkExit)"
+    exit 1
+}
+
+# ── Stage for the Flutter plugin ─────────────────────────────────────────────
+# The plugin's windows\CMakeLists.txt bundles this committed copy into the app.
+$PluginDll = Join-Path $Root "bindings\flutter\windows\$Arch\medut.dll"
+New-Item -ItemType Directory -Force (Split-Path -Parent $PluginDll) | Out-Null
+Copy-Item $DllPath $PluginDll -Force
+Write-Host "Staged $PluginDll"
 
 Write-Host ""
 Write-Host "Done. Output:"

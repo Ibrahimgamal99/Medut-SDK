@@ -22,8 +22,12 @@ _deps/
 # ...except the prebuilt Android core the Kotlin binding (and through it the
 # Flutter plugin) ships
 !bindings/kotlin/medut/src/main/jniLibs/**/*.so
+# ...and the desktop cores the Flutter plugin bundles (scripts/build-linux.sh,
+# .github/workflows/desktop-libs.yml)
+!bindings/flutter/linux/*/medut.so
 *.dylib
 *.dll
+!bindings/flutter/windows/*/medut.dll
 *.lib
 *.exe
 *.out
@@ -102,3 +106,6 @@ desktop.ini
 # (scripts/build-ios.sh or scripts/fetch-prebuilt.sh refresh it).
 bindings/swift/.build/
 bindings/swift/.swiftpm/
+
+# Build-only dependencies scripts/build-linux-portable.sh compiles (CI caches it)
+.cache/

@@ -486,6 +486,7 @@ struct AccountConfig {
         acfg.turn_user    = cstr_or_null(turn_user);
         acfg.turn_pass    = cstr_or_null(turn_pass);
         acfg.verify_tls   = verify_tls;
+        acfg.verify_tls_set = true;
         acfg.dtmf_mode    = dtmf_mode;
 
         /* Per-account codec override via audio_codec_names[] */
@@ -709,9 +710,6 @@ int main(int argc, char* argv[])
     sdk.config().log_level         = 0;  /* errors only; 3 = debug for audio troubleshooting */
     sdk.config().trace_sip         = false;
     sdk.config().prefer_ipv6       = false;
-    /* Certificate checking is SDK-wide: the account's verify_tls alone does
-     * not turn it off, so the JSON flag is applied here. */
-    sdk.config().verify_server     = cfg.verify_tls;
     /* Desktop audio.  WebRTC AEC3 cancels echo while both sides talk; on a
      * build or machine without it, init falls back to the half-duplex
      * suppressor.  A raw laptop mic also wants noise suppression and AGC. */

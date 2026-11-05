@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-// Force old glibc symbol versions — target glibc >= 2.2.5
+// Force old glibc symbol versions for the C23 scanf/strto* family.
 // This file should be compiled and linked into medut.so
 
 // ── Strategy ────────────────────────────────────────────────────────────────
@@ -15,12 +15,28 @@
 // only satisfy the undefined refs from inside medut.a without polluting the
 // global namespace or intercepting calls from other libraries.
 
-__asm__(".symver __old_vfscanf,vfscanf@GLIBC_2.2.5");
-__asm__(".symver __old_vsscanf,vsscanf@GLIBC_2.2.5");
-__asm__(".symver __old_strtol,strtol@GLIBC_2.2.5");
-__asm__(".symver __old_strtoul,strtoul@GLIBC_2.2.5");
-__asm__(".symver __old_strtoll,strtoll@GLIBC_2.2.5");
-__asm__(".symver __old_strtoull,strtoull@GLIBC_2.2.5");
+//
+// Older headers (glibc < 2.38, e.g. the manylinux2014 build image) never emit
+// __isoc23_* references, so there is nothing to shim and the file is empty.
+//
+// The old ABI is each architecture's base glibc version: 2.2.5 on x86_64,
+// 2.17 on aarch64 (the first glibc with an aarch64 port).
+#if defined(__GLIBC__) && __GLIBC_PREREQ(2, 38)
+
+#if defined(__x86_64__)
+#  define BSDK_GLIBC_BASE "GLIBC_2.2.5"
+#elif defined(__aarch64__)
+#  define BSDK_GLIBC_BASE "GLIBC_2.17"
+#else
+#  error "glibc_symver.c: no base glibc version for this architecture"
+#endif
+
+__asm__(".symver __old_vfscanf,vfscanf@" BSDK_GLIBC_BASE);
+__asm__(".symver __old_vsscanf,vsscanf@" BSDK_GLIBC_BASE);
+__asm__(".symver __old_strtol,strtol@" BSDK_GLIBC_BASE);
+__asm__(".symver __old_strtoul,strtoul@" BSDK_GLIBC_BASE);
+__asm__(".symver __old_strtoll,strtoll@" BSDK_GLIBC_BASE);
+__asm__(".symver __old_strtoull,strtoull@" BSDK_GLIBC_BASE);
 
 extern int   __old_vfscanf(FILE *, const char *, va_list);
 extern int   __old_vsscanf(const char *, const char *, va_list);
@@ -68,3 +84,5 @@ long long __isoc23_strtoll(const char *nptr, char **endptr, int base) {
 unsigned long long __isoc23_strtoull(const char *nptr, char **endptr, int base) {
     return __old_strtoull(nptr, endptr, base);
 }
+
+#endif /* glibc >= 2.38 */

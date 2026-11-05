@@ -12,6 +12,9 @@ data class MedutError(val code: Code, val rawValue: Int = STATE) {
     enum class Code {
         INVALID_ARGUMENT, OUT_OF_MEMORY, INVALID_STATE, DNS, TRANSPORT, AUTHENTICATION,
         SERVER_ERROR, WEBSOCKET_REJECTED, TIMEOUT, ALREADY, FORBIDDEN,
+        /** The server's TLS certificate was rejected (wrong host name, expired,
+         *  untrusted).  Registration stops retrying. */
+        TLS_CERTIFICATE,
         /** [Medut.start] was not called, or [Medut.shutdown] already ran. */
         NOT_RUNNING,
         /** The call has ended; nothing more can be done with it. */
@@ -53,6 +56,7 @@ data class MedutError(val code: Code, val rawValue: Int = STATE) {
                 -9 -> Code.TIMEOUT
                 -10 -> Code.ALREADY
                 -11 -> Code.FORBIDDEN
+                -12 -> Code.TLS_CERTIFICATE
                 else -> Code.UNKNOWN
             }
         }

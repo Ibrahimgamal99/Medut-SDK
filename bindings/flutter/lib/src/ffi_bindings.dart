@@ -1996,6 +1996,15 @@ abstract class medut_error_t {
   /// itself was rejected.  Appended at the end of the enum so an app
   /// built against an older header keeps its own numbering.
   static const int MEDUT_ERR_FORBIDDEN = -11;
+
+  /// The server's TLS certificate failed verification — it names another
+  /// host, has expired, or does not chain to a trusted root.  Covers SIP
+  /// over TLS and WSS.  The event's error_str carries OpenSSL's reason
+  /// ("hostname mismatch", ...).  A registration that hits this reports
+  /// FAILED rather than retrying, since the certificate will be the same
+  /// next time; a network change still gets one fresh attempt, which is
+  /// what clears a captive portal intercepting the connection.
+  static const int MEDUT_ERR_TLS_CERT = -12;
 }
 
 /// ── Call states ────────────────────────────────────────────────────────────
@@ -3499,7 +3508,7 @@ final class medut_account_config_t extends ffi.Struct {
   /// alias for outbound; NULL = auto
   external ffi.Pointer<ffi.Char> outbound_proxy;
 
-  /// false = skip TLS cert verification
+  /// used when verify_tls_set is true
   @ffi.Bool()
   external bool verify_tls;
 
@@ -3566,6 +3575,22 @@ final class medut_account_config_t extends ffi.Struct {
 
   @ffi.Int32()
   external int ice_transport_policy;
+
+  /// Per-account server certificate check for SIP over TLS and WSS.
+  /// false (default) = follow the global medut_config_t.verify_server;
+  /// true = use verify_tls above for this account, either way round.
+  ///
+  /// Decided per server: accounts that reach the same host share its
+  /// connections, so when they disagree the server is verified.  A
+  /// request to an address no account names — a call's in-dialog
+  /// requests, when the PBX gives its IP address as Contact — gets the
+  /// decision made for the server at that address.  TURN
+  /// over TLS (`turns:`) keeps following the global setting.  Turning
+  /// the check off lets anyone on the path impersonate the server; prefer
+  /// a server_url the certificate covers, or ca_cert_path for a private
+  /// CA.
+  @ffi.Bool()
+  external bool verify_tls_set;
 }
 
 /// Called once per live account by medut_account_foreach().

@@ -67,9 +67,10 @@ with `scripts/build-ios.sh` on macOS, fetch it with
 commits it to its branch by default).
 If it is absent, `pod install` fails with a clear message.
 
-**Desktop:** build the C library (`scripts/build-linux.sh`,
-`build-macos.sh`, `build-windows.ps1`) and ship it next to the app, or point
-`Medut.start(libPath: ...)` at it.
+**Desktop:** on Linux and Windows the plugin bundles a prebuilt core for the
+app's target (x64 or arm64), so nothing else is needed. On macOS build
+`medut.dylib` with `scripts/build-macos.sh` and ship it with the app, or point
+`Medut.start(libPath: ...)` at it. See [Desktop](#desktop-linux-macos-windows).
 
 ## Use
 
@@ -184,7 +185,36 @@ Register accounts from Dart with `createAccount(..., remember: true)` so
 those native starts find them; `account.destroy(forget: true)` and
 `forgetAccount()` remove them again.
 
-## Desktop
+## Desktop (Linux, macOS, Windows)
+
+The same Dart API runs on desktop over `dart:ffi`: `lib/src/ffi_backend.dart`
+implements the plugin's host API by calling the C library directly, so
+`Medut.start`, accounts, calls, events and errors behave as on mobile.
+
+On Linux and Windows the plugin ships prebuilt cores for x64 and arm64:
+`linux/<arch>/medut.so` (built on CentOS 7, so glibc 2.17+: RHEL/CentOS 7+,
+Ubuntu 14.04+, Debian 8+; OpenSSL linked in, needs only PulseAudio's
+`libpulse.so.0` and zlib) and `windows/<arch>/medut.dll` (OpenSSL and zlib
+linked in, needs the MSVC runtime). `flutter build linux` /
+`flutter build windows` bundle the one for the target, so `Medut.start()`
+needs no path.
+
+After a core change, refresh them with the **Desktop libraries** workflow
+(`gh workflow run desktop-libs.yml -f commit=true`). It builds each one on a
+native runner, checks its exports and dependencies and loads it (the Linux
+ones on glibc 2.17), runs `test/medut_smoke_test.dart` against the x64 ones,
+and commits them. Locally, `scripts/build-linux.sh` builds against the system
+OpenSSL into `dist/` without touching the committed ones (test it with
+`MEDUT_LIB=../../dist/linux/x86_64/medut.so flutter test`), and
+`scripts/build-windows.ps1 [-Arch x64|arm64]` refreshes
+`windows/<arch>/medut.dll`.
+
+On macOS, build `medut.dylib` with `scripts/build-macos.sh` and ship it on the
+library search path. Any platform can load the library from a given path:
+
+```dart
+final sdk = await Medut.start(libPath: '/opt/myapp/medut.so');
+```
 
 Phone-only features are predictable there: `telecom` and `audioSession` are
 ignored, `remember` is ignored and `rememberedAccounts()` is empty, audio

@@ -1,7 +1,9 @@
-/// Desktop smoke test for the FFI backend against the real Linux build.
-///
-/// Requires `scripts/build-linux.sh` to have produced
-/// `dist/linux/x86_64/medut.so`. Skipped automatically when missing.
+/// Desktop smoke test for the FFI backend against the core the plugin ships
+/// for this host: `linux/<arch>/medut.so` (scripts/build-linux.sh) or
+/// `windows/<arch>/medut.dll` (.github/workflows/desktop-libs.yml,
+/// scripts/build-windows.ps1). MEDUT_LIB=<path> tests another build instead,
+/// such as a local `scripts/build-linux.sh` one in dist/. Skipped on other
+/// hosts or when the library is missing.
 ///
 /// Run: flutter test test/medut_smoke_test.dart
 @Timeout(Duration(minutes: 2))
@@ -15,8 +17,18 @@ import 'package:medut/src/ffi_bindings.dart' as c;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final libPath = File('../../dist/linux/x86_64/medut.so').absolute.path;
-  final haveLib = File(libPath).existsSync() && Platform.isLinux;
+  final arch = switch (Abi.current()) {
+    Abi.linuxArm64 || Abi.windowsArm64 => 'arm64',
+    _ => 'x64',
+  };
+  final libPath = File(Platform.environment['MEDUT_LIB'] ??
+          (Platform.isWindows
+              ? 'windows/$arch/medut.dll'
+              : 'linux/$arch/medut.so'))
+      .absolute
+      .path;
+  final haveLib = (Platform.isLinux || Platform.isWindows) &&
+      File(libPath).existsSync();
   // The library may predate medut_account_refresh_registration(); the rest
   // of the test still runs against it.
   final haveRefresh = haveLib &&
@@ -49,6 +61,7 @@ void main() {
     expect(IceHandover.failFast.raw,
         c.medut_ice_handover_t.MEDUT_ICE_HANDOVER_FAIL_FAST);
     expect(MedutError.forbidden.raw, c.medut_error_t.MEDUT_ERR_FORBIDDEN);
+    expect(MedutError.tlsCertificate.raw, c.medut_error_t.MEDUT_ERR_TLS_CERT);
   });
 
   test('register failure path delivers owned events safely', () async {
@@ -139,7 +152,7 @@ void main() {
 
     // Refused once the stack is down.
     await expectLater(sdk.useAppOwnedAudio(true), throwsCode('NOT_RUNNING'));
-  }, skip: haveLib ? false : 'dist/linux/x86_64/medut.so not built');
+  }, skip: haveLib ? false : '$libPath not built');
 
   // One body on purpose: the event callback is bound to the zone that created
   // it, so a second test's events would be dropped.
@@ -202,5 +215,5 @@ void main() {
     await adopted.destroy();
     await second.shutdown();
     expect(Medut.instance, isNull);
-  }, skip: haveLib ? false : 'dist/linux/x86_64/medut.so not built');
+  }, skip: haveLib ? false : '$libPath not built');
 }

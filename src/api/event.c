@@ -384,15 +384,41 @@ void bsdk_ev_reg_ok(struct medut_account *acct)
 	bsdk_event_post(&ev);
 }
 
+/* A TLS or WSS connection the server's certificate failed verification on.
+ *
+ * libre reported every handshake failure as EPROTO, so this used to arrive as
+ * "Protocol error [71]" — a transport error, retried forever on a backoff no
+ * retry could win.  The patched tls_connect() (cmake/patch-re-sources.cmake,
+ * hunk AA) returns EKEYREJECTED for it instead and keeps OpenSSL's reason,
+ * which goes into `buf` as the reason the app sees. */
+static bool tls_cert_rejected(const char *reason, char *buf, size_t sz)
+{
+	const char *why;
+
+	if (bsdk_reason_errno(reason) != EKEYREJECTED)
+		return false;
+
+	why = bsdk_tls_verify_reason();
+	re_snprintf(buf, sz, "TLS certificate rejected: %s",
+	            why ? why : "verification failed");
+	return true;
+}
+
 void bsdk_ev_reg_fail(struct medut_account *acct, uint16_t code,
                       const char *reason)
 {
+	char cert_reason[96];
 	medut_event_t ev = {0};
 
 	ev.type            = MEDUT_EV_REG_STATE;
 	ev.u.reg.account   = acct;
-	/* Classify error by 3-digit SIP status code */
-	if (code == 401 || code == 403 || code == 407)
+	/* Classify error by 3-digit SIP status code — after a rejected server
+	 * certificate, which has none and which no retry can fix. */
+	if (!code && tls_cert_rejected(reason, cert_reason, sizeof(cert_reason))) {
+		ev.u.reg.error = MEDUT_ERR_TLS_CERT;
+		reason = cert_reason;
+	}
+	else if (code == 401 || code == 403 || code == 407)
 		ev.u.reg.error = MEDUT_ERR_AUTH;
 	else if (code >= 500 && code < 600)
 		ev.u.reg.error = MEDUT_ERR_SERVER_5XX;
@@ -402,7 +428,9 @@ void bsdk_ev_reg_fail(struct medut_account *acct, uint16_t code,
 	/* RECONNECTING while the SDK still has a retry to spend on this —
 	 * a timeout, a 5xx, a transport that died with the network.  FAILED
 	 * only for the ones no retry can fix (auth) or when the budget is
-	 * gone.  Decided before the event is posted so both agree.
+	 * gone, or for a server certificate that was rejected, which will be
+	 * the same certificate next time.  Decided before the event is posted
+	 * so both agree.
 	 *
 	 * An account the app unregistered only fails its un-REGISTER (not
 	 * sent, or not answered): it is unregistered either way, and the
@@ -438,7 +466,8 @@ void bsdk_ev_reg_fail(struct medut_account *acct, uint16_t code,
 		 * Outside the queued-event allocation below as well: a
 		 * failed alloc costs one event, it must not cost the
 		 * recovery. */
-		if (ev.u.reg.error != MEDUT_ERR_AUTH)
+		if (ev.u.reg.error != MEDUT_ERR_AUTH &&
+		    ev.u.reg.error != MEDUT_ERR_TLS_CERT)
 			bsdk_account_schedule_retry(acct);
 
 		/* schedule_retry() has just reported this same reconnect,
@@ -627,8 +656,16 @@ void bsdk_ev_call_closed(struct medut_call *lc,
 	else
 		ev.u.call_state.state = MEDUT_CALL_ENDED;
 
+	/* A call that never connected because the server's certificate was
+	 * refused carries the same code and reason as the registration would. */
+	char cert_reason[96];
+	bool cert_err = !peer_hangup && is_transport_err &&
+	        tls_cert_rejected(reason, cert_reason, sizeof(cert_reason));
+
 	ev.u.call_state.error = bsdk_sip_call_error(scode);
-	if (ev.u.call_state.error == MEDUT_OK &&
+	if (cert_err)
+		ev.u.call_state.error = MEDUT_ERR_TLS_CERT;
+	else if (ev.u.call_state.error == MEDUT_OK &&
 	    is_transport_err && !peer_hangup && !cause->peer_cancel)
 		ev.u.call_state.error = MEDUT_ERR_TRANSPORT;
 
@@ -648,6 +685,10 @@ void bsdk_ev_call_closed(struct medut_call *lc,
 			 * network fault to anyone logging it. */
 			str_ncpy(qev->buf, "Remote hangup",
 			         sizeof(qev->buf));
+			qev->ev.u.call_state.reason = qev->buf;
+		}
+		else if (cert_err) {
+			str_ncpy(qev->buf, cert_reason, sizeof(qev->buf));
 			qev->ev.u.call_state.reason = qev->buf;
 		}
 		else if (reason && codec_reason_is_really_menc(reason, acct)) {

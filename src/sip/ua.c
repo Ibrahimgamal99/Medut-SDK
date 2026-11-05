@@ -709,6 +709,27 @@ bool mdt_ua_has_calls(const struct mdt_ua *ea)
 	return ea && !list_isempty(&ea->calls);
 }
 
+/* Which host the UA's requests are sent to, for the per-server TLS
+ * verification decision (bsdk_tls_verify_host()).  With an outbound route
+ * every request goes there, so that host is the server; without one the
+ * requests go to the AOR's host. */
+bool mdt_ua_sends_to(const struct mdt_ua *ea, const char *host)
+{
+	if (!ea || !str_isset(host))
+		return false;
+
+	if (str_isset(ea->outbound)) {
+		struct pl pl;
+		struct uri uri;
+
+		pl_set_str(&pl, ea->outbound);
+		if (!uri_decode(&uri, &pl))
+			return 0 == pl_strcasecmp(&uri.host, host);
+	}
+
+	return 0 == pl_strcasecmp(&ea->luri.host, host);
+}
+
 /* The Contact user: the AOR's user, made unique when another UA of this
  * process already uses it (two accounts of one user on two servers). */
 static int cuser_gen(struct mdt_ua *ua)

@@ -27,11 +27,19 @@ medut_account_config_t cfg = {
     .transport   = MEDUT_TRANSPORT_TLS,
     .server_host = "pbx.example.com",
     .server_port = 5061,
-    .verify_tls  = true,
 };
 ```
 
-> **Note:** `verify_tls` is reserved for future per-account control. Currently the effective TLS verification setting is the global `verify_server` field in `medut_config_t` (defaults to `true`). Set it there to control verification for all accounts.
+The server's certificate is checked according to the global `verify_server`
+(below, default `true`). An account can override it either way with
+`verify_tls` plus `verify_tls_set = true`; leaving `verify_tls_set` false
+keeps the global setting, so a zero-filled config never turns the check off.
+The bindings expose this as an optional `verifyTls` (Kotlin, Flutter,
+Python) / `verifyTLS` (Swift), where null means "follow the global".
+
+The decision is per server: accounts that reach the same host share its
+connections, so when they disagree the server is verified. TURN over TLS
+(`turns:`) always follows the global setting.
 
 ### Global TLS config (medut_config_t)
 
@@ -212,7 +220,8 @@ medut_account_config_t cfg = {
     .transport   = MEDUT_TRANSPORT_TLS,
     .server_host = "192.168.1.10",
     .server_port = 5061,
-    .verify_tls  = false,   // accept self-signed
+    .verify_tls     = false,  // accept self-signed, for this account only
+    .verify_tls_set = true,
 };
 ```
 
@@ -242,9 +251,10 @@ cfg.client_key  = "/path/to/client.key";
 
 | Error | Cause | Fix |
 |---|---|---|
-| `MEDUT_ERR_TRANSPORT` | TLS handshake failed | Check server cert, set `verify_tls = false` to test |
+| `MEDUT_ERR_TLS_CERT` | Server certificate rejected; `error_str` says why | Use a `server_url` the certificate covers, or `ca_cert_path`; to test, `verify_tls = false` with `verify_tls_set = true` |
+| `MEDUT_ERR_TRANSPORT` | TLS handshake failed for another reason | Check the server's TLS port and protocol versions |
 | `MEDUT_ERR_AUTH` after TLS connects | Wrong SIP credentials | Verify `uri` + `password` |
-| Certificate verification fails | Self-signed or expired | Set `ca_cert_path` or `verify_tls = false` |
+| Certificate verification fails | Self-signed or expired | Set `ca_cert_path`, or `verify_tls = false` with `verify_tls_set = true` |
 | `unable to get local issuer certificate`, reported as `Register: Protocol error [100]` | Server chain does not reach a trusted root | The cert is fine and the chain is complete — the *client* has no anchor for it. See [Certificate trust store](#certificate-trust-store); on iOS, an MDM/private root needs `ca_cert_path` |
 | SNI mismatch | Proxy cert doesn't match | Set `sni_hostname` explicitly |
 | WSS 403 / rejected | Origin check fails | Set `ws_origin` to match server's allowed origins |

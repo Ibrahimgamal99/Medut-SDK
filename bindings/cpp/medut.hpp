@@ -280,6 +280,14 @@ typedef enum {
 	 * itself was rejected.  Appended at the end of the enum so an app
 	 * built against an older header keeps its own numbering. */
 	MEDUT_ERR_FORBIDDEN            = -11,
+	/* The server's TLS certificate failed verification — it names another
+	 * host, has expired, or does not chain to a trusted root.  Covers SIP
+	 * over TLS and WSS.  The event's error_str carries OpenSSL's reason
+	 * ("hostname mismatch", ...).  A registration that hits this reports
+	 * FAILED rather than retrying, since the certificate will be the same
+	 * next time; a network change still gets one fresh attempt, which is
+	 * what clears a captive portal intercepting the connection. */
+	MEDUT_ERR_TLS_CERT             = -12,
 } medut_error_t;
 
 /* ── Call states ──────────────────────────────────────────────────────────── */
@@ -303,7 +311,8 @@ typedef enum {
 	/**
 	 * Terminal: the registration is down and the SDK has stopped trying.
 	 * Either nothing it can retry will help (MEDUT_ERR_AUTH — wrong
-	 * credentials), the retry budget (`reg_retry_max_attempts`) ran out, or
+	 * credentials; MEDUT_ERR_TLS_CERT — the server's certificate was
+	 * rejected), the retry budget (`reg_retry_max_attempts`) ran out, or
 	 * the app cancelled the retry itself.  Recovering needs the app:
 	 * medut_account_retry_now(), or new credentials.
 	 */
@@ -1435,7 +1444,7 @@ typedef struct {
 
 	const char          *outbound;   /* NULL = auto-derived from server */
 	const char          *outbound_proxy; /* alias for outbound; NULL = auto */
-	bool                 verify_tls; /* false = skip TLS cert verification */
+	bool                 verify_tls; /* used when verify_tls_set is true */
 
 	/* ── Push notifications ─────────────────────────────────────────────── */
 
@@ -1516,6 +1525,23 @@ typedef struct {
 	const medut_ice_server_t     *ice_servers;
 	uint32_t                        ice_server_count;
 	medut_ice_transport_policy_t  ice_transport_policy;
+
+	/**
+	 * Per-account server certificate check for SIP over TLS and WSS.
+	 * false (default) = follow the global medut_config_t.verify_server;
+	 * true = use verify_tls above for this account, either way round.
+	 *
+	 * Decided per server: accounts that reach the same host share its
+	 * connections, so when they disagree the server is verified.  A
+	 * request to an address no account names — a call's in-dialog
+	 * requests, when the PBX gives its IP address as Contact — gets the
+	 * decision made for the server at that address.  TURN
+	 * over TLS (`turns:`) keeps following the global setting.  Turning
+	 * the check off lets anyone on the path impersonate the server; prefer
+	 * a server_url the certificate covers, or ca_cert_path for a private
+	 * CA.
+	 */
+	bool                            verify_tls_set;
 
 } medut_account_config_t;
 

@@ -1,23 +1,35 @@
 # Quick start — Python
 
+## Install
+
+```bash
+pip install medut
+```
+
+Wheels are published on [PyPI](https://pypi.org/project/medut/) for Linux
+x86_64 · aarch64 (glibc 2.17+) and Windows x64 · ARM64, for any Python 3.9+.
+The core is bundled in the wheel, so there is nothing to build. To run
+against your own build of the core instead, see
+[Building from source](#building-from-source).
+
 ## Prerequisites
 
 ### Linux
 
-One library is required that is not pre-installed on all distros:
+One runtime library, PulseAudio's client library, which every desktop Linux
+already has:
 
 ```bash
-# Ubuntu / Debian
-sudo apt install libwebrtc-audio-processing-1
-
-# Fedora / RHEL / CentOS
-sudo dnf install webrtc-audio-processing
-
-# Arch
-sudo pacman -S webrtc-audio-processing
+sudo apt install libpulse0          # Ubuntu / Debian
+sudo dnf install pulseaudio-libs    # Fedora / RHEL / CentOS
+sudo pacman -S libpulse             # Arch
 ```
 
-Everything else (`libssl`, `libz`, `libpulse`, …) is already on every desktop Linux.
+OpenSSL and opus are embedded in the published wheels. A core built locally
+with `scripts/build-linux.sh` links the system OpenSSL 3 instead (`libssl3`).
+
+`libwebrtc-audio-processing-1` is optional: it enables the `AEC_WEBRTC`
+full-duplex echo canceller, and the SDK works without it.
 
 > **Missing library at import time?** Medut raises `ImportError` with the exact
 > install command for your distro — you don't need to remember the package name.
@@ -31,12 +43,14 @@ which ships with Windows, Visual Studio, and most apps — it is almost never mi
 If you do hit a `vcruntime140.dll` error at import time, Medut will tell you:
 
 ```
-winget install Microsoft.VCRedist.2022.x64
+winget install Microsoft.VCRedist.2022.x64      # .arm64 on Windows on ARM
 ```
 
 ---
 
-## One-command setup
+## Building from source
+
+Only needed to change the C core or the binding; otherwise `pip install medut`.
 
 ### Linux / macOS
 

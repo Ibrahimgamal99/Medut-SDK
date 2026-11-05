@@ -634,6 +634,8 @@ def create_account(uri: str, password: str,
       ice_transport_policy — "all" (default) | "relay" (TURN only)
       display_name, auth_user, server_url, server_host, server_port
       rtcp_mux      — bool
+      verify_tls    — bool, check the server's TLS certificate for this
+                      account; omitted or None follows configure(verify_server)
       rel100        — "disabled" | "enabled" | "required"
       dtmf_mode     — "rfc4733" | "sip_info" | "auto"
       audio_codecs  — list of codec name strings, e.g. ["opus", "pcmu"]
@@ -650,6 +652,10 @@ def create_account(uri: str, password: str,
         kwargs["media_enc"] = _STR_MEDIA_ENC[kwargs["media_enc"]]
     if "rtcp_mux" in kwargs:
         kwargs["rtcp_mux_set"] = True
+    if kwargs.get("verify_tls") is None:
+        kwargs.pop("verify_tls", None)
+    else:
+        kwargs["verify_tls_set"] = True
     rel100_val = kwargs.pop("rel100", None)
     if isinstance(rel100_val, str):
         rel100_val = _STR_REL100[rel100_val]

@@ -40,6 +40,16 @@ void bsdk_ev_reg_unregistered(struct medut_account *acct);
 struct mdt_ua;
 const char *bsdk_ua_contact_params(const struct mdt_ua *ea);
 
+/* Not an event, a question: whether to verify the server certificate of a
+ * TLS or WSS connection to `host` (NULL when the connection has no name).
+ * Sets *verify, and returns true when an account sends to that host; false
+ * means no account claims it, and libre falls back to the decision it
+ * recorded for the address the host resolved to, *verify being the last
+ * resort.  Asked on re_main before libre picks or opens the connection
+ * (cmake/patch-re-sources.cmake, hunk AB), so it is answered without the
+ * account lock for the same reason as bsdk_ua_contact_params(). */
+bool bsdk_tls_verify_host(const char *host, bool *verify);
+
 /* ── Calls ─────────────────────────────────────────────────────────────── */
 
 /* A new incoming call on `acct`.  The SDK wraps `ec`. */

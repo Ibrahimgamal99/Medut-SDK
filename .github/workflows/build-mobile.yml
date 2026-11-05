@@ -12,6 +12,9 @@ name: Build mobile libraries
 #            -> bindings/flutter/ios/Frameworks/
 #
 # and, unless `commit` is unchecked, commits both to the branch it ran on.
+# The desktop cores (Linux and Windows, x64 and arm64) are built and committed
+# the same way by desktop-libs.yml; the two touch different files, so a run of
+# one rebases cleanly onto the other's commit.
 on:
   workflow_dispatch:
     inputs:
@@ -144,6 +147,8 @@ jobs:
               echo "::error::${GITHUB_REF_NAME} moved to $(git rev-parse --short FETCH_HEAD) with core changes since ${GITHUB_SHA::12}; re-run this workflow on the new head"
               exit 1
             fi
-            git rebase FETCH_HEAD
+            # --autostash: a build step can leave tracked files modified,
+            # and a plain rebase refuses to run over them.
+            git rebase --autostash FETCH_HEAD
           done
           exit 1

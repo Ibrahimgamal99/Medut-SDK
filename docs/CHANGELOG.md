@@ -177,7 +177,7 @@ All of these were the same on the baresip build.
   OPTIONS); if that goes unanswered too it hands over: transport flush,
   re-REGISTER, and the re-INVITE re-sent on the fresh connection. Before, the
   request sat in the dead connection, later repair rounds deferred behind it,
-  and libre's Timer B ended the call 32 s later (src/netmon.c `offer_wait()`).
+  and libre's Timer B ended the call 32 s later (src/api/netmon.c `offer_wait()`).
 - **Calls follow a WebSocket that reconnects on its own.** When a WS/WSS
   registration fails because its connection closed and the retry registers
   on a new one (no handover), each call of the account is re-INVITEd so its
@@ -401,6 +401,41 @@ All of these were the same on the baresip build.
 
 ### Fixed
 
+- **Calls on an account with `verify_tls` off no longer fail mid-call.**
+  The per-account decision went by host name, and a call's in-dialog
+  requests go to the PBX's Contact — usually its IP address, which no
+  account names — so they fell back to the global check and were rejected
+  ("IP address mismatch"), also when a handover re-INVITEd the call. The
+  decision made for a server's name is now recorded for the address it
+  reached, and requests to that address use it.
+
+- **Per-account TLS verification works.** `medut_account_config_t.verify_tls`
+  and the bindings' `verifyTls` were passed down and ignored: only the
+  global `verify_server` counted. An account now overrides it either way
+  for SIP over TLS and WSS, via the new `verify_tls_set` (false = follow the
+  global, so zero-filled configs keep checking). The decision is made per
+  server: accounts that reach the same host and disagree get it verified,
+  and a connection opened under one decision is never reused for the other.
+  `verifyTls` is now optional in Kotlin, Flutter and Swift (`verifyTLS`),
+  null following `verifyServer`; Python takes `verify_tls=` on
+  `create_account()`. Kotlin's saved accounts use a new key, since the old
+  one held `true` for every account. TURN over TLS keeps following the
+  global setting. An account being destroyed (or shut down) keeps its own
+  decision while its UA sends the un-REGISTER, so an account with
+  verification off no longer has that request refused and its binding left
+  at the registrar.
+
+- **A rejected TLS certificate is reported as one.** SIP over TLS and WSS
+  reported a server certificate that failed verification (wrong host name,
+  expired, untrusted) as `MEDUT_ERR_TRANSPORT` / "Protocol error [71]" and
+  retried it forever. It is now the new `MEDUT_ERR_TLS_CERT` (-12), with
+  OpenSSL's reason in `error_str` ("TLS certificate rejected: hostname
+  mismatch"), and the registration goes to `FAILED` instead of retrying; a
+  network change still gets one fresh attempt (a captive portal). Calls that
+  fail on it carry the same code. Mirrored in Kotlin and Flutter
+  (`TLS_CERTIFICATE`), Swift (`.tlsCertificate`) and Dart
+  (`MedutError.tlsCertificate`).
+
 - **Kotlin push wait could deadlock with shutdown.** `MedutPush.wake` matched
   the incoming call on the SDK event thread through the stack gate, which
   `Medut.shutdown()` holds while it joins that thread. The listener now only
@@ -461,6 +496,23 @@ All of these were the same on the baresip build.
 - **Push wake-up refreshes the registration** instead of sending an OPTIONS
   probe (Kotlin, Swift). RFC 8599 servers release a held INVITE only on the
   binding refresh.
+- **Push wake-up no longer forces a network handover on a stack that just
+  started**: `MedutPush.reachAccounts()` (run by `wake`) skips
+  `network.changed()` for the first 10 s after `start` (Kotlin, Swift). A
+  push that started the process used to flush the transports and re-do the
+  first REGISTER while the INVITE was on its way, adding ~1.5 s to the wake.
+  The age is measured on a clock that counts device sleep
+  (`elapsedRealtimeNanos`, `CLOCK_MONOTONIC`).
+- **A dead TCP/WebSocket connection closes** (libre hunk S). libre closed a
+  connection on a failed `recv()` only on Windows; a socket iOS reclaimed
+  from a suspended app failed every `recv()` with ENOTCONN, spun the handler
+  and kept taking REGISTERs that failed with EPIPE. It now closes on any
+  non-transient error, which triggers the usual re-register.
+- **A dead DNS socket is reopened** (libre hunk T). The resolver's UDP
+  sockets were never reopened, so after iOS reclaimed them every lookup, and
+  so every REGISTER to a named server, failed with EPIPE through transport
+  flushes and account rebuilds. A send failing with EPIPE/ENOTCONN reopens
+  the socket and retries once.
 - **A refreshed push token is saved** with the remembered accounts (Kotlin,
   Swift, Flutter), so a process a later push starts registers with it.
 - **Kotlin in minified builds:** `MedutAndroid.start` failed with

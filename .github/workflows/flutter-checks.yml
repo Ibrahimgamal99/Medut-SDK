@@ -109,9 +109,11 @@ jobs:
   # ── Dart binding: analyzer + tests ───────────────────────────────────────
   # test/medut_test.dart covers the mobile (Pigeon) side against fake host
   # channels. The native library is built first so the desktop FFI backend's
-  # test/medut_smoke_test.dart actually runs: it self-skips when
-  # dist/linux/x86_64/medut.so is missing, so without this the job passed
-  # while executing nothing.
+  # test/medut_smoke_test.dart actually runs against this commit's sources:
+  # by default it loads the committed linux/x64/medut.so, which only the
+  # Desktop libraries workflow refreshes, so MEDUT_LIB points it at the build
+  # made here instead.  It self-skips when the library is missing, so without
+  # the build the job passed while executing nothing.
   dart:
     runs-on: ubuntu-22.04
     name: Dart · analyze + tests
@@ -160,3 +162,5 @@ jobs:
       - name: Tests (e2e_asterisk_test self-skips without a SIP server)
         working-directory: bindings/flutter
         run: flutter test
+        env:
+          MEDUT_LIB: ${{ github.workspace }}/dist/linux/x86_64/medut.so

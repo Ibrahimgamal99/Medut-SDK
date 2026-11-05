@@ -90,6 +90,12 @@ if(MEDUT_SRC_MODE)
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+  # medut_internal.h uses C11 <stdatomic.h>, which MSVC only provides in C11
+  # mode with its (still "experimental") atomics switch.
+  if(MSVC)
+    target_compile_options(medut_core PRIVATE /std:c11 /experimental:c11atomics)
+  endif()
+
   # Propagate the modules profile as a compile definition
   if(MEDUT_MODULES_PROFILE STREQUAL "mobile")
     target_compile_definitions(medut_core PRIVATE MEDUT_PROFILE_MOBILE=1)
@@ -273,9 +279,21 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   string(REPLACE ";" "_" _ARCH_SLUG "${CMAKE_OSX_ARCHITECTURES}")
   set(MEDUT_PLATFORM_ID "macos/${_ARCH_SLUG}")
 elseif(WIN32)
-  set(MEDUT_PLATFORM_ID "windows/x64")
+  # Visual Studio names the target with -A; other generators build for the
+  # host.
+  if(CMAKE_GENERATOR_PLATFORM)
+    set(_WIN_ARCH "${CMAKE_GENERATOR_PLATFORM}")
+  else()
+    set(_WIN_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+  endif()
+  if(_WIN_ARCH MATCHES "^(ARM64|arm64|aarch64)$")
+    set(MEDUT_PLATFORM_ID "windows/arm64")
+  else()
+    set(MEDUT_PLATFORM_ID "windows/x64")
+  endif()
 else()
-  set(MEDUT_PLATFORM_ID "linux/x86_64")
+  # x86_64 or aarch64, as `uname -m` spells them.
+  set(MEDUT_PLATFORM_ID "linux/${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -284,6 +302,12 @@ endif()
 set(CROSS_ARGS "")
 if(CMAKE_TOOLCHAIN_FILE)
   list(APPEND CROSS_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
+endif()
+# Without it vcpkg's toolchain falls back to the host's default (dynamic)
+# triplet in every sub-build, so re and Opus would look for OpenSSL in a
+# tree that has none, or pick up another OpenSSL on the machine.
+if(VCPKG_TARGET_TRIPLET)
+  list(APPEND CROSS_ARGS "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}")
 endif()
 foreach(_var
     CMAKE_SYSTEM_NAME
@@ -414,6 +438,22 @@ if(MEDUT_BUILD_OPENSSL)
     endif()
     set(_OSSL_ENV)   # xcrun is on PATH already; no extra environment needed
     set(_OSSL_TARGET_ARGS ${_OSSL_TARGET} "${_OSSL_MINVER}")
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Portable desktop builds (MEDUT_PORTABLE=1 scripts/build-linux.sh, in the
+    # manylinux2014 image): OpenSSL linked in, so medut.so runs on distros
+    # whose OpenSSL is not 3.x. CA roots come from the distro's bundle
+    # (platform/linux/ca_linux.c), not from OpenSSL's compiled-in OPENSSLDIR.
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+      set(_OSSL_TARGET "linux-x86_64")
+    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      set(_OSSL_TARGET "linux-aarch64")
+    else()
+      message(FATAL_ERROR
+        "No OpenSSL target mapping for Linux ${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    set(_OSSL_ENV "CC=${CMAKE_C_COMPILER}")
+    # -fPIC: the archives end up inside medut.so.
+    set(_OSSL_TARGET_ARGS ${_OSSL_TARGET} -fPIC)
   else()
     message(FATAL_ERROR
       "MEDUT_BUILD_OPENSSL=ON has no cross-target mapping for "

@@ -1,5 +1,5 @@
  
-              const char *medut_version(void);
+            const char *medut_version(void);
  const char *medut_strerror(int err);
 
 typedef struct medut_account *medut_account_handle_t;
@@ -102,6 +102,8 @@ typedef enum {
  MEDUT_ERR_ALREADY = -10,
 
  MEDUT_ERR_FORBIDDEN = -11,
+
+ MEDUT_ERR_TLS_CERT = -12,
 } medut_error_t;
 
 typedef enum {
@@ -118,7 +120,6 @@ typedef enum {
  MEDUT_REG_UNREGISTERED = 0,
  MEDUT_REG_REGISTERING,
  MEDUT_REG_REGISTERED,
-
  MEDUT_REG_FAILED,
  MEDUT_REG_UNREGISTERING,
  MEDUT_REG_RECONNECTING,
@@ -556,6 +557,7 @@ typedef struct {
  const medut_ice_server_t *ice_servers;
  uint32_t ice_server_count;
  medut_ice_transport_policy_t ice_transport_policy;
+ bool verify_tls_set;
 
 } medut_account_config_t;
  void medut_config_init(medut_config_t *cfg);

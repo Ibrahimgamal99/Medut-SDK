@@ -494,6 +494,7 @@ extension MedutError.Code {
         case .timeout: return "TIMEOUT"
         case .already: return "ALREADY"
         case .forbidden: return "FORBIDDEN"
+        case .tlsCertificate: return "TLS_CERTIFICATE"
         case .notRunning: return "NOT_RUNNING"
         case .callEnded: return "CALL_ENDED"
         case .accountDestroyed: return "ACCOUNT_DESTROYED"

@@ -430,7 +430,14 @@ static void fill_account_config(JNIEnv *env, jobject o,
 	c->ice_servers = get_ice_servers(env, o, "iceServers", pl, &c->ice_server_count);
 	c->ice_transport_policy = (medut_ice_transport_policy_t)
 		get_enum(env, o, "iceTransportPolicy", SIG_E("IceTransportPolicy"));
-	c->verify_tls  = get_z(env, o, "verifyTls");
+	/* verifyTls, like rtcpMux: null follows the global verify_server. */
+	jobject vt = get_o(env, o, "verifyTls", "Ljava/lang/Boolean;");
+	c->verify_tls_set = vt != NULL;
+	if (vt) {
+		c->verify_tls = (*env)->CallBooleanMethod(env, vt, s_boolean_value);
+		if (!(*env)->ExceptionCheck(env))
+			(*env)->DeleteLocalRef(env, vt);
+	}
 
 	c->push_provider = (medut_push_provider_t)get_enum(env, o, "pushProvider", SIG_E("PushProvider"));
 	c->push_token    = get_s(env, o, "pushToken", pl);

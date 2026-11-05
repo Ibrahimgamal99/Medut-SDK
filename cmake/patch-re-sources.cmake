@@ -15,7 +15,7 @@
 # fixes on Linux/Android): Apple's linker has no --wrap, so iOS builds
 # silently shipped without them.  The rename patches below are the
 # compile-time equivalent — libre's definition moves to __real_*, Medut's
-# src/ws_path.c owns the public name, and every call site resolves to it at
+# src/api/ws_path.c owns the public name, and every call site resolves to it at
 # link time on every platform.  No linker flags, and dist/ archives no longer
 # require consumers to pass any.
 
@@ -125,7 +125,7 @@ int sipsess_reply_ack(struct sipsess *sess, const struct sip_msg *msg)
 # proxy that names the server's own internal address, so the request dies in
 # DNS after being reported sent (RFC 7118 B.2 says a WebSocket client's
 # requests belong on the flow the registration established).  Medut decides
-# the route in bsdk_ws_route_override() (src/ws_path.c); this rename lets it
+# the route in bsdk_ws_route_override() (src/api/ws_path.c); this rename lets it
 # own the public accessor.
 # ---------------------------------------------------------------------------
 medut_patch("${SOURCE_DIR}/src/sip/dialog.c"
@@ -1823,3 +1823,539 @@ medut_patch("${SOURCE_DIR}/src/mqueue/mqueue.c"
 #define re_fprintf(stream, ...) dbg_printf(DBG_WARNING, __VA_ARGS__)
 ]=]
 "mqueue: console prints through dbg")
+
+# ---------------------------------------------------------------------------
+# AA. tls/openssl/tls_tcp.c — tell a rejected certificate apart from a broken
+# handshake
+#
+# Every SSL_connect() failure came back as EPROTO, so a server presenting a
+# certificate for another name (or an expired or self-signed one) reached the
+# registration as "Protocol error [71]" — indistinguishable from a link that
+# dropped mid-handshake, and retried forever on a backoff that could never
+# fix it.  When OpenSSL's verify result says the certificate was refused,
+# return EKEYREJECTED instead (re_types.h supplies it where the platform does
+# not), and keep OpenSSL's reason text for the SDK to report.  SIP over TLS
+# and WSS both connect through here.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/src/tls/openssl/tls_tcp.c"
+[=[
+static int tls_connect(struct tls_conn *tc)
+{
+	int err = 0, r;
+
+	ERR_clear_error();
+
+	r = SSL_connect(tc->ssl);
+	if (r <= 0) {
+		const int ssl_err = SSL_get_error(tc->ssl, r);
+
+		switch (ssl_err) {
+
+		case SSL_ERROR_WANT_READ:
+			break;
+
+		default:
+			DEBUG_WARNING("connect: error (r=%d, ssl_err=%d)\n",
+				      r, ssl_err);
+			tls_flush_error();
+			err = EPROTO;
+			break;
+		}
+]=]
+[=[
+/* Medut-patched: why the last certificate check failed, as OpenSSL words
+ * it ("hostname mismatch", "certificate has expired", ...), or NULL before
+ * any has.  Written and read on the re thread only.  OpenSSL returns static
+ * strings, so the pointer stays valid. */
+static const char *bsdk_tls_verify_reason_last;
+
+const char *bsdk_tls_verify_reason(void)
+{
+	return bsdk_tls_verify_reason_last;
+}
+
+
+static int tls_connect(struct tls_conn *tc)
+{
+	int err = 0, r;
+
+	ERR_clear_error();
+
+	r = SSL_connect(tc->ssl);
+	if (r <= 0) {
+		const int ssl_err = SSL_get_error(tc->ssl, r);
+		long vr;
+
+		switch (ssl_err) {
+
+		case SSL_ERROR_WANT_READ:
+			break;
+
+		default:
+			DEBUG_WARNING("connect: error (r=%d, ssl_err=%d)\n",
+				      r, ssl_err);
+			tls_flush_error();
+
+			/* Medut-patched: a certificate the verify step refused
+			 * is EKEYREJECTED, not EPROTO — no retry fixes it. */
+			vr = SSL_get_verify_result(tc->ssl);
+			if (vr != X509_V_OK) {
+				bsdk_tls_verify_reason_last =
+					X509_verify_cert_error_string(vr);
+				err = EKEYREJECTED;
+				break;
+			}
+
+			err = EPROTO;
+			break;
+		}
+]=]
+"tls_connect: report a rejected certificate as EKEYREJECTED")
+
+# ---------------------------------------------------------------------------
+# AB. sip/transp.c, http/client.c — server certificate verification per account
+#
+# libre verifies a TLS server against the one struct tls every SIP transport
+# shares, so verification was all-or-nothing for the whole stack and the
+# account config's verify_tls had nothing to act on.  The SDK now registers a
+# handler (sip_transp_set_verify_handler) that, given the host name a
+# connection is for, says whether to verify it: the setting of the accounts
+# that use that server, or the stack-wide one.  It goes by host, not by the
+# message, because a request's text is written only after its connection is
+# picked (the Via and Contact need its local address).  Every connection to
+# one host therefore gets the same decision, and a connection is still only
+# reused for the same decision, so one opened before the accounts changed is
+# never handed to a message that wants the other.
+#
+# In-dialog requests go to the peer's Contact, which a PBX usually gives as
+# its IP address: a host no account names.  So each decision made for a host
+# an account claims is also recorded against the address it resolved to, on
+# the SIP stack rather than on a connection (a handover flushes those before
+# the call's re-INVITE goes out), and a host no account claims takes the
+# decision recorded for its address — verify if any recorded host there
+# verifies — and the stack-wide one only when nothing is recorded.
+#
+# WSS connects through the transport's HTTP client.  The client is shared,
+# and the connection may open later than websock_connect() returns (the SDK
+# usually rewrites the URI to the server's host name, so DNS comes first);
+# http_client_set_verify_next() therefore stamps the decision on the request
+# websock_connect() creates, and the connection reads it from there.
+# ---------------------------------------------------------------------------
+medut_patch("${SOURCE_DIR}/include/re_sip.h"
+[=[
+int  sip_transp_add_ccert(struct sip *sip, const struct uri *uri,
+			  const char *ccertfile);
+]=]
+[=[
+int  sip_transp_add_ccert(struct sip *sip, const struct uri *uri,
+			  const char *ccertfile);
+/* Medut-patched: per-account server certificate verification.  Sets
+ * *verify for a TLS/WSS connection to host (NULL if unnamed), and returns
+ * true when an account claims host — false leaves the decision to what was
+ * recorded for the address, *verify being the fallback. */
+typedef bool (sip_transp_verify_h)(const char *host, bool *verify,
+				   void *arg);
+void sip_transp_set_verify_handler(struct sip *sip, sip_transp_verify_h *h,
+				   void *arg);
+]=]
+"sip_transp_set_verify_handler() declaration")
+
+medut_patch("${SOURCE_DIR}/src/sip/sip.h"
+[=[
+	uint8_t tos;
+	enum sip_transp tp_def;
+};
+]=]
+[=[
+	uint8_t tos;
+	enum sip_transp tp_def;
+	/* Medut-patched: see sip_transp_set_verify_handler() */
+	sip_transp_verify_h *medut_verifyh;
+	void *medut_verify_arg;
+	struct list medut_verifyl;  /* decisions by address and host */
+};
+]=]
+"struct sip: verify handler")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+	enum sip_transp tp;
+	struct websock_conn *websock_conn;
+};
+]=]
+[=[
+	enum sip_transp tp;
+	struct websock_conn *websock_conn;
+	bool medut_verify;  /* Medut-patched: server cert was verified */
+};
+]=]
+"struct sip_conn: verification decision")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+static struct sip_conn *conn_find(struct sip *sip, const struct sa *paddr,
+				  bool secure)
+{
+	struct le *le;
+
+	le = list_head(hash_list(sip->ht_conn, sa_hash(paddr, SA_ALL)));
+
+	for (; le; le = le->next) {
+
+		struct sip_conn *conn = le->data;
+
+		if (secure && !conn->sc)
+			continue;
+
+		if (!secure && conn->sc)
+			continue;
+
+		if (!sa_cmp(&conn->paddr, paddr, SA_ALL))
+			continue;
+
+		return conn;
+	}
+]=]
+[=[
+/* Medut-patched: per-account server certificate verification */
+void sip_transp_set_verify_handler(struct sip *sip, sip_transp_verify_h *h,
+				   void *arg)
+{
+	if (!sip)
+		return;
+
+	sip->medut_verifyh    = h;
+	sip->medut_verify_arg = arg;
+}
+
+
+/* Medut-patched: a decision made for a claimed host, kept against the
+ * address it was sent to. */
+struct medut_verify_rec {
+	struct le le;
+	struct sa addr;
+	char *host;
+	bool verify;
+};
+
+
+static void medut_verify_rec_destructor(void *arg)
+{
+	struct medut_verify_rec *rec = arg;
+
+	list_unlink(&rec->le);
+	mem_deref(rec->host);
+}
+
+
+/* Medut-patched: whether a TLS/WSS connection to host at dst verifies the
+ * server.  A host an account claims decides, and the decision is recorded
+ * for dst; any other host (a Contact's IP address) takes what is recorded
+ * for dst — verify if any recorded host there does — else the handler's
+ * fallback.  Without a handler, libre's own behaviour: verify. */
+static bool medut_conn_verify(struct sip *sip, const char *host,
+			      const struct sa *dst)
+{
+	struct medut_verify_rec *rec = NULL;
+	bool verify = true, claimed, recorded = false, any = false;
+	struct le *le;
+
+	if (!sip->medut_verifyh)
+		return true;
+
+	claimed = sip->medut_verifyh(host, &verify, sip->medut_verify_arg);
+
+	for (le = sip->medut_verifyl.head; le; ) {
+		struct medut_verify_rec *r = le->data;
+		le = le->next;
+
+		if (!sa_cmp(&r->addr, dst, SA_ALL))
+			continue;
+
+		if (str_isset(host) && 0 == str_casecmp(r->host, host)) {
+			if (!claimed) {
+				/* no account sends to this name any more */
+				mem_deref(r);
+				continue;
+			}
+			rec = r;
+		}
+
+		recorded = true;
+		any |= r->verify;
+	}
+
+	if (claimed) {
+		if (!rec) {
+			rec = mem_zalloc(sizeof(*rec),
+					 medut_verify_rec_destructor);
+			if (rec && str_dup(&rec->host, host))
+				rec = mem_deref(rec);
+			if (rec) {
+				rec->addr = *dst;
+				list_append(&sip->medut_verifyl, &rec->le, rec);
+			}
+		}
+		if (rec)
+			rec->verify = verify;
+
+		return verify;
+	}
+
+	return recorded ? any : verify;
+}
+
+
+static struct sip_conn *conn_find(struct sip *sip, const struct sa *paddr,
+				  bool secure, bool verify)
+{
+	struct le *le;
+
+	le = list_head(hash_list(sip->ht_conn, sa_hash(paddr, SA_ALL)));
+
+	for (; le; le = le->next) {
+
+		struct sip_conn *conn = le->data;
+
+		if (secure && !conn->sc)
+			continue;
+
+		if (!secure && conn->sc)
+			continue;
+
+		if (!sa_cmp(&conn->paddr, paddr, SA_ALL))
+			continue;
+
+		/* Medut-patched: never share across verification settings */
+		if (secure && conn->medut_verify != verify)
+			continue;
+
+		return conn;
+	}
+]=]
+"conn_find: match the verification decision")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+static struct sip_conn *ws_conn_find(struct sip *sip, const struct sa *paddr,
+				     enum sip_transp tp)
+{
+	struct le *le;
+	(void) tp;
+
+	le = list_head(hash_list(sip->ht_conn, sa_hash(paddr, SA_ALL)));
+
+	for (; le; le = le->next) {
+
+		struct sip_conn *conn = le->data;
+
+		/* if (tp != conn->tp)
+		   continue; */
+
+		if (!sa_cmp(&conn->paddr, paddr, SA_ALL))
+			continue;
+
+		return conn;
+	}
+]=]
+[=[
+static struct sip_conn *ws_conn_find(struct sip *sip, const struct sa *paddr,
+				     enum sip_transp tp, bool verify)
+{
+	struct le *le;
+	(void) tp;
+
+	le = list_head(hash_list(sip->ht_conn, sa_hash(paddr, SA_ALL)));
+
+	for (; le; le = le->next) {
+
+		struct sip_conn *conn = le->data;
+
+		/* if (tp != conn->tp)
+		   continue; */
+
+		if (!sa_cmp(&conn->paddr, paddr, SA_ALL))
+			continue;
+
+		/* Medut-patched: never share across verification settings */
+		if (conn->tp == SIP_TRANSP_WSS &&
+		    conn->medut_verify != verify)
+			continue;
+
+		return conn;
+	}
+]=]
+"ws_conn_find: match the verification decision")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+#ifndef USE_TLS
+	(void) host;
+#endif
+
+	conn = conn_find(sip, dst, secure);
+]=]
+[=[
+	bool verify = true;
+
+#ifndef USE_TLS
+	(void) host;
+#endif
+
+	/* Medut-patched: per-account server certificate verification */
+	if (secure)
+		verify = medut_conn_verify(sip, host, dst);
+
+	conn = conn_find(sip, dst, secure, verify);
+]=]
+"conn_send: decide verification before picking a connection")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+		err |= tls_set_verify_server(conn->sc, host);
+		if (err)
+			goto out;
+]=]
+[=[
+		/* Medut-patched: verify only when the account wants it */
+		conn->medut_verify = verify;
+		if (verify)
+			err |= tls_set_verify_server(conn->sc, host);
+		if (err)
+			goto out;
+]=]
+"conn_send: verify the server only when asked to")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+	conn = ws_conn_find(sip, dst, tp);
+]=]
+[=[
+	/* Medut-patched: per-account server certificate verification */
+	bool verify = secure ? medut_conn_verify(sip, host, dst) : true;
+
+	conn = ws_conn_find(sip, dst, tp, verify);
+]=]
+"ws_conn_send: decide verification before picking a connection")
+
+medut_patch("${SOURCE_DIR}/src/sip/transp.c"
+[=[
+	re_printf("websock: connecting to '%s'\n", ws_uri);
+]=]
+[=[
+	/* Medut-patched: websock_connect() makes its HTTP request with the
+	 * decision set here; the request keeps it until its connection
+	 * opens. */
+	conn->medut_verify = verify;
+	http_client_set_verify_next(transp->http_cli, verify);
+
+	re_printf("websock: connecting to '%s'\n", ws_uri);
+]=]
+"ws_conn_send: pass the decision to the HTTP client")
+
+medut_patch("${SOURCE_DIR}/include/re_http.h"
+[=[
+int http_client_disable_verify_server(struct http_cli *cli);
+]=]
+[=[
+int http_client_disable_verify_server(struct http_cli *cli);
+/* Medut-patched: whether requests made from now on verify the server */
+void http_client_set_verify_next(struct http_cli *cli, bool verify);
+]=]
+"http_client_set_verify_next() declaration")
+
+medut_patch("${SOURCE_DIR}/src/http/client.c"
+[=[
+	struct sa laddr6;
+	size_t bufsize_max;
+};
+]=]
+[=[
+	struct sa laddr6;
+	size_t bufsize_max;
+	bool medut_noverify;  /* Medut-patched: http_client_set_verify_next */
+};
+]=]
+"struct http_cli: per-connection verification")
+
+medut_patch("${SOURCE_DIR}/src/http/client.c"
+[=[
+	bool secure;
+	bool close;
+	http_bodyh *bodyh;
+};
+]=]
+[=[
+	bool secure;
+	bool close;
+	http_bodyh *bodyh;
+	bool medut_noverify;  /* Medut-patched: copied from the client */
+};
+]=]
+"struct http_req: verification decision")
+
+medut_patch("${SOURCE_DIR}/src/http/client.c"
+[=[
+	req->cli    = cli;
+]=]
+[=[
+	req->cli    = cli;
+	/* Medut-patched: fixed when the request is made, not when its
+	 * connection opens — that can be after DNS, by which time the
+	 * client may have been set for another connection. */
+	req->medut_noverify = cli->medut_noverify;
+]=]
+"http_request: take the verification decision from the client")
+
+medut_patch("${SOURCE_DIR}/src/http/client.c"
+[=[
+		if (req->cli->tlshn)
+			err  = tls_set_verify_server(conn->sc,
+					req->cli->tlshn);
+		else
+			err  = tls_set_verify_server(conn->sc, req->host);
+]=]
+[=[
+		/* Medut-patched: see http_client_set_verify_next() */
+		if (req->medut_noverify)
+			err  = 0;
+		else if (req->cli->tlshn)
+			err  = tls_set_verify_server(conn->sc,
+					req->cli->tlshn);
+		else
+			err  = tls_set_verify_server(conn->sc, req->host);
+]=]
+"conn_connect: skip verification when asked to")
+
+medut_patch("${SOURCE_DIR}/src/http/client.c"
+[=[
+int http_client_disable_verify_server(struct http_cli *cli)
+{
+]=]
+[=[
+/* Medut-patched: whether the requests made from here on verify the server
+ * on the connection they open.  Each request keeps the value it was made
+ * with, so set it before each request it should apply to. */
+void http_client_set_verify_next(struct http_cli *cli, bool verify)
+{
+	if (cli)
+		cli->medut_noverify = !verify;
+}
+
+
+int http_client_disable_verify_server(struct http_cli *cli)
+{
+]=]
+"http_client_set_verify_next()")
+
+medut_patch("${SOURCE_DIR}/src/sip/sip.c"
+[=[
+	list_flush(&sip->transpl);
+	list_flush(&sip->lsnrl);
+]=]
+[=[
+	list_flush(&sip->transpl);
+	list_flush(&sip->lsnrl);
+	list_flush(&sip->medut_verifyl);  /* Medut-patched */
+]=]
+"sip destructor: free the recorded verification decisions")

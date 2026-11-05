@@ -20,6 +20,9 @@ public struct MedutError: Error, Equatable, Sendable, CustomStringConvertible {
         case timeout
         case already
         case forbidden
+        /// The server's TLS certificate was rejected (wrong host name,
+        /// expired, untrusted).  Registration stops retrying.
+        case tlsCertificate
         /// The stack is not running: `start()` was not called, or
         /// `shutdown()` already ran.
         case notRunning
@@ -78,6 +81,9 @@ public struct MedutError: Error, Equatable, Sendable, CustomStringConvertible {
         case MEDUT_ERR_TIMEOUT: return .timeout
         case MEDUT_ERR_ALREADY: return .already
         case MEDUT_ERR_FORBIDDEN: return .forbidden
+        // MEDUT_ERR_TLS_CERT, by value: the committed xcframework's header
+        // predates it until CI rebuilds the framework.
+        case medut_error_t(rawValue: -12): return .tlsCertificate
         default: return .unknown(rc)
         }
     }

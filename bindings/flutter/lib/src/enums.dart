@@ -334,7 +334,12 @@ enum MedutError {
 
   /// 403 Forbidden — the server refused this request, not the credentials.
   /// On a call: a dialplan or policy refusal ("you may not dial that").
-  forbidden(-11);
+  forbidden(-11),
+
+  /// The server's TLS certificate was rejected (wrong host name, expired,
+  /// untrusted).  Registration stops retrying; the event's error text says
+  /// why.
+  tlsCertificate(-12);
 
   final int raw;
   const MedutError(this.raw);

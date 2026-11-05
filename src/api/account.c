@@ -665,10 +665,11 @@ static void acct_engine_prm(const struct medut_account *acct,
  * the retry loop, one second later, quietly fixed it.
  *
  * So a failure the SDK will act on itself is RECONNECTING, and FAILED is kept
- * for the ones it has stopped acting on: wrong credentials, an exhausted retry
- * budget, a retry the app cancelled.  The decision is one function because
- * three call sites make it — the REGISTER_FAIL event, the registration
- * watchdog and the keepalive probe — and they must agree.
+ * for the ones it has stopped acting on: wrong credentials, a server certificate
+ * that failed verification, an exhausted retry budget, a retry the app
+ * cancelled.  The decision is one function because three call sites make it —
+ * the REGISTER_FAIL event, the registration watchdog and the keepalive probe —
+ * and they must agree.
  */
 
 static bool retry_budget_left(const struct medut_account *acct)
@@ -686,7 +687,7 @@ medut_reg_state_t bsdk_account_reg_fail_state(struct medut_account *acct,
 	/* An armed retry settles it: that attempt is going out whatever the
 	 * budget now says, and schedule_retry() already counted it. */
 	bool will_retry = acct->reg_wanted && !acct->destroyed &&
-	        err != MEDUT_ERR_AUTH &&
+	        err != MEDUT_ERR_AUTH && err != MEDUT_ERR_TLS_CERT &&
 	        (tmr_isrunning(&acct->retry_tmr) || retry_budget_left(acct));
 
 	acct->reconnecting = will_retry;
@@ -1474,6 +1475,56 @@ const char *bsdk_ua_contact_params(const struct mdt_ua *ea)
 			return acct->pn_cparams;
 	}
 	return NULL;
+}
+
+/* ── Per-account server certificate verification ─────────────────────────
+ *
+ * The stack asks this (mdt_events.h), on re_main, before libre picks or opens
+ * a TLS or WSS connection (cmake/patch-re-sources.cmake, hunk AB).  It can
+ * only say which host the connection is for: the message is written after the
+ * connection is chosen.  So the accounts that send to that host decide — each
+ * by its own verify_tls when verify_tls_set, else the global verify_server —
+ * and when they disagree the server is verified, since an account that asked
+ * for the check must not lose it to one that did not.
+ *
+ * A host no account sends to is not claimed (returns false).  That is how an
+ * in-dialog request to the peer's Contact usually looks — a PBX gives its IP
+ * address there — and libre then uses the decision it recorded for that
+ * address when a claimed host's connection went to it; *verify, the global
+ * setting, only when it recorded none.
+ *
+ * Walked without acct_lock for the reason bsdk_ua_contact_params() gives. */
+bool bsdk_tls_verify_host(const char *host, bool *verify)
+{
+	struct le *le;
+	bool matched = false;
+
+	*verify = g_bsdk.cfg.verify_server;
+
+	if (!str_isset(host))
+		return false;
+
+	LIST_FOREACH(&g_bsdk.accounts, le) {
+		const struct medut_account *acct = le->data;
+		bool want;
+
+		/* A destroyed account still counts while its UA exists: the
+		 * account is marked destroyed before mdt_ua_free(), which sends
+		 * the un-REGISTER, and that request must go out under the
+		 * account's own decision.  Skipping it fell back to the global
+		 * check, so an account with verification off had its
+		 * un-REGISTER refused and left its binding at the registrar. */
+		if (!acct->ea || !mdt_ua_sends_to(acct->ea, host))
+			continue;
+
+		want = acct->cfg.verify_tls_set ? acct->cfg.verify_tls
+		                                : g_bsdk.cfg.verify_server;
+
+		*verify  = matched ? (*verify || want) : want;
+		matched  = true;
+	}
+
+	return matched;
 }
 
 /* ── Public API — dispatch wrappers ─────────────────────────────────────── */

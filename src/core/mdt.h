@@ -133,6 +133,10 @@ int  mdt_ua_set_outbound(struct mdt_ua *ea, const char *uri);
 int  mdt_ua_options_send(struct mdt_ua *ea, const char *uri,
                            mdt_resp_h *resph, void *arg);
 bool mdt_ua_has_calls(const struct mdt_ua *ea);
+/* Whether the UA's requests go to `host`: the host of its outbound route
+ * when it has one, else the host of its AOR.  Case-insensitive, as host
+ * names are.  Used to decide TLS verification per server. */
+bool mdt_ua_sends_to(const struct mdt_ua *ea, const char *host);
 int  mdt_ua_add_header(struct mdt_ua *ea, const char *name,
                          const char *value);
 int  mdt_ua_set_100rel(struct mdt_ua *ea, medut_100rel_mode_t mode);

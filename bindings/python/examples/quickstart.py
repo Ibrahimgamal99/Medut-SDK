@@ -145,12 +145,9 @@ def _config_from_json(path_or_str: str):
     if isinstance(j.get("audio_codecs"), str):
         j["audio_codecs"] = [j["audio_codecs"]] if j["audio_codecs"] else []
 
-    # verify_tls → global SDK setting
-    verify_tls = j.pop("verify_tls", True)
-
+    # verify_tls stays on the account: it overrides the global
+    # verify_server for this account only.
     sdk_kwargs = {}
-    if not verify_tls:
-        sdk_kwargs["verify_server"] = False
 
     account_kwargs = {k: v for k, v in j.items() if v is not None}
     return uri, password, enabled, account_kwargs, sdk_kwargs

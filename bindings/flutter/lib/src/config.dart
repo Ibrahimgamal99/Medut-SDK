@@ -728,7 +728,11 @@ class AccountConfig {
   /// [Account.setIceServers].
   final List<IceServer> iceServers;
   final IceTransportPolicy iceTransportPolicy;
-  final bool verifyTls;
+
+  /// Check the server's TLS certificate for this account (SIP over TLS and
+  /// WSS); null follows [MedutConfig.verifyServer].  Accounts that reach the
+  /// same server and disagree get it verified.
+  final bool? verifyTls;
 
   final PushProvider pushProvider;
   final String? pushToken;
@@ -757,7 +761,7 @@ class AccountConfig {
     this.turnPass,
     this.iceServers = const [],
     this.iceTransportPolicy = IceTransportPolicy.all,
-    this.verifyTls = true,
+    this.verifyTls,
     this.pushProvider = PushProvider.none,
     this.pushToken,
     this.pushParam,

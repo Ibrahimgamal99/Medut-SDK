@@ -143,13 +143,25 @@ static int tls_ctx(struct tls **tlsp, bool wss)
 				  wss ? "wss" : "tls", cfg->ca_cert_path, err);
 	}
 
-	if (!cfg->verify_server)
-		tls_disable_verify_server(*tlsp);
+	/* Left verifying whatever cfg->verify_server says: the global setting
+	 * and each account's verify_tls are applied per connection by libre,
+	 * which asks tls_verify_handler() below and verifies only when told to
+	 * (cmake/patch-re-sources.cmake, hunk AB).  Switching it off here would
+	 * switch it off for every account sharing this context. */
 
 	if (!wss)
 		tls_set_resumption(*tlsp, TLS_RESUMPTION_ALL);
 
 	return 0;
+}
+
+/* libre's question before it picks or opens a TLS or WSS connection: should
+ * the server's certificate be checked?  The SDK answers from the accounts
+ * that send to that host (bsdk_tls_verify_host(), src/api/account.c). */
+static bool tls_verify_handler(const char *host, bool *verify, void *arg)
+{
+	(void)arg;
+	return bsdk_tls_verify_host(host, verify);
 }
 
 static int transp_add(const struct sa *laddr)
@@ -500,6 +512,10 @@ int mdt_sip_init(void)
 		MDT_WARN("sip: stack: %m\n", err);
 		goto out;
 	}
+
+	/* Before any transport exists, so that no TLS or WSS connection is
+	 * opened without the per-account decision. */
+	sip_transp_set_verify_handler(g_sip.sip, tls_verify_handler, NULL);
 
 	err = transp_add_all();
 	if (err)
