@@ -430,6 +430,7 @@ typedef struct {
  bool verify_server;
  const char *sni_hostname;
  const char *user_agent;
+
  const char *ws_origin;
  const char **ws_extra_headers;
  uint32_t ws_keepalive_ms;
@@ -614,7 +615,9 @@ typedef void (*medut_account_iter_fn)(medut_account_handle_t acct, void *arg);
  int medut_call_hangup(medut_call_handle_t call);
  int medut_call_reject(medut_call_handle_t call,
                                         uint16_t scode, const char *reason);
+
  int medut_call_hold(medut_call_handle_t call);
+
  int medut_call_resume(medut_call_handle_t call);
  bool medut_call_is_held(medut_call_handle_t call);
  int medut_call_send_dtmf(medut_call_handle_t call, char digit);
