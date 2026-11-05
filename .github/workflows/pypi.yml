@@ -6,14 +6,20 @@ name: PyPI
 # cffi's ABI mode, so one wheel serves every Python 3.9+. No sdist: without a
 # core it cannot work, and building one needs the whole native toolchain.
 #
-# The cores come from desktop-libs.yml, run here on the commit being
-# released, so a wheel never carries a stale library and every core has
-# passed the same checks as the Flutter plugin's copies. Each wheel is then
-# installed from the built files and imported on its own platform before
-# anything is uploaded.
+# The cores are the ones the Desktop libraries workflow (desktop-libs.yml)
+# built and committed for the Flutter plugin, in
+# bindings/flutter/{linux,windows}/<arch>/, so they have passed its checks
+# (exports, dependencies, glibc 2.17, a load on each platform) and are not
+# built a second time here.  Each core's commit names the source commit it
+# was built from ("CI build of <sha>"); a core whose sources (src, include,
+# cmake, platform, CMakeLists.txt, scripts) changed after that is stale, and
+# the run stops rather than ship it.  Each wheel is then installed from the
+# built files and imported on its own platform before anything is uploaded.
 #
-# Release by pushing a tag that matches bindings/python/pyproject.toml:
-#   git tag v1.0.1 && git push origin v1.0.1
+# Release, after a core change, in this order:
+#   gh workflow run desktop-libs.yml -f commit=true   # wait for its commit
+#   git pull
+#   git tag v2.0.0 && git push origin v2.0.0          # matches pyproject.toml
 # A manual run is a dry run: it builds and tests the wheels, leaves them as
 # the run's "wheels" artifact, and uploads nothing.
 #   gh workflow run pypi.yml
@@ -34,22 +40,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cores:
-    name: Cores
-    uses: ./.github/workflows/desktop-libs.yml
-    with:
-      commit: false
-    # desktop-libs.yml asks for contents: write for its commit job, skipped
-    # here; a called workflow may not ask for more than its caller grants.
-    permissions:
-      contents: write
-
   wheels:
-    needs: cores
     runs-on: ubuntu-24.04
     name: Build wheels
     steps:
+      # Full history: the staleness check below compares each core's source
+      # commit with this one.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -75,16 +74,43 @@ jobs:
           git diff --exit-code bindings/python/medut/_medut_clean.h \
             || { echo "::error::_medut_clean.h regenerated differently on this runner than the committed copy"; exit 1; }
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: plugin-*
-          path: ${{ runner.temp }}/cores
+      # The committed cores must have been built from this commit's core
+      # sources.  The last commit that touched a core's directory is the
+      # Desktop libraries commit that put it there, and its message names the
+      # source commit; when the sources changed since, the core does not
+      # match what is being released.
+      - name: Check the committed cores are current
+        run: |
+          stale=0
+          for core in linux/x64 linux/arm64 windows/x64 windows/arm64; do
+            dir="bindings/flutter/${core}"
+            if ! compgen -G "${dir}/medut.*" >/dev/null; then
+              echo "::error::${dir}: no committed core"; stale=1; continue
+            fi
+            msg=$(git log -1 --format=%s -- "${dir}")
+            built=$(sed -n 's/.*(CI build of \([0-9a-f]\{7,40\}\)).*/\1/p' <<<"${msg}")
+            if [ -z "${built}" ]; then
+              echo "::error::${dir}: last changed by \"${msg}\", not a Desktop libraries commit"
+              stale=1; continue
+            fi
+            if ! git diff --quiet "${built}" HEAD -- \
+                 src include cmake platform CMakeLists.txt scripts; then
+              echo "::error::${dir}: built from ${built}, and the core sources changed since"
+              stale=1; continue
+            fi
+            echo "${dir}: built from ${built}, current"
+          done
+          if [ "${stale}" = 1 ]; then
+            echo "::error::Run Desktop libraries with commit=true, then run this on (or tag) its commit"
+            exit 1
+          fi
 
       # setup.py packs whichever core sits in medut/, and the wheel is built
       # on this host, so each one is retagged for the platform it carries.
       # Not auditwheel: libpulse must stay the system's (it talks to the
       # running sound server), and the core already passed the glibc 2.17
-      # check in desktop-libs.yml.
+      # check in desktop-libs.yml.  ${core/-//} turns linux-x64 into the
+      # plugin's directory, linux/x64.
       - name: Build wheels
         working-directory: bindings/python
         run: |
@@ -99,8 +125,8 @@ jobs:
           mkdir -p "${OUT}"
           for core in "${!PLATFORM[@]}"; do
             rm -rf build dist *.egg-info medut/medut.so medut/medut.dll medut/medut.dylib
-            cp "${RUNNER_TEMP}/cores/plugin-${core}"/medut.* medut/
-            chmod 755 medut/medut.*   # upload-artifact drops the exec bit
+            cp "../flutter/${core/-//}"/medut.* medut/
+            chmod 755 medut/medut.*
             python -m build --wheel --outdir dist
             python -m wheel tags --remove --platform-tag "${PLATFORM[$core]}" dist/*.whl
             mv dist/*.whl "${OUT}/"
