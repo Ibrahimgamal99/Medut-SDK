@@ -162,7 +162,10 @@ jobs:
         working-directory: bindings/flutter
         run: |
           flutter pub get
-          flutter test test/medut_smoke_test.dart
+          # Expanded: every test's start, result and error on its own line.
+          # The default GitHub reporter folds them, and a test that died with
+          # the process left only "N tests passed" and an exit code.
+          flutter test --reporter expanded test/medut_smoke_test.dart
 
       - name: Upload plugin library
         uses: actions/upload-artifact@v4
@@ -251,7 +254,10 @@ jobs:
         working-directory: bindings/flutter
         run: |
           flutter pub get
-          flutter test test/medut_smoke_test.dart
+          # Expanded: every test's start, result and error on its own line.
+          # The default GitHub reporter folds them, and a test that died with
+          # the process left only "N tests passed" and an exit code.
+          flutter test --reporter expanded test/medut_smoke_test.dart
 
       - name: Upload plugin library
         uses: actions/upload-artifact@v4
