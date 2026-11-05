@@ -180,7 +180,27 @@ jobs:
         env:
           MEDUT_DEBUG_INIT: "1"
         run: |
+          # Windows Error Reporting writes a minidump when the test process
+          # crashes, so the stack of the crash can be printed below.
+          $dumps = "$env:RUNNER_TEMP\crashdumps"
+          New-Item -ItemType Directory -Force $dumps | Out-Null
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\flutter_tester.exe"
+          New-Item -Force $key | Out-Null
+          New-ItemProperty -Force $key -Name DumpFolder -PropertyType ExpandString -Value $dumps | Out-Null
+          New-ItemProperty -Force $key -Name DumpType -PropertyType DWord -Value 1 | Out-Null
           flutter test --reporter expanded test/medut_smoke_test.dart
+          # The exception and the crashing thread's stack, from the first
+          # dump: which module (medut.dll, the CRT, ntdll's heap) and which
+          # exported function the crash is nearest to.
+          $dump = Get-ChildItem $dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
+          $cdb = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($dump -and $cdb) {
+            & $cdb.FullName -z $dump.FullName -c ".exr -1; .ecxr; kb 40; lm m medut*; q"
+          } elseif ($dump) {
+            Write-Host "dump at $($dump.FullName), but no cdb.exe to read it"
+          } else {
+            Write-Host "no crash dump was written"
+          }
           exit 1
 
       - name: Upload plugin library

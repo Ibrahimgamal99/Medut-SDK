@@ -572,13 +572,16 @@ void mdt_ua_close_all(void)
 
 	/* The SDK frees its UAs first; any left are unlinked, not freed —
 	 * their owner still holds them. */
+	BSDK_TRACE("[bsdk] ua_close_all: unlink UAs\n");
 	while ((le = list_head(&g_sip.ual)))
 		list_unlink(le);
 
 	/* Each UA ended its own; this is whatever a failed init left. */
+	BSDK_TRACE("[bsdk] ua_close_all: mwi/presence close\n");
 	mdt_mwi_close();
 	mdt_presence_close();
 
+	BSDK_TRACE("[bsdk] ua_close_all: quiesce\n");
 	mdt_sip_quiesce();
 
 	/* Abort what is still out (medut_shutdown() waited for it, up to a
@@ -586,9 +589,13 @@ void mdt_ua_close_all(void)
 	 * stack.  Without this, one un-REGISTER left unanswered when the loop
 	 * stopped kept the stack, its sockets, TLS contexts and DNS client
 	 * allocated for the life of the process. */
+	BSDK_TRACE("[bsdk] ua_close_all: sip_close\n");
 	sip_close(g_sip.sip, true);
+	BSDK_TRACE("[bsdk] ua_close_all: free SIP stack\n");
 	g_sip.sip     = mem_deref(g_sip.sip);
+	BSDK_TRACE("[bsdk] ua_close_all: free TLS contexts\n");
 	g_sip.tls     = mem_deref(g_sip.tls);
 	g_sip.wss_tls = mem_deref(g_sip.wss_tls);
 	g_sip.subh    = NULL;
+	BSDK_TRACE("[bsdk] ua_close_all: done\n");
 }
