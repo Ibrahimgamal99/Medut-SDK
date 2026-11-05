@@ -91,6 +91,14 @@ jobs:
 
       - name: vcpkg install openssl zlib
         run: |
+          # Use the runner's own CMake rather than letting vcpkg download one
+          # from GitHub Releases on every cache miss: that download has
+          # failed the job with HTTP 504 before anything was built.  Only
+          # when a CMake is on PATH; otherwise vcpkg fetches its own as before.
+          if (Get-Command cmake -ErrorAction SilentlyContinue) {
+            $env:VCPKG_FORCE_SYSTEM_BINARIES = "1"
+            Write-Host "vcpkg uses $((Get-Command cmake).Source) ($(cmake --version | Select-Object -First 1))"
+          }
           & "$env:VCPKG_ROOT\vcpkg.exe" install `
             "openssl:${{ matrix.arch }}-windows-static-md" "zlib:${{ matrix.arch }}-windows-static-md"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
